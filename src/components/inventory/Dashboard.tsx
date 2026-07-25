@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, AlertTriangle, TrendingUp, Package, Clock } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
+import PieChartWidget from './PieChartWidget';
 
 interface StockRow {
   product_id: number;
@@ -265,6 +266,12 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Pie chart widgets */}
+      <div className="grid grid-cols-2 gap-6">
+        <PieChartWidget mode="spending" />
+        <PieChartWidget mode="quantity" />
       </div>
 
       {/* Full Stock Levels Table */}
