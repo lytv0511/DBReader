@@ -1,6 +1,6 @@
 import { memo, useRef } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
-import { Table } from 'lucide-react';
+import { Table, X } from 'lucide-react';
 import type { ColumnInfo } from '../../types';
 
 export interface TableNodeData {
@@ -8,10 +8,11 @@ export interface TableNodeData {
   tables: string[];
   columns: ColumnInfo[];
   onTableChange?: (table: string) => void;
+  onDelete?: (id: string) => void;
 }
 
-function TableNode({ data }: NodeProps) {
-  const { selectedTable, tables, columns, onTableChange } = data as TableNodeData;
+function TableNode({ id, data }: NodeProps) {
+  const { selectedTable, tables, columns, onTableChange, onDelete } = data as TableNodeData;
   const selectRef = useRef<HTMLSelectElement>(null);
 
   const stopAll = (e: React.SyntheticEvent) => {
@@ -23,6 +24,15 @@ function TableNode({ data }: NodeProps) {
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-tertiary rounded-t-lg">
         <Table size={14} className="text-accent" />
         <span className="text-xs font-semibold text-text-primary">Table Source</span>
+        {onDelete && (
+          <button
+            onClick={() => onDelete(id)}
+            onPointerDown={stopAll}
+            className="ml-auto text-text-secondary hover:text-error transition-colors"
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       <div className="p-3">

@@ -1,6 +1,6 @@
 import { memo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
-import { Filter } from 'lucide-react';
+import { Filter, X } from 'lucide-react';
 
 export interface FilterNodeData {
   filterColumn: string;
@@ -10,12 +10,13 @@ export interface FilterNodeData {
   columns: string[];
   onFilterChange?: (column: string, op: string, value: string) => void;
   onCustomSqlChange?: (sql: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 const OPERATORS = ['=', '!=', '>', '<', '>=', '<=', 'LIKE', 'NOT LIKE', 'IN', 'IS NULL', 'IS NOT NULL'];
 
-function FilterNode({ data }: NodeProps) {
-  const { filterColumn, filterOp, filterValue, customSql, columns, onFilterChange, onCustomSqlChange } =
+function FilterNode({ id, data }: NodeProps) {
+  const { filterColumn, filterOp, filterValue, customSql, columns, onFilterChange, onCustomSqlChange, onDelete } =
     data as FilterNodeData;
   const [useCustom, setUseCustom] = useState(!filterColumn && !!customSql);
   const colRef = useRef<HTMLSelectElement>(null);
@@ -30,6 +31,15 @@ function FilterNode({ data }: NodeProps) {
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-tertiary rounded-t-lg">
         <Filter size={14} className="text-warning" />
         <span className="text-xs font-semibold text-text-primary">Filter</span>
+        {onDelete && (
+          <button
+            onClick={() => onDelete(id)}
+            onPointerDown={stopAll}
+            className="ml-auto text-text-secondary hover:text-error transition-colors"
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       <div className="p-3">
