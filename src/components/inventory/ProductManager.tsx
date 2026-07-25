@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag } from 'lucide-react';
-import { executeQuery } from '../../lib/db';
+import { executeQuery, upsertProductAttribute } from '../../lib/db';
 
 interface Product {
   id: number;
@@ -156,6 +156,12 @@ export default function ProductManager() {
   const deleteProduct = async (id: number) => {
     if (!confirm('Delete this product? Associated attributes, batches, and logs will also be deleted.')) return;
     try {
+      await executeQuery(`DELETE FROM inventory_logs WHERE batch_id IN (SELECT id FROM batches WHERE product_id = ${id})`);
+      await executeQuery(`DELETE FROM batches WHERE product_id = ${id}`);
+      await executeQuery(`DELETE FROM product_attributes WHERE product_id = ${id}`);
+      await executeQuery(`DELETE FROM unit_conversions WHERE product_id = ${id}`);
+      await executeQuery(`DELETE FROM product_notes WHERE product_id = ${id}`);
+      await executeQuery(`DELETE FROM reservations WHERE product_id = ${id}`);
       await executeQuery(`DELETE FROM products WHERE id = ${id}`);
       setSelectedProduct(null);
       await fetchData();
@@ -188,7 +194,7 @@ export default function ProductManager() {
   const saveAttribute = async () => {
     if (!formAttrKey.trim() || !formAttrValue.trim() || !selectedProduct) return;
     try {
-      await executeQuery(`INSERT INTO product_attributes (product_id, attr_key, attr_value, data_type) VALUES (${selectedProduct.id}, '${formAttrKey.replace(/'/g, "''")}', '${formAttrValue.replace(/'/g, "''")}', '${formAttrType}')`);
+      await upsertProductAttribute(selectedProduct.id, formAttrKey.trim(), formAttrValue, formAttrType);
       setModalMode(null);
       await fetchProductDetails(selectedProduct.id);
     } catch (err) {

@@ -327,6 +327,7 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -378,8 +379,9 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
       setResults([]);
       return;
     }
-    const timeout = setTimeout(handleSearch, 300);
-    return () => clearTimeout(timeout);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(handleSearch, 300);
+    return () => { clearTimeout(debounceRef.current); };
   }, [queryInput, handleSearch]);
 
   const toggleItem = (batchId: number) => {
@@ -481,7 +483,7 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
               ref={inputRef}
               value={queryInput}
               onChange={(e) => setQueryInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+               onKeyDown={(e) => { if (e.key === 'Enter') { clearTimeout(debounceRef.current); handleSearch(); } }}
               placeholder="Search like: 4 red wine, 2 merlot from batch LOT-2024-001, any 6 sparkling..."
               className="w-full pl-9 pr-4 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
             />

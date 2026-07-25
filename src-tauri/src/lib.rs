@@ -4,8 +4,12 @@ use std::sync::Mutex;
 use tauri::State;
 
 struct DbState {
-    conn: Mutex<Option<Connection>>,
-    path: Mutex<Option<String>>,
+    inner: Mutex<InnerState>,
+}
+
+struct InnerState {
+    conn: Option<Connection>,
+    path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -28,6 +32,15 @@ pub struct QueryResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
     pub rows_affected: Option<u64>,
+}
+
+fn with_conn<F, T>(state: &State<DbState>, f: F) -> Result<T, String>
+where
+    F: FnOnce(&Connection) -> Result<T, String>,
+{
+    let inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let conn = inner.conn.as_ref().ok_or_else(|| "No database connected".to_string())?;
+    f(conn)
 }
 
 const INVENTORY_SCHEMA: &str = "
@@ -226,8 +239,8 @@ INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold)
 (3, 'Whispering Angel 2023', 'WINE-RS-001', 'bottle', 10),
 (4, 'Dom Pérignon 2013', 'WINE-SP-001', 'bottle', 4),
 (4, 'Moët & Chandon Impérial', 'WINE-SP-002', 'bottle', 8),
-(5, 'Taylor\'s 20 Year Tawny Port', 'WINE-F-001', 'bottle', 6),
-(6, 'Hendrick\'s Gin', 'SPIR-001', 'bottle', 4),
+(5, 'Taylor''s 20 Year Tawny Port', 'WINE-F-001', 'bottle', 6),
+(6, 'Hendrick''s Gin', 'SPIR-001', 'bottle', 4),
 (6, 'Macallan 12 Year Highland Scotch', 'SPIR-002', 'bottle', 4),
 (7, 'Riedel Vinum Bordeaux Glasses (Set of 2)', 'ACC-001', 'set', 2);
 
@@ -331,128 +344,235 @@ INSERT INTO inventory_logs (batch_id, location_id, quantity_change, transaction_
 (14, 5, 8.00, 'PURCHASE', 'Additional stock - 2 cases', '2024-08-01 10:00:00');
 ";
 
-fn get_conn<'a>(state: &'a State<'a, DbState>) -> Result<std::sync::MutexGuard<'a, Option<Connection>>, String> {
-    state.conn.lock().map_err(|e| e.to_string())
+fn safe_quote(id: &str) -> String {
+    format!("\"{}\"", id.replace('"', "\"\""))
 }
 
-fn get_active_conn<'a>(conn_lock: &'a std::sync::MutexGuard<'a, Option<Connection>>) -> Result<&'a Connection, String> {
-    conn_lock.as_ref().ok_or_else(|| "No database connected".to_string())
+fn is_valid_table_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
-#[tauri::command]
-fn open_database(path: String, state: State<DbState>) -> Result<TableInfo, String> {
-    let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
-    let mut conn_lock = get_conn(&state)?;
-    *conn_lock = Some(conn);
-    let mut path_lock = state.path.lock().map_err(|e| e.to_string())?;
-    *path_lock = Some(path.clone());
-    drop(conn_lock);
-    drop(path_lock);
-    get_schema(state)
-}
-
-#[tauri::command]
-fn create_new_database(path: String, state: State<DbState>) -> Result<TableInfo, String> {
-    let conn = Connection::open(&path).map_err(|e| format!("Failed to create database: {}", e))?;
-    conn.execute_batch(INVENTORY_SCHEMA)
-        .map_err(|e| format!("Failed to create schema: {}", e))?;
-    conn.execute_batch("PRAGMA foreign_keys = ON;")
-        .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
-    conn.execute_batch(SEED_DATA)
-        .map_err(|e| format!("Failed to seed data: {}", e))?;
-    let mut conn_lock = get_conn(&state)?;
-    *conn_lock = Some(conn);
-    let mut path_lock = state.path.lock().map_err(|e| e.to_string())?;
-    *path_lock = Some(path.clone());
-    drop(conn_lock);
-    drop(path_lock);
-    get_schema(state)
-}
-
-#[tauri::command]
-fn get_schema(state: State<DbState>) -> Result<TableInfo, String> {
-    let conn_lock = get_conn(&state)?;
-    let _conn = get_active_conn(&conn_lock)?;
-    Ok(TableInfo {
-        name: String::new(),
-        columns: vec![],
-    })
-}
-
-#[tauri::command]
-fn get_tables(state: State<DbState>) -> Result<Vec<String>, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
+fn get_tables_internal(conn: &Connection) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
         .map_err(|e| format!("Failed to query tables: {}", e))?;
     let tables: Vec<String> = stmt
         .query_map([], |row| row.get(0))
         .map_err(|e| format!("Failed to read tables: {}", e))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read tables: {}", e))?;
     Ok(tables)
 }
 
-#[tauri::command]
-fn get_table_columns(table: String, state: State<DbState>) -> Result<Vec<ColumnInfo>, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let pragma = format!("PRAGMA table_info('{}')", table.replace('\'', "''"));
+fn get_columns_internal(conn: &Connection, table: &str) -> Result<Vec<ColumnInfo>, String> {
+    let quoted = safe_quote(table);
+    let pragma = format!("PRAGMA table_info({})", quoted);
     let mut stmt = conn
         .prepare(&pragma)
         .map_err(|e| format!("Failed to query columns: {}", e))?;
     let columns = stmt
         .query_map([], |row| {
+            let not_null_i32: i32 = row.get(3)?;
+            let pk_i32: i32 = row.get(5)?;
+            let default_value: Option<String> = match row.get::<_, Option<String>>(4) {
+                Ok(v) => v,
+                Err(_) => None,
+            };
             Ok(ColumnInfo {
                 name: row.get(1)?,
                 data_type: row.get(2)?,
-                not_null: row.get::<_, bool>(3)?,
-                default_value: row.get(4).ok(),
-                primary_key: row.get::<_, bool>(5)?,
+                not_null: not_null_i32 != 0,
+                default_value,
+                primary_key: pk_i32 != 0,
             })
         })
         .map_err(|e| format!("Failed to read columns: {}", e))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read columns: {}", e))?;
     Ok(columns)
 }
 
 #[tauri::command]
-fn execute_query(sql: String, state: State<DbState>) -> Result<QueryResult, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let trimmed = sql.trim().to_uppercase();
+fn open_database(path: String, state: State<DbState>) -> Result<TableInfo, String> {
+    let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
+    let tables = get_tables_internal(&conn)?;
+    let mut columns = Vec::new();
+    if let Some(first) = tables.first() {
+        columns = get_columns_internal(&conn, first)?;
+    }
+    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    *inner = InnerState {
+        conn: Some(conn),
+        path: Some(path),
+    };
+    Ok(TableInfo {
+        name: tables.first().cloned().unwrap_or_default(),
+        columns,
+    })
+}
 
-    if trimmed.starts_with("SELECT") || trimmed.starts_with("PRAGMA") || trimmed.starts_with("EXPLAIN") {
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| format!("SQL error: {}", e))?;
-        let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
-        let num_cols = stmt.column_count();
-        let mut rows = Vec::new();
-        let mut rows_affected = 0u64;
-        let rows_result = stmt
-            .query_map([], |row| {
-                let mut values = Vec::new();
-                for i in 0..num_cols {
-                    // Try string first, then i64, then f64, then null
-                    let val: serde_json::Value = if let Ok(Some(s)) = row.get::<_, Option<String>>(i) {
-                        if let Ok(n) = s.parse::<i64>() {
+#[tauri::command]
+fn create_new_database(path: String, state: State<DbState>) -> Result<TableInfo, String> {
+    let conn = Connection::open(&path).map_err(|e| format!("Failed to create database: {}", e))?;
+    conn.execute_batch("BEGIN;")
+        .map_err(|e| format!("Failed to start transaction: {}", e))?;
+    if let Err(e) = conn.execute_batch(INVENTORY_SCHEMA) {
+        conn.execute_batch("ROLLBACK;").ok();
+        return Err(format!("Failed to create schema: {}", e));
+    }
+    if let Err(e) = conn.execute_batch("PRAGMA foreign_keys = ON;") {
+        conn.execute_batch("ROLLBACK;").ok();
+        return Err(format!("Failed to enable foreign keys: {}", e));
+    }
+    if let Err(e) = conn.execute_batch(SEED_DATA) {
+        conn.execute_batch("ROLLBACK;").ok();
+        return Err(format!("Failed to seed data: {}", e));
+    }
+    conn.execute_batch("COMMIT;")
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+    let tables = get_tables_internal(&conn)?;
+    let mut columns = Vec::new();
+    if let Some(first) = tables.first() {
+        columns = get_columns_internal(&conn, first)?;
+    }
+    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    *inner = InnerState {
+        conn: Some(conn),
+        path: Some(path),
+    };
+    Ok(TableInfo {
+        name: tables.first().cloned().unwrap_or_default(),
+        columns,
+    })
+}
+
+#[tauri::command]
+fn get_schema(state: State<DbState>) -> Result<TableInfo, String> {
+    with_conn(&state, |conn| {
+        let tables = get_tables_internal(conn)?;
+        let mut columns = Vec::new();
+        if let Some(first) = tables.first() {
+            columns = get_columns_internal(conn, first)?;
+        }
+        Ok(TableInfo {
+            name: tables.first().cloned().unwrap_or_default(),
+            columns,
+        })
+    })
+}
+
+#[tauri::command]
+fn get_tables(state: State<DbState>) -> Result<Vec<String>, String> {
+    with_conn(&state, |conn| get_tables_internal(conn))
+}
+
+#[tauri::command]
+fn get_table_columns(table: String, state: State<DbState>) -> Result<Vec<ColumnInfo>, String> {
+    with_conn(&state, |conn| get_columns_internal(conn, &table))
+}
+
+#[tauri::command]
+fn execute_query(sql: String, state: State<DbState>) -> Result<QueryResult, String> {
+    with_conn(&state, |conn| {
+        let stripped = strip_sql_comments(&sql);
+        let trimmed = stripped.trim().to_uppercase();
+        let is_query = trimmed.starts_with("SELECT")
+            || trimmed.starts_with("PRAGMA")
+            || trimmed.starts_with("EXPLAIN")
+            || trimmed.starts_with("WITH");
+
+        if is_query {
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| format!("SQL error: {}", e))?;
+            let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+            let num_cols = stmt.column_count();
+            let mut rows = Vec::new();
+            let rows_result = stmt
+                .query_map([], |row| {
+                    let mut values = Vec::new();
+                    for i in 0..num_cols {
+                        let val: serde_json::Value = if let Ok(n) = row.get::<_, i64>(i) {
                             serde_json::Value::Number(n.into())
-                        } else if let Ok(f) = s.parse::<f64>() {
+                        } else if let Ok(f) = row.get::<_, f64>(i) {
                             serde_json::Value::Number(
                                 serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0)),
                             )
-                        } else {
+                        } else if let Ok(Some(s)) = row.get::<_, Option<String>>(i) {
                             serde_json::Value::String(s)
-                        }
-                    } else if let Ok(n) = row.get::<_, i64>(i) {
+                        } else {
+                            serde_json::Value::Null
+                        };
+                        values.push(val);
+                    }
+                    Ok(values)
+                })
+                .map_err(|e| format!("SQL execution error: {}", e))?;
+            for row in rows_result {
+                let values = row.map_err(|e| format!("Row read error: {}", e))?;
+                rows.push(values);
+            }
+            Ok(QueryResult { columns: col_names, rows, rows_affected: None })
+        } else {
+            let rows_affected = conn.execute(&sql, [])
+                .map_err(|e| format!("SQL execution error: {}", e))?;
+            Ok(QueryResult { columns: vec![], rows: vec![], rows_affected: Some(rows_affected as u64) })
+        }
+    })
+}
+
+fn strip_sql_comments(sql: &str) -> String {
+    let mut result = String::with_capacity(sql.len());
+    let chars: Vec<char> = sql.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '-' {
+            i += 2;
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+        } else if i + 1 < chars.len() && chars[i] == '/' && chars[i + 1] == '*' {
+            i += 2;
+            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+                i += 1;
+            }
+            i += 2;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
+#[tauri::command]
+fn get_table_data(table: String, limit: Option<u32>, state: State<DbState>) -> Result<QueryResult, String> {
+    with_conn(&state, |conn| {
+        let lim = limit.unwrap_or(100);
+        if !is_valid_table_name(&table) {
+            return Err("Invalid table name".to_string());
+        }
+        let quoted = safe_quote(&table);
+        let sql = format!("SELECT * FROM {} LIMIT ?", quoted);
+        let mut stmt = conn.prepare(&sql)
+            .map_err(|e| format!("Failed to prepare query: {}", e))?;
+        let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+        let num_cols = stmt.column_count();
+        let mut rows = Vec::new();
+        let rows_result = stmt
+            .query_map(rusqlite::params![lim], |row| {
+                let mut values = Vec::new();
+                for i in 0..num_cols {
+                    let val: serde_json::Value = if let Ok(n) = row.get::<_, i64>(i) {
                         serde_json::Value::Number(n.into())
                     } else if let Ok(f) = row.get::<_, f64>(i) {
                         serde_json::Value::Number(
                             serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0)),
                         )
+                    } else if let Ok(Some(s)) = row.get::<_, Option<String>>(i) {
+                        serde_json::Value::String(s)
                     } else {
                         serde_json::Value::Null
                     };
@@ -460,76 +580,69 @@ fn execute_query(sql: String, state: State<DbState>) -> Result<QueryResult, Stri
                 }
                 Ok(values)
             })
-            .map_err(|e| format!("SQL execution error: {}", e))?;
+            .map_err(|e| format!("Query error: {}", e))?;
         for row in rows_result {
-            if let Ok(values) = row {
-                rows.push(values);
-                rows_affected += 1;
-            }
+            let values = row.map_err(|e| format!("Row read error: {}", e))?;
+            rows.push(values);
         }
-        Ok(QueryResult { columns: col_names, rows, rows_affected: Some(rows_affected) })
-    } else {
-        let rows_affected = conn.execute(&sql, [])
-            .map_err(|e| format!("SQL execution error: {}", e))?;
-        Ok(QueryResult { columns: vec![], rows: vec![], rows_affected: Some(rows_affected as u64) })
-    }
-}
-
-#[tauri::command]
-fn get_table_data(table: String, limit: Option<u32>, state: State<DbState>) -> Result<QueryResult, String> {
-    let lim = limit.unwrap_or(100);
-    let sql = format!("SELECT * FROM '{}' LIMIT {}", table.replace('\'', "''"), lim);
-    execute_query(sql, state)
+        Ok(QueryResult { columns: col_names, rows, rows_affected: None })
+    })
 }
 
 #[tauri::command]
 fn get_database_path(state: State<DbState>) -> Result<Option<String>, String> {
-    let path_lock = state.path.lock().map_err(|e| e.to_string())?;
-    Ok(path_lock.clone())
+    let inner = state.inner.lock().map_err(|e| e.to_string())?;
+    Ok(inner.path.clone())
 }
 
 #[tauri::command]
 fn close_database(state: State<DbState>) -> Result<(), String> {
-    let mut conn_lock = get_conn(&state)?;
-    *conn_lock = None;
-    let mut path_lock = state.path.lock().map_err(|e| e.to_string())?;
-    *path_lock = None;
+    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    *inner = InnerState { conn: None, path: None };
     Ok(())
 }
 
 #[tauri::command]
 fn migrate_schema(state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    // Batch status
-    conn.execute_batch("ALTER TABLE batches ADD COLUMN status VARCHAR(30) DEFAULT 'in_inventory';").ok();
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status);").ok();
-    // Category enhancements
-    conn.execute_batch("ALTER TABLE categories ADD COLUMN description TEXT;").ok();
-    conn.execute_batch("ALTER TABLE categories ADD COLUMN icon VARCHAR(10) DEFAULT '📋';").ok();
-    conn.execute_batch("ALTER TABLE categories ADD COLUMN color VARCHAR(20) DEFAULT '#5b6abf';").ok();
-    // Category attribute templates
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS category_attribute_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE, attr_key VARCHAR(100) NOT NULL, attr_type VARCHAR(20) DEFAULT 'string', is_required INTEGER DEFAULT 0, display_order INTEGER DEFAULT 0, UNIQUE(category_id, attr_key));").ok();
-    // Product notes
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS product_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, title VARCHAR(255), body TEXT NOT NULL, is_pinned INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
-    // Clients
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(255) NOT NULL, email VARCHAR(255), phone VARCHAR(50), company VARCHAR(255), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
-    // Client reservations
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS client_reservations (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, quantity NUMERIC(10, 2) NOT NULL DEFAULT 1, reserved_date DATE NOT NULL, fulfilled_date DATE, status VARCHAR(30) DEFAULT 'reserved' CHECK (status IN ('reserved', 'partial', 'fulfilled', 'cancelled')), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
-    // Calendar events
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS calendar_events (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER REFERENCES products(id) ON DELETE CASCADE, title VARCHAR(255) NOT NULL, event_type VARCHAR(50) NOT NULL CHECK (event_type IN ('purchase', 'shipping', 'delivery', 'tasting', 'reservation', 'custom')), event_date DATE NOT NULL, end_date DATE, quantity NUMERIC(10, 2), notes TEXT, is_completed INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
-    // Notifications
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS product_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, notification_type VARCHAR(50) NOT NULL CHECK (notification_type IN ('low_stock', 'expiry', 'custom', 'reorder', 'reservation')), message TEXT NOT NULL, threshold_value NUMERIC(10, 2), is_active INTEGER DEFAULT 1, last_triggered TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
-    // Indexes
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);").ok();
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_templates_category ON category_attribute_templates(category_id);").ok();
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_notes_product ON product_notes(product_id);").ok();
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_reservations_client ON client_reservations(client_id);").ok();
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_reservations_product ON client_reservations(product_id);").ok();
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_calendar_product ON calendar_events(product_id);").ok();
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_calendar_date ON calendar_events(event_date);").ok();
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_notifications_product ON product_notifications(product_id);").ok();
-    Ok(())
+    with_conn(&state, |conn| {
+        let steps: [&str; 19] = [
+            "ALTER TABLE batches ADD COLUMN status VARCHAR(30) DEFAULT 'in_inventory';",
+            "CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status);",
+            "ALTER TABLE categories ADD COLUMN description TEXT;",
+            "ALTER TABLE categories ADD COLUMN icon VARCHAR(10) DEFAULT '📋';",
+            "ALTER TABLE categories ADD COLUMN color VARCHAR(20) DEFAULT '#5b6abf';",
+            "CREATE TABLE IF NOT EXISTS category_attribute_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE, attr_key VARCHAR(100) NOT NULL, attr_type VARCHAR(20) DEFAULT 'string', is_required INTEGER DEFAULT 0, display_order INTEGER DEFAULT 0, UNIQUE(category_id, attr_key));",
+            "CREATE TABLE IF NOT EXISTS product_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, title VARCHAR(255), body TEXT NOT NULL, is_pinned INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);",
+            "CREATE TABLE IF NOT EXISTS clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(255) NOT NULL, email VARCHAR(255), phone VARCHAR(50), company VARCHAR(255), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);",
+            "CREATE TABLE IF NOT EXISTS client_reservations (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, quantity NUMERIC(10, 2) NOT NULL DEFAULT 1, reserved_date DATE NOT NULL, fulfilled_date DATE, status VARCHAR(30) DEFAULT 'reserved' CHECK (status IN ('reserved', 'partial', 'fulfilled', 'cancelled')), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);",
+            "CREATE TABLE IF NOT EXISTS calendar_events (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER REFERENCES products(id) ON DELETE CASCADE, title VARCHAR(255) NOT NULL, event_type VARCHAR(50) NOT NULL CHECK (event_type IN ('purchase', 'shipping', 'delivery', 'tasting', 'reservation', 'custom')), event_date DATE NOT NULL, end_date DATE, quantity NUMERIC(10, 2), notes TEXT, is_completed INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);",
+            "CREATE TABLE IF NOT EXISTS product_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, notification_type VARCHAR(50) NOT NULL CHECK (notification_type IN ('low_stock', 'expiry', 'custom', 'reorder', 'reservation')), message TEXT NOT NULL, threshold_value NUMERIC(10, 2), is_active INTEGER DEFAULT 1, last_triggered TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);",
+            "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);",
+            "CREATE INDEX IF NOT EXISTS idx_templates_category ON category_attribute_templates(category_id);",
+            "CREATE INDEX IF NOT EXISTS idx_notes_product ON product_notes(product_id);",
+            "CREATE INDEX IF NOT EXISTS idx_reservations_client ON client_reservations(client_id);",
+            "CREATE INDEX IF NOT EXISTS idx_reservations_product ON client_reservations(product_id);",
+            "CREATE INDEX IF NOT EXISTS idx_calendar_product ON calendar_events(product_id);",
+            "CREATE INDEX IF NOT EXISTS idx_calendar_date ON calendar_events(event_date);",
+            "CREATE INDEX IF NOT EXISTS idx_notifications_product ON product_notifications(product_id);",
+        ];
+        let mut any_failed = false;
+        let mut last_error = String::new();
+        for step in &steps {
+            if let Err(e) = conn.execute_batch(step) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") && !msg.contains("already exists") {
+                    any_failed = true;
+                    last_error = msg;
+                }
+            }
+        }
+        if any_failed {
+            Err(format!("Migration error: {}", last_error))
+        } else {
+            Ok(())
+        }
+    })
 }
 
 #[tauri::command]
@@ -538,414 +651,436 @@ fn update_batch_status(batch_id: i64, status: String, state: State<DbState>) -> 
     if !valid.contains(&status.as_str()) {
         return Err(format!("Invalid status: {}. Must be one of: {}", status, valid.join(", ")));
     }
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let sql = format!("UPDATE batches SET status = '{}' WHERE id = {}", status.replace('\'', "''"), batch_id);
-    conn.execute(&sql, []).map_err(|e| format!("Failed to update batch status: {}", e))?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("UPDATE batches SET status = ?1 WHERE id = ?2", rusqlite::params![status, batch_id])
+            .map_err(|e| format!("Failed to update batch status: {}", e))?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 fn delete_inventory_log(log_id: i64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("DELETE FROM inventory_logs WHERE id = {}", log_id), [])
-        .map_err(|e| format!("Failed to delete inventory log: {}", e))?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("DELETE FROM inventory_logs WHERE id = ?1", rusqlite::params![log_id])
+            .map_err(|e| format!("Failed to delete inventory log: {}", e))?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 fn update_inventory_log_notes(log_id: i64, notes: Option<String>, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let notes_val = match notes {
-        Some(n) => format!("'{}'", n.replace('\'', "''")),
-        None => "NULL".to_string(),
-    };
-    conn.execute(&format!("UPDATE inventory_logs SET notes = {} WHERE id = {}", notes_val, log_id), [])
-        .map_err(|e| format!("Failed to update log notes: {}", e))?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("UPDATE inventory_logs SET notes = ?1 WHERE id = ?2", rusqlite::params![notes, log_id])
+            .map_err(|e| format!("Failed to update log notes: {}", e))?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 fn update_product(product_id: i64, name: String, sku: Option<String>, category_id: Option<i64>, base_unit_name: String, reorder_threshold: f64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let sku_val = match sku {
-        Some(s) => format!("'{}'", s.replace('\'', "''")),
-        None => "NULL".to_string(),
-    };
-    let cat_val = match category_id {
-        Some(c) => c.to_string(),
-        None => "NULL".to_string(),
-    };
-    let sql = format!(
-        "UPDATE products SET name = '{}', sku = {}, category_id = {}, base_unit_name = '{}', reorder_threshold = {} WHERE id = {}",
-        name.replace('\'', "''"), sku_val, cat_val, base_unit_name.replace('\'', "''"), reorder_threshold, product_id
-    );
-    conn.execute(&sql, []).map_err(|e| format!("Failed to update product: {}", e))?;
-    Ok(())
+    if !reorder_threshold.is_finite() {
+        return Err("reorder_threshold must be a finite number".to_string());
+    }
+    with_conn(&state, |conn| {
+        conn.execute(
+            "UPDATE products SET name = ?1, sku = ?2, category_id = ?3, base_unit_name = ?4, reorder_threshold = ?5 WHERE id = ?6",
+            rusqlite::params![name, sku, category_id, base_unit_name, reorder_threshold, product_id],
+        ).map_err(|e| format!("Failed to update product: {}", e))?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 fn upsert_product_attribute(product_id: i64, attr_key: String, attr_value: String, data_type: String, state: State<DbState>) -> Result<i64, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let existing: Option<i64> = conn.query_row(
-        &format!("SELECT id FROM product_attributes WHERE product_id = {} AND attr_key = '{}'", product_id, attr_key.replace('\'', "''")),
-        [],
-        |row| row.get(0),
-    ).ok();
-    match existing {
-        Some(id) => {
-            conn.execute(
-                &format!("UPDATE product_attributes SET attr_value = '{}', data_type = '{}' WHERE id = {}",
-                    attr_value.replace('\'', "''"), data_type.replace('\'', "''"), id),
-                [],
-            ).map_err(|e| format!("Failed to update attribute: {}", e))?;
-            Ok(id)
+    with_conn(&state, |conn| {
+        let existing: Option<i64> = conn.query_row(
+            "SELECT id FROM product_attributes WHERE product_id = ?1 AND attr_key = ?2",
+            rusqlite::params![product_id, attr_key],
+            |row| row.get(0),
+        ).ok();
+        match existing {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE product_attributes SET attr_value = ?1, data_type = ?2 WHERE id = ?3",
+                    rusqlite::params![attr_value, data_type, id],
+                ).map_err(|e| format!("Failed to update attribute: {}", e))?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO product_attributes (product_id, attr_key, attr_value, data_type) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![product_id, attr_key, attr_value, data_type],
+                ).map_err(|e| format!("Failed to insert attribute: {}", e))?;
+                Ok(conn.last_insert_rowid())
+            }
         }
-        None => {
-            conn.execute(
-                &format!("INSERT INTO product_attributes (product_id, attr_key, attr_value, data_type) VALUES ({}, '{}', '{}', '{}')",
-                    product_id, attr_key.replace('\'', "''"), attr_value.replace('\'', "''"), data_type.replace('\'', "''")),
-                [],
-            ).map_err(|e| format!("Failed to insert attribute: {}", e))?;
-            Ok(conn.last_insert_rowid())
-        }
-    }
+    })
 }
 
 #[tauri::command]
 fn update_unit_conversion(conversion_id: i64, unit_name: String, conversion_factor: f64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(
-        &format!("UPDATE unit_conversions SET unit_name = '{}', conversion_factor = {} WHERE id = {}",
-            unit_name.replace('\'', "''"), conversion_factor, conversion_id),
-        [],
-    ).map_err(|e| format!("Failed to update unit conversion: {}", e))?;
-    Ok(())
+    if !conversion_factor.is_finite() {
+        return Err("conversion_factor must be a finite number".to_string());
+    }
+    with_conn(&state, |conn| {
+        conn.execute(
+            "UPDATE unit_conversions SET unit_name = ?1, conversion_factor = ?2 WHERE id = ?3",
+            rusqlite::params![unit_name, conversion_factor, conversion_id],
+        ).map_err(|e| format!("Failed to update unit conversion: {}", e))?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 fn upsert_category(name: String, description: Option<String>, icon: Option<String>, color: Option<String>, state: State<DbState>) -> Result<i64, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let desc = description.map(|d| format!("'{}'", d.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    let ico = icon.unwrap_or_else(|| "📋".to_string());
-    let col = color.unwrap_or_else(|| "#5b6abf".to_string());
-    // Try update first
-    let existing: Option<i64> = conn.query_row(
-        &format!("SELECT id FROM categories WHERE name = '{}'", name.replace('\'', "''")),
-        [],
-        |row| row.get(0),
-    ).ok();
-    match existing {
-        Some(id) => {
-            conn.execute(
-                &format!("UPDATE categories SET description = {}, icon = '{}', color = '{}' WHERE id = {}",
-                    desc, ico.replace('\'', "''"), col.replace('\'', "''"), id),
-                [],
-            ).map_err(|e| format!("Failed to update category: {}", e))?;
-            Ok(id)
+    with_conn(&state, |conn| {
+        let ico = icon.unwrap_or_else(|| "📋".to_string());
+        let col = color.unwrap_or_else(|| "#5b6abf".to_string());
+        let existing: Option<i64> = conn.query_row(
+            "SELECT id FROM categories WHERE name = ?1",
+            rusqlite::params![name],
+            |row| row.get(0),
+        ).ok();
+        match existing {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE categories SET description = ?1, icon = ?2, color = ?3 WHERE id = ?4",
+                    rusqlite::params![description, ico, col, id],
+                ).map_err(|e| format!("Failed to update category: {}", e))?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO categories (name, description, icon, color) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![name, description, ico, col],
+                ).map_err(|e| format!("Failed to create category: {}", e))?;
+                Ok(conn.last_insert_rowid())
+            }
         }
-        None => {
-            conn.execute(
-                &format!("INSERT INTO categories (name, description, icon, color) VALUES ('{}', {}, '{}', '{}')",
-                    name.replace('\'', "''"), desc, ico.replace('\'', "''"), col.replace('\'', "''")),
-                [],
-            ).map_err(|e| format!("Failed to create category: {}", e))?;
-            Ok(conn.last_insert_rowid())
-        }
-    }
+    })
 }
 
 #[tauri::command]
 fn delete_category(category_id: i64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("DELETE FROM category_attribute_templates WHERE category_id = {}", category_id), []).ok();
-    conn.execute(&format!("UPDATE products SET category_id = NULL WHERE category_id = {}", category_id), [])
-        .map_err(|e| format!("Failed to unassign products: {}", e))?;
-    conn.execute(&format!("DELETE FROM categories WHERE id = {}", category_id), [])
-        .map_err(|e| format!("Failed to delete category: {}", e))?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute_batch("BEGIN;")
+            .map_err(|e| format!("Failed to start transaction: {}", e))?;
+        if let Err(e) = conn.execute("DELETE FROM category_attribute_templates WHERE category_id = ?1", rusqlite::params![category_id]) {
+            conn.execute_batch("ROLLBACK;").ok();
+            return Err(format!("Failed to delete category templates: {}", e));
+        }
+        if let Err(e) = conn.execute("UPDATE products SET category_id = NULL WHERE category_id = ?1", rusqlite::params![category_id]) {
+            conn.execute_batch("ROLLBACK;").ok();
+            return Err(format!("Failed to unassign products: {}", e));
+        }
+        if let Err(e) = conn.execute("DELETE FROM categories WHERE id = ?1", rusqlite::params![category_id]) {
+            conn.execute_batch("ROLLBACK;").ok();
+            return Err(format!("Failed to delete category: {}", e));
+        }
+        conn.execute_batch("COMMIT;").map_err(|e| e.to_string())?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 fn get_category_templates(category_id: i64, state: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let mut stmt = conn.prepare(
-        &format!("SELECT id, attr_key, attr_type, is_required, display_order FROM category_attribute_templates WHERE category_id = {} ORDER BY display_order", category_id)
-    ).map_err(|e| format!("Failed to query templates: {}", e))?;
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "attr_key": row.get::<_, String>(1)?,
-            "attr_type": row.get::<_, String>(2)?,
-            "is_required": row.get::<_, bool>(3)?,
-            "display_order": row.get::<_, i64>(4)?
-        }))
-    }).map_err(|e| format!("Failed to read templates: {}", e))?;
-    let mut result = Vec::new();
-    for row in rows {
-        if let Ok(r) = row { result.push(r); }
-    }
-    Ok(result)
+    with_conn(&state, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, attr_key, attr_type, is_required, display_order FROM category_attribute_templates WHERE category_id = ?1 ORDER BY display_order"
+        ).map_err(|e| format!("Failed to query templates: {}", e))?;
+        let rows = stmt.query_map(rusqlite::params![category_id], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "attr_key": row.get::<_, String>(1)?,
+                "attr_type": row.get::<_, String>(2)?,
+                "is_required": row.get::<_, bool>(3)?,
+                "display_order": row.get::<_, i64>(4)?
+            }))
+        }).map_err(|e| format!("Failed to read templates: {}", e))?;
+        let mut result = Vec::new();
+        for row in rows {
+            let r = row.map_err(|e| format!("Template row error: {}", e))?;
+            result.push(r);
+        }
+        Ok(result)
+    })
 }
 
 #[tauri::command]
 fn upsert_category_template(category_id: i64, attr_key: String, attr_type: String, is_required: bool, display_order: i64, state: State<DbState>) -> Result<i64, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let existing: Option<i64> = conn.query_row(
-        &format!("SELECT id FROM category_attribute_templates WHERE category_id = {} AND attr_key = '{}'", category_id, attr_key.replace('\'', "''")),
-        [],
-        |row| row.get(0),
-    ).ok();
-    match existing {
-        Some(id) => {
-            conn.execute(
-                &format!("UPDATE category_attribute_templates SET attr_type = '{}', is_required = {}, display_order = {} WHERE id = {}",
-                    attr_type.replace('\'', "''"), is_required as i32, display_order, id),
-                [],
-            ).map_err(|e| format!("Failed to update template: {}", e))?;
-            Ok(id)
+    with_conn(&state, |conn| {
+        let existing: Option<i64> = conn.query_row(
+            "SELECT id FROM category_attribute_templates WHERE category_id = ?1 AND attr_key = ?2",
+            rusqlite::params![category_id, attr_key],
+            |row| row.get(0),
+        ).ok();
+        match existing {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE category_attribute_templates SET attr_type = ?1, is_required = ?2, display_order = ?3 WHERE id = ?4",
+                    rusqlite::params![attr_type, is_required, display_order, id],
+                ).map_err(|e| format!("Failed to update template: {}", e))?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO category_attribute_templates (category_id, attr_key, attr_type, is_required, display_order) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![category_id, attr_key, attr_type, is_required, display_order],
+                ).map_err(|e| format!("Failed to create template: {}", e))?;
+                Ok(conn.last_insert_rowid())
+            }
         }
-        None => {
-            conn.execute(
-                &format!("INSERT INTO category_attribute_templates (category_id, attr_key, attr_type, is_required, display_order) VALUES ({}, '{}', '{}', {}, {})",
-                    category_id, attr_key.replace('\'', "''"), attr_type.replace('\'', "''"), is_required as i32, display_order),
-                [],
-            ).map_err(|e| format!("Failed to create template: {}", e))?;
-            Ok(conn.last_insert_rowid())
-        }
-    }
+    })
 }
 
 #[tauri::command]
 fn delete_category_template(template_id: i64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("DELETE FROM category_attribute_templates WHERE id = {}", template_id), [])
-        .map_err(|e| format!("Failed to delete template: {}", e))?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("DELETE FROM category_attribute_templates WHERE id = ?1", rusqlite::params![template_id])
+            .map_err(|e| format!("Failed to delete template: {}", e))?;
+        Ok(())
+    })
 }
 
 // === Product Notes ===
 #[tauri::command]
 fn upsert_product_note(product_id: i64, title: Option<String>, body: String, is_pinned: bool, note_id: Option<i64>, state: State<DbState>) -> Result<i64, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let title_val = title.map(|t| format!("'{}'", t.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    match note_id {
-        Some(id) => {
-            conn.execute(&format!("UPDATE product_notes SET title = {}, body = '{}', is_pinned = {}, updated_at = CURRENT_TIMESTAMP WHERE id = {}",
-                title_val, body.replace('\'', "''"), is_pinned as i32, id), []).map_err(|e| e.to_string())?;
-            Ok(id)
+    with_conn(&state, |conn| {
+        match note_id {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE product_notes SET title = ?1, body = ?2, is_pinned = ?3, updated_at = CURRENT_TIMESTAMP WHERE id = ?4",
+                    rusqlite::params![title, body, is_pinned, id],
+                ).map_err(|e| e.to_string())?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO product_notes (product_id, title, body, is_pinned) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![product_id, title, body, is_pinned],
+                ).map_err(|e| e.to_string())?;
+                Ok(conn.last_insert_rowid())
+            }
         }
-        None => {
-            conn.execute(&format!("INSERT INTO product_notes (product_id, title, body, is_pinned) VALUES ({}, {}, '{}', {})",
-                product_id, title_val, body.replace('\'', "''"), is_pinned as i32), []).map_err(|e| e.to_string())?;
-            Ok(conn.last_insert_rowid())
-        }
-    }
+    })
 }
 
 #[tauri::command]
 fn delete_product_note(note_id: i64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("DELETE FROM product_notes WHERE id = {}", note_id), []).map_err(|e| e.to_string())?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("DELETE FROM product_notes WHERE id = ?1", rusqlite::params![note_id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
 }
 
 // === Clients ===
 #[tauri::command]
 fn upsert_client(name: String, email: Option<String>, phone: Option<String>, company: Option<String>, notes: Option<String>, client_id: Option<i64>, state: State<DbState>) -> Result<i64, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let email_val = email.map(|e| format!("'{}'", e.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    let phone_val = phone.map(|p| format!("'{}'", p.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    let company_val = company.map(|c| format!("'{}'", c.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    let notes_val = notes.map(|n| format!("'{}'", n.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    match client_id {
-        Some(id) => {
-            conn.execute(&format!("UPDATE clients SET name = '{}', email = {}, phone = {}, company = {}, notes = {} WHERE id = {}",
-                name.replace('\'', "''"), email_val, phone_val, company_val, notes_val, id), []).map_err(|e| e.to_string())?;
-            Ok(id)
+    with_conn(&state, |conn| {
+        match client_id {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE clients SET name = ?1, email = ?2, phone = ?3, company = ?4, notes = ?5 WHERE id = ?6",
+                    rusqlite::params![name, email, phone, company, notes, id],
+                ).map_err(|e| e.to_string())?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO clients (name, email, phone, company, notes) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![name, email, phone, company, notes],
+                ).map_err(|e| e.to_string())?;
+                Ok(conn.last_insert_rowid())
+            }
         }
-        None => {
-            conn.execute(&format!("INSERT INTO clients (name, email, phone, company, notes) VALUES ('{}', {}, {}, {}, {})",
-                name.replace('\'', "''"), email_val, phone_val, company_val, notes_val), []).map_err(|e| e.to_string())?;
-            Ok(conn.last_insert_rowid())
-        }
-    }
+    })
 }
 
 #[tauri::command]
 fn delete_client(client_id: i64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("DELETE FROM client_reservations WHERE client_id = {}", client_id), []).ok();
-    conn.execute(&format!("DELETE FROM clients WHERE id = {}", client_id), []).map_err(|e| e.to_string())?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute_batch("BEGIN;").map_err(|e| e.to_string())?;
+        if let Err(e) = conn.execute("DELETE FROM client_reservations WHERE client_id = ?1", rusqlite::params![client_id]) {
+            conn.execute_batch("ROLLBACK;").ok();
+            return Err(format!("Failed to delete client reservations: {}", e));
+        }
+        if let Err(e) = conn.execute("DELETE FROM clients WHERE id = ?1", rusqlite::params![client_id]) {
+            conn.execute_batch("ROLLBACK;").ok();
+            return Err(format!("Failed to delete client: {}", e));
+        }
+        conn.execute_batch("COMMIT;").map_err(|e| e.to_string())?;
+        Ok(())
+    })
 }
 
 // === Reservations ===
 #[tauri::command]
 fn upsert_reservation(client_id: i64, product_id: i64, quantity: f64, reserved_date: String, status: Option<String>, notes: Option<String>, fulfilled_date: Option<String>, reservation_id: Option<i64>, state: State<DbState>) -> Result<i64, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let status_val = status.unwrap_or_else(|| "reserved".to_string());
-    let notes_val = notes.map(|n| format!("'{}'", n.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    let fulfilled_val = fulfilled_date.map(|d| format!("'{}'", d.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    match reservation_id {
-        Some(id) => {
-            conn.execute(&format!("UPDATE client_reservations SET client_id = {}, product_id = {}, quantity = {}, reserved_date = '{}', status = '{}', notes = {}, fulfilled_date = {} WHERE id = {}",
-                client_id, product_id, quantity, reserved_date.replace('\'', "''"), status_val.replace('\'', "''"), notes_val, fulfilled_val, id), []).map_err(|e| e.to_string())?;
-            Ok(id)
-        }
-        None => {
-            conn.execute(&format!("INSERT INTO client_reservations (client_id, product_id, quantity, reserved_date, status, notes, fulfilled_date) VALUES ({}, {}, {}, '{}', '{}', {}, {})",
-                client_id, product_id, quantity, reserved_date.replace('\'', "''"), status_val.replace('\'', "''"), notes_val, fulfilled_val), []).map_err(|e| e.to_string())?;
-            Ok(conn.last_insert_rowid())
-        }
+    if !quantity.is_finite() {
+        return Err("quantity must be a finite number".to_string());
     }
+    with_conn(&state, |conn| {
+        let status_val = status.unwrap_or_else(|| "reserved".to_string());
+        match reservation_id {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE client_reservations SET client_id = ?1, product_id = ?2, quantity = ?3, reserved_date = ?4, status = ?5, notes = ?6, fulfilled_date = ?7 WHERE id = ?8",
+                    rusqlite::params![client_id, product_id, quantity, reserved_date, status_val, notes, fulfilled_date, id],
+                ).map_err(|e| e.to_string())?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO client_reservations (client_id, product_id, quantity, reserved_date, status, notes, fulfilled_date) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    rusqlite::params![client_id, product_id, quantity, reserved_date, status_val, notes, fulfilled_date],
+                ).map_err(|e| e.to_string())?;
+                Ok(conn.last_insert_rowid())
+            }
+        }
+    })
 }
 
 #[tauri::command]
 fn delete_reservation(reservation_id: i64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("DELETE FROM client_reservations WHERE id = {}", reservation_id), []).map_err(|e| e.to_string())?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("DELETE FROM client_reservations WHERE id = ?1", rusqlite::params![reservation_id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
 }
 
 // === Calendar Events ===
 #[tauri::command]
 fn upsert_calendar_event(product_id: Option<i64>, title: String, event_type: String, event_date: String, end_date: Option<String>, quantity: Option<f64>, notes: Option<String>, event_id: Option<i64>, state: State<DbState>) -> Result<i64, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let pid = product_id.map(|p| p.to_string()).unwrap_or_else(|| "NULL".to_string());
-    let end_val = end_date.map(|d| format!("'{}'", d.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    let qty_val = quantity.map(|q| q.to_string()).unwrap_or_else(|| "NULL".to_string());
-    let notes_val = notes.map(|n| format!("'{}'", n.replace('\'', "''"))).unwrap_or_else(|| "NULL".to_string());
-    match event_id {
-        Some(id) => {
-            conn.execute(&format!("UPDATE calendar_events SET product_id = {}, title = '{}', event_type = '{}', event_date = '{}', end_date = {}, quantity = {}, notes = {} WHERE id = {}",
-                pid, title.replace('\'', "''"), event_type.replace('\'', "''"), event_date.replace('\'', "''"), end_val, qty_val, notes_val, id), []).map_err(|e| e.to_string())?;
-            Ok(id)
+    with_conn(&state, |conn| {
+        match event_id {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE calendar_events SET product_id = ?1, title = ?2, event_type = ?3, event_date = ?4, end_date = ?5, quantity = ?6, notes = ?7 WHERE id = ?8",
+                    rusqlite::params![product_id, title, event_type, event_date, end_date, quantity, notes, id],
+                ).map_err(|e| e.to_string())?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO calendar_events (product_id, title, event_type, event_date, end_date, quantity, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    rusqlite::params![product_id, title, event_type, event_date, end_date, quantity, notes],
+                ).map_err(|e| e.to_string())?;
+                Ok(conn.last_insert_rowid())
+            }
         }
-        None => {
-            conn.execute(&format!("INSERT INTO calendar_events (product_id, title, event_type, event_date, end_date, quantity, notes) VALUES ({}, '{}', '{}', '{}', {}, {}, {})",
-                pid, title.replace('\'', "''"), event_type.replace('\'', "''"), event_date.replace('\'', "''"), end_val, qty_val, notes_val), []).map_err(|e| e.to_string())?;
-            Ok(conn.last_insert_rowid())
-        }
-    }
+    })
 }
 
 #[tauri::command]
 fn toggle_calendar_event(event_id: i64, is_completed: bool, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("UPDATE calendar_events SET is_completed = {} WHERE id = {}", is_completed as i32, event_id), []).map_err(|e| e.to_string())?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("UPDATE calendar_events SET is_completed = ?1 WHERE id = ?2", rusqlite::params![is_completed, event_id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 fn delete_calendar_event(event_id: i64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("DELETE FROM calendar_events WHERE id = {}", event_id), []).map_err(|e| e.to_string())?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("DELETE FROM calendar_events WHERE id = ?1", rusqlite::params![event_id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
 }
 
 // === Notifications ===
 #[tauri::command]
 fn upsert_notification(product_id: i64, notification_type: String, message: String, threshold_value: Option<f64>, is_active: bool, notification_id: Option<i64>, state: State<DbState>) -> Result<i64, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    let thresh_val = threshold_value.map(|t| t.to_string()).unwrap_or_else(|| "NULL".to_string());
-    match notification_id {
-        Some(id) => {
-            conn.execute(&format!("UPDATE product_notifications SET notification_type = '{}', message = '{}', threshold_value = {}, is_active = {} WHERE id = {}",
-                notification_type.replace('\'', "''"), message.replace('\'', "''"), thresh_val, is_active as i32, id), []).map_err(|e| e.to_string())?;
-            Ok(id)
+    with_conn(&state, |conn| {
+        match notification_id {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE product_notifications SET notification_type = ?1, message = ?2, threshold_value = ?3, is_active = ?4 WHERE id = ?5",
+                    rusqlite::params![notification_type, message, threshold_value, is_active, id],
+                ).map_err(|e| e.to_string())?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO product_notifications (product_id, notification_type, message, threshold_value, is_active) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![product_id, notification_type, message, threshold_value, is_active],
+                ).map_err(|e| e.to_string())?;
+                Ok(conn.last_insert_rowid())
+            }
         }
-        None => {
-            conn.execute(&format!("INSERT INTO product_notifications (product_id, notification_type, message, threshold_value, is_active) VALUES ({}, '{}', '{}', {}, {})",
-                product_id, notification_type.replace('\'', "''"), message.replace('\'', "''"), thresh_val, is_active as i32), []).map_err(|e| e.to_string())?;
-            Ok(conn.last_insert_rowid())
-        }
-    }
+    })
 }
 
 #[tauri::command]
 fn delete_notification(notification_id: i64, state: State<DbState>) -> Result<(), String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
-    conn.execute(&format!("DELETE FROM product_notifications WHERE id = {}", notification_id), []).map_err(|e| e.to_string())?;
-    Ok(())
+    with_conn(&state, |conn| {
+        conn.execute("DELETE FROM product_notifications WHERE id = ?1", rusqlite::params![notification_id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
 }
 
 // === Product Report Data ===
 #[tauri::command]
 fn get_product_report_data(product_id: i64, state: State<DbState>) -> Result<serde_json::Value, String> {
-    let conn_lock = get_conn(&state)?;
-    let conn = get_active_conn(&conn_lock)?;
+    with_conn(&state, |conn| {
+        let product: serde_json::Value = conn.query_row(
+            "SELECT p.id, p.name, p.sku, COALESCE(c.name, 'Uncategorized'), COALESCE(c.icon, '📋'), COALESCE(c.color, '#5b6abf')
+             FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.id = ?1",
+            rusqlite::params![product_id],
+            |row| Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "sku": row.get::<_, Option<String>>(2)?,
+                "category": row.get::<_, String>(3)?, "icon": row.get::<_, String>(4)?, "color": row.get::<_, String>(5)?
+            }))
+        ).map_err(|e| e.to_string())?;
 
-    let product: serde_json::Value = conn.query_row(&format!(
-        "SELECT p.id, p.name, p.sku, COALESCE(c.name, 'Uncategorized'), COALESCE(c.icon, '📋'), COALESCE(c.color, '#5b6abf')
-         FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.id = {}", product_id), [],
-        |row| Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "sku": row.get::<_, Option<String>>(2)?,
-            "category": row.get::<_, String>(3)?, "icon": row.get::<_, String>(4)?, "color": row.get::<_, String>(5)?
+        let attrs: Vec<serde_json::Value> = {
+            let mut stmt = conn.prepare("SELECT attr_key, attr_value, data_type FROM product_attributes WHERE product_id = ?1 ORDER BY attr_key").map_err(|e| e.to_string())?;
+            let rows: Vec<_> = stmt.query_map(rusqlite::params![product_id], |row| Ok(serde_json::json!({"key": row.get::<_, String>(0)?, "value": row.get::<_, String>(1)?, "type": row.get::<_, String>(2)?}))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            rows
+        };
+
+        let history: Vec<serde_json::Value> = {
+            let mut stmt = conn.prepare(
+                "SELECT il.transaction_type, SUM(il.quantity_change) as net_qty, strftime('%Y-%m', il.created_at) as month
+                 FROM inventory_logs il JOIN batches b ON il.batch_id = b.id WHERE b.product_id = ?1 GROUP BY il.transaction_type, month ORDER BY month"
+            ).map_err(|e| e.to_string())?;
+            let rows: Vec<_> = stmt.query_map(rusqlite::params![product_id], |row| Ok(serde_json::json!({"type": row.get::<_, String>(0)?, "qty": row.get::<_, f64>(1)?, "month": row.get::<_, String>(2)?}))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            rows
+        };
+
+        let cost_data: Vec<serde_json::Value> = {
+            let mut stmt = conn.prepare(
+                "SELECT b.purchase_date, b.unit_cost_price, SUM(COALESCE(il2.quantity_change, 0)) as total_purchased_qty
+                 FROM batches b LEFT JOIN inventory_logs il2 ON il2.batch_id = b.id AND il2.transaction_type = 'PURCHASE'
+                 WHERE b.product_id = ?1 GROUP BY b.id ORDER BY b.purchase_date"
+            ).map_err(|e| e.to_string())?;
+            let rows: Vec<_> = stmt.query_map(rusqlite::params![product_id], |row| Ok(serde_json::json!({"date": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)?, "total_purchased_qty": row.get::<_, f64>(2)?}))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            rows
+        };
+
+        let notes: Vec<serde_json::Value> = {
+            let mut stmt = conn.prepare("SELECT id, title, body, is_pinned, created_at FROM product_notes WHERE product_id = ?1 ORDER BY is_pinned DESC, created_at DESC").map_err(|e| e.to_string())?;
+            let rows: Vec<_> = stmt.query_map(rusqlite::params![product_id], |row| Ok(serde_json::json!({"id": row.get::<_, i64>(0)?, "title": row.get::<_, Option<String>>(1)?, "body": row.get::<_, String>(2)?, "pinned": row.get::<_, bool>(3)?, "created_at": row.get::<_, String>(4)?}))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            rows
+        };
+
+        let reservations: Vec<serde_json::Value> = {
+            let mut stmt = conn.prepare(
+                "SELECT cr.id, cl.name, cr.quantity, cr.reserved_date, cr.status, cr.notes
+                 FROM client_reservations cr JOIN clients cl ON cr.client_id = cl.id WHERE cr.product_id = ?1 ORDER BY cr.reserved_date"
+            ).map_err(|e| e.to_string())?;
+            let rows: Vec<_> = stmt.query_map(rusqlite::params![product_id], |row| Ok(serde_json::json!({"id": row.get::<_, i64>(0)?, "client": row.get::<_, String>(1)?, "qty": row.get::<_, f64>(2)?, "date": row.get::<_, String>(3)?, "status": row.get::<_, String>(4)?, "notes": row.get::<_, Option<String>>(5)?}))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            rows
+        };
+
+        Ok(serde_json::json!({
+            "product": product, "attributes": attrs, "history": history, "cost_data": cost_data, "notes": notes, "reservations": reservations
         }))
-    ).map_err(|e| e.to_string())?;
-
-    let attrs: Vec<serde_json::Value> = {
-        let mut stmt = conn.prepare(&format!("SELECT attr_key, attr_value, data_type FROM product_attributes WHERE product_id = {} ORDER BY attr_key", product_id)).map_err(|e| e.to_string())?;
-        let rows: Vec<_> = stmt.query_map([], |row| Ok(serde_json::json!({"key": row.get::<_, String>(0)?, "value": row.get::<_, String>(1)?, "type": row.get::<_, String>(2)?}))).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
-        rows
-    };
-
-    let history: Vec<serde_json::Value> = {
-        let mut stmt = conn.prepare(&format!(
-            "SELECT il.transaction_type, SUM(ABS(il.quantity_change)) as total_qty, strftime('%Y-%m', il.created_at) as month
-             FROM inventory_logs il JOIN batches b ON il.batch_id = b.id WHERE b.product_id = {} GROUP BY il.transaction_type, month ORDER BY month", product_id)).map_err(|e| e.to_string())?;
-        let rows: Vec<_> = stmt.query_map([], |row| Ok(serde_json::json!({"type": row.get::<_, String>(0)?, "qty": row.get::<_, f64>(1)?, "month": row.get::<_, String>(2)?}))).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
-        rows
-    };
-
-    let cost_data: Vec<serde_json::Value> = {
-        let mut stmt = conn.prepare(&format!(
-            "SELECT b.purchase_date, b.unit_cost_price, SUM(COALESCE(il2.quantity_change, 0)) as stock
-             FROM batches b LEFT JOIN inventory_logs il2 ON il2.batch_id = b.id AND il2.transaction_type = 'PURCHASE'
-             WHERE b.product_id = {} GROUP BY b.id ORDER BY b.purchase_date", product_id)).map_err(|e| e.to_string())?;
-        let rows: Vec<_> = stmt.query_map([], |row| Ok(serde_json::json!({"date": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)?, "stock": row.get::<_, f64>(2)?}))).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
-        rows
-    };
-
-    let notes: Vec<serde_json::Value> = {
-        let mut stmt = conn.prepare(&format!("SELECT id, title, body, is_pinned, created_at FROM product_notes WHERE product_id = {} ORDER BY is_pinned DESC, created_at DESC", product_id)).map_err(|e| e.to_string())?;
-        let rows: Vec<_> = stmt.query_map([], |row| Ok(serde_json::json!({"id": row.get::<_, i64>(0)?, "title": row.get::<_, Option<String>>(1)?, "body": row.get::<_, String>(2)?, "pinned": row.get::<_, bool>(3)?, "created_at": row.get::<_, String>(4)?}))).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
-        rows
-    };
-
-    let reservations: Vec<serde_json::Value> = {
-        let mut stmt = conn.prepare(&format!(
-            "SELECT cr.id, cl.name, cr.quantity, cr.reserved_date, cr.status, cr.notes
-             FROM client_reservations cr JOIN clients cl ON cr.client_id = cl.id WHERE cr.product_id = {} ORDER BY cr.reserved_date", product_id)).map_err(|e| e.to_string())?;
-        let rows: Vec<_> = stmt.query_map([], |row| Ok(serde_json::json!({"id": row.get::<_, i64>(0)?, "client": row.get::<_, String>(1)?, "qty": row.get::<_, f64>(2)?, "date": row.get::<_, String>(3)?, "status": row.get::<_, String>(4)?, "notes": row.get::<_, Option<String>>(5)?}))).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
-        rows
-    };
-
-    Ok(serde_json::json!({
-        "product": product, "attributes": attrs, "history": history, "cost_data": cost_data, "notes": notes, "reservations": reservations
-    }))
+    })
 }
 
 #[derive(Serialize, Deserialize)]
@@ -975,14 +1110,577 @@ fn load_preferences() -> Result<AppPreferences, String> {
     serde_json::from_str(&data).map_err(|e| e.to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch(INVENTORY_SCHEMA).unwrap();
+        conn.execute_batch(SEED_DATA).unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_schema_creates_all_tables() {
+        let conn = setup_db();
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).unwrap();
+        let tables: Vec<String> = stmt.query_map([], |row| row.get(0)).unwrap()
+            .filter_map(|r| r.ok()).collect();
+        let expected = [
+            "batches", "calendar_events", "categories", "category_attribute_templates",
+            "client_reservations", "clients", "inventory_logs", "locations",
+            "product_attributes", "product_notifications", "product_notes", "products",
+            "unit_conversions",
+        ];
+        for t in &expected {
+            assert!(tables.contains(&t.to_string()), "Missing table: {}", t);
+        }
+    }
+
+    #[test]
+    fn test_schema_creates_indexes() {
+        let conn = setup_db();
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name"
+        ).unwrap();
+        let indexes: Vec<String> = stmt.query_map([], |row| row.get(0)).unwrap()
+            .filter_map(|r| r.ok()).collect();
+        let expected = [
+            "idx_attributes_product", "idx_batches_product_date", "idx_batches_status",
+            "idx_calendar_date", "idx_calendar_product", "idx_clients_name",
+            "idx_logs_batch", "idx_logs_created", "idx_notes_product",
+            "idx_notifications_product", "idx_products_category", "idx_products_sku",
+            "idx_reservations_client", "idx_reservations_product", "idx_templates_category",
+        ];
+        for idx in &expected {
+            assert!(indexes.contains(&idx.to_string()), "Missing index: {}", idx);
+        }
+    }
+
+    #[test]
+    fn test_seed_categories() {
+        let conn = setup_db();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM categories", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 8);
+    }
+
+    #[test]
+    fn test_seed_products() {
+        let conn = setup_db();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 12);
+    }
+
+    #[test]
+    fn test_seed_batches() {
+        let conn = setup_db();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM batches", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 15);
+    }
+
+    #[test]
+    fn test_seed_locations() {
+        let conn = setup_db();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM locations", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 5);
+    }
+
+    #[test]
+    fn test_seed_inventory_logs() {
+        let conn = setup_db();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM inventory_logs", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 27);
+    }
+
+    #[test]
+    fn test_product_belongs_to_category() {
+        let conn = setup_db();
+        let category: String = conn.query_row(
+            "SELECT c.name FROM products p JOIN categories c ON p.category_id = c.id WHERE p.sku = 'WINE-R-001'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(category, "Red Wine");
+    }
+
+    #[test]
+    fn test_batch_status_default() {
+        let conn = setup_db();
+        let status: String = conn.query_row(
+            "SELECT status FROM batches WHERE batch_number = 'LOT-2024-001'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(status, "in_inventory");
+    }
+
+    #[test]
+    fn test_in_transaction_types_are_valid() {
+        let conn = setup_db();
+        let mut stmt = conn.prepare("SELECT DISTINCT transaction_type FROM inventory_logs").unwrap();
+        let types: Vec<String> = stmt.query_map([], |row| row.get(0)).unwrap()
+            .filter_map(|r| r.ok()).collect();
+        for t in &types {
+            assert!(["PURCHASE", "USAGE", "SPOILAGE", "ADJUSTMENT"].contains(&t.as_str()));
+        }
+    }
+
+    #[test]
+    fn test_foreign_key_cascade_category_delete() {
+        let conn = setup_db();
+        let cat_id: i64 = conn.query_row("SELECT id FROM categories WHERE name = 'Red Wine'", [], |row| row.get(0)).unwrap();
+        conn.execute("UPDATE products SET category_id = NULL WHERE category_id = ?", rusqlite::params![cat_id]).unwrap();
+        conn.execute("DELETE FROM category_attribute_templates WHERE category_id = ?", rusqlite::params![cat_id]).unwrap();
+        conn.execute("DELETE FROM categories WHERE id = ?", rusqlite::params![cat_id]).unwrap();
+        let orphans: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM products WHERE category_id IS NULL AND name = 'Château Margaux 2015'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(orphans, 1);
+    }
+
+    #[test]
+    fn test_foreign_key_cascade_product_delete_deletes_attributes() {
+        let conn = setup_db();
+        let product_id: i64 = conn.query_row("SELECT id FROM products WHERE sku = 'WINE-R-001'", [], |row| row.get(0)).unwrap();
+        conn.execute("DELETE FROM unit_conversions WHERE product_id = ?", rusqlite::params![product_id]).unwrap();
+        conn.execute("DELETE FROM inventory_logs WHERE batch_id IN (SELECT id FROM batches WHERE product_id = ?)", rusqlite::params![product_id]).unwrap();
+        conn.execute("DELETE FROM batches WHERE product_id = ?", rusqlite::params![product_id]).unwrap();
+        conn.execute("DELETE FROM product_notes WHERE product_id = ?", rusqlite::params![product_id]).unwrap();
+        conn.execute("DELETE FROM client_reservations WHERE product_id = ?", rusqlite::params![product_id]).unwrap();
+        conn.execute("DELETE FROM calendar_events WHERE product_id = ?", rusqlite::params![product_id]).unwrap();
+        conn.execute("DELETE FROM product_notifications WHERE product_id = ?", rusqlite::params![product_id]).unwrap();
+        conn.execute("DELETE FROM products WHERE id = ?", rusqlite::params![product_id]).unwrap();
+        let attr_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM product_attributes WHERE product_id = ?", rusqlite::params![product_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(attr_count, 0);
+    }
+
+    #[test]
+    fn test_insert_product_and_read() {
+        let conn = setup_db();
+        conn.execute(
+            "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Test Wine', 'TST-001', 'bottle', 5)",
+            [],
+        ).unwrap();
+        let (name, sku): (String, String) = conn.query_row(
+            "SELECT name, sku FROM products WHERE sku = 'TST-001'", [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(name, "Test Wine");
+        assert_eq!(sku, "TST-001");
+    }
+
+    #[test]
+    fn test_execute_query_select() {
+        let conn = setup_db();
+        let sql = "SELECT name FROM products ORDER BY name LIMIT 1";
+        let mut stmt = conn.prepare(sql).unwrap();
+        let name: String = stmt.query_row([], |row| row.get(0)).unwrap();
+        assert!(!name.is_empty());
+    }
+
+    #[test]
+    fn test_execute_query_insert_update_delete() {
+        let conn = setup_db();
+        conn.execute("INSERT INTO locations (name, sub_location) VALUES ('Test', 'Shelf 1')", []).unwrap();
+        let id: i64 = conn.query_row("SELECT id FROM locations WHERE name = 'Test'", [], |row| row.get(0)).unwrap();
+        conn.execute("UPDATE locations SET sub_location = 'Shelf 2' WHERE id = ?", rusqlite::params![id]).unwrap();
+        let sub: String = conn.query_row("SELECT sub_location FROM locations WHERE id = ?", rusqlite::params![id], |row| row.get(0)).unwrap();
+        assert_eq!(sub, "Shelf 2");
+        conn.execute("DELETE FROM locations WHERE id = ?", rusqlite::params![id]).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM locations WHERE id = ?", rusqlite::params![id], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_upsert_product_attribute_insert() {
+        let conn = setup_db();
+        let pid: i64 = conn.query_row("SELECT id FROM products LIMIT 1", [], |row| row.get(0)).unwrap();
+        let key = "test_attr".to_string();
+        let val = "test_val".to_string();
+        let dt = "string".to_string();
+        let existing: Option<i64> = conn.query_row(
+            "SELECT id FROM product_attributes WHERE product_id = ?1 AND attr_key = ?2",
+            rusqlite::params![pid, key], |row| row.get(0),
+        ).ok();
+        assert!(existing.is_none());
+        conn.execute(
+            "INSERT INTO product_attributes (product_id, attr_key, attr_value, data_type) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![pid, key, val, dt],
+        ).unwrap();
+        let new_id: i64 = conn.last_insert_rowid();
+        let fetched: String = conn.query_row(
+            "SELECT attr_value FROM product_attributes WHERE id = ?1",
+            rusqlite::params![new_id], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(fetched, "test_val");
+    }
+
+    #[test]
+    fn test_upsert_product_attribute_update() {
+        let conn = setup_db();
+        let pid: i64 = conn.query_row("SELECT id FROM products LIMIT 1", [], |row| row.get(0)).unwrap();
+        let key = "Vintage".to_string();
+        let existing_id: i64 = conn.query_row(
+            "SELECT id FROM product_attributes WHERE product_id = ?1 AND attr_key = ?2",
+            rusqlite::params![pid, key], |row| row.get(0),
+        ).unwrap();
+        conn.execute(
+            "UPDATE product_attributes SET attr_value = '2020' WHERE id = ?1",
+            rusqlite::params![existing_id],
+        ).unwrap();
+        let val: String = conn.query_row(
+            "SELECT attr_value FROM product_attributes WHERE id = ?1",
+            rusqlite::params![existing_id], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(val, "2020");
+    }
+
+    #[test]
+    fn test_batch_status_validation() {
+        let conn = setup_db();
+        let bid: i64 = conn.query_row("SELECT id FROM batches LIMIT 1", [], |row| row.get(0)).unwrap();
+        let valid_statuses = ["ordered", "shipping", "arrived", "in_inventory", "used", "reserved"];
+        for status in &valid_statuses {
+            conn.execute(
+                "UPDATE batches SET status = ?1 WHERE id = ?2",
+                rusqlite::params![status, bid],
+            ).unwrap();
+            let current: String = conn.query_row(
+                "SELECT status FROM batches WHERE id = ?1",
+                rusqlite::params![bid], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(&current, status);
+        }
+    }
+
+    #[test]
+    fn test_batch_invalid_status_rejected() {
+        let conn = setup_db();
+        let result = conn.execute_batch(
+            "UPDATE batches SET status = 'invalid_status' WHERE id = 1"
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_upsert_category_insert_and_update() {
+        let conn = setup_db();
+        conn.execute(
+            "INSERT OR IGNORE INTO categories (name, description, icon, color) VALUES ('TestCat', 'desc', '🔴', '#ff0000')",
+            [],
+        ).unwrap();
+        let desc: String = conn.query_row(
+            "SELECT description FROM categories WHERE name = 'TestCat'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(desc, "desc");
+        conn.execute(
+            "UPDATE categories SET description = 'updated' WHERE name = 'TestCat'", [],
+        ).unwrap();
+        let desc2: String = conn.query_row(
+            "SELECT description FROM categories WHERE name = 'TestCat'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(desc2, "updated");
+    }
+
+    #[test]
+    fn test_delete_category_cleans_up_products() {
+        let conn = setup_db();
+        let cat_id: i64 = conn.query_row("SELECT id FROM categories LIMIT 1", [], |row| row.get(0)).unwrap();
+        conn.execute("UPDATE products SET category_id = NULL WHERE category_id = ?", rusqlite::params![cat_id]).unwrap();
+        conn.execute("DELETE FROM category_attribute_templates WHERE category_id = ?", rusqlite::params![cat_id]).unwrap();
+        conn.execute("DELETE FROM categories WHERE id = ?", rusqlite::params![cat_id]).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM categories WHERE id = ?", rusqlite::params![cat_id], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_get_tables_query() {
+        let conn = setup_db();
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).unwrap();
+        let tables: Vec<String> = stmt.query_map([], |row| row.get(0)).unwrap()
+            .filter_map(|r| r.ok()).collect();
+        assert!(tables.len() >= 13);
+    }
+
+    #[test]
+    fn test_get_table_columns() {
+        let conn = setup_db();
+        let mut stmt = conn.prepare("PRAGMA table_info('products')").unwrap();
+        let columns: Vec<String> = stmt.query_map([], |row| row.get::<_, String>(1)).unwrap()
+            .filter_map(|r| r.ok()).collect();
+        assert!(columns.contains(&"name".to_string()));
+        assert!(columns.contains(&"sku".to_string()));
+        assert!(columns.contains(&"category_id".to_string()));
+    }
+
+    #[test]
+    fn test_get_product_report_data_query() {
+        let conn = setup_db();
+        let pid: i64 = conn.query_row("SELECT id FROM products LIMIT 1", [], |row| row.get(0)).unwrap();
+        let product_name: String = conn.query_row(
+            "SELECT p.name FROM products p WHERE p.id = ?1",
+            rusqlite::params![pid], |row| row.get(0),
+        ).unwrap();
+        assert!(!product_name.is_empty());
+        let attr_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM product_attributes WHERE product_id = ?1",
+            rusqlite::params![pid], |row| row.get(0),
+        ).unwrap();
+        assert!(attr_count > 0);
+    }
+
+    #[test]
+    fn test_unit_conversions_exist() {
+        let conn = setup_db();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM unit_conversions", [], |row| row.get(0)).unwrap();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_category_templates_exist() {
+        let conn = setup_db();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM category_attribute_templates", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 23);
+    }
+
+    #[test]
+    fn test_sql_injection_prevention() {
+        let conn = setup_db();
+        let malicious_name = "Robert'; DROP TABLE products; --";
+        conn.execute(
+            "INSERT INTO categories (name) VALUES (?)", rusqlite::params![malicious_name],
+        ).unwrap();
+        let table_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='products'", [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(table_count, 1, "products table should still exist");
+    }
+
+    #[test]
+    fn test_migrate_schema_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(INVENTORY_SCHEMA).unwrap();
+        conn.execute_batch(SEED_DATA).unwrap();
+        let run_migration = |conn: &Connection| {
+            conn.execute_batch("ALTER TABLE batches ADD COLUMN status VARCHAR(30) DEFAULT 'in_inventory';").ok();
+            conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status);").ok();
+            conn.execute_batch("ALTER TABLE categories ADD COLUMN description TEXT;").ok();
+            conn.execute_batch("ALTER TABLE categories ADD COLUMN icon VARCHAR(10) DEFAULT '📋';").ok();
+            conn.execute_batch("ALTER TABLE categories ADD COLUMN color VARCHAR(20) DEFAULT '#5b6abf';").ok();
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS category_attribute_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE, attr_key VARCHAR(100) NOT NULL, attr_type VARCHAR(20) DEFAULT 'string', is_required INTEGER DEFAULT 0, display_order INTEGER DEFAULT 0, UNIQUE(category_id, attr_key));").ok();
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS product_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, title VARCHAR(255), body TEXT NOT NULL, is_pinned INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(255) NOT NULL, email VARCHAR(255), phone VARCHAR(50), company VARCHAR(255), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS client_reservations (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, quantity NUMERIC(10, 2) NOT NULL DEFAULT 1, reserved_date DATE NOT NULL, fulfilled_date DATE, status VARCHAR(30) DEFAULT 'reserved' CHECK (status IN ('reserved', 'partial', 'fulfilled', 'cancelled')), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS calendar_events (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER REFERENCES products(id) ON DELETE CASCADE, title VARCHAR(255) NOT NULL, event_type VARCHAR(50) NOT NULL CHECK (event_type IN ('purchase', 'shipping', 'delivery', 'tasting', 'reservation', 'custom')), event_date DATE NOT NULL, end_date DATE, quantity NUMERIC(10, 2), notes TEXT, is_completed INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS product_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE, notification_type VARCHAR(50) NOT NULL CHECK (notification_type IN ('low_stock', 'expiry', 'custom', 'reorder', 'reservation')), message TEXT NOT NULL, threshold_value NUMERIC(10, 2), is_active INTEGER DEFAULT 1, last_triggered TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);").ok();
+        };
+        run_migration(&conn);
+        run_migration(&conn);
+        let tables: Vec<String> = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).unwrap().query_map([], |row| row.get(0)).unwrap().filter_map(|r| r.ok()).collect();
+        assert_eq!(tables.len(), 13);
+    }
+
+    #[test]
+    fn test_product_attributes_count_by_product() {
+        let conn = setup_db();
+        let mut stmt = conn.prepare(
+            "SELECT p.name, COUNT(pa.id) FROM products p LEFT JOIN product_attributes pa ON pa.product_id = p.id GROUP BY p.id ORDER BY p.name"
+        ).unwrap();
+        let rows: Vec<(String, i64)> = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }).unwrap().filter_map(|r| r.ok()).collect();
+        assert!(rows.len() == 12);
+        let margaux = rows.iter().find(|(n, _)| n.starts_with("Château Margaux")).unwrap();
+        assert_eq!(margaux.1, 4);
+    }
+
+    #[test]
+    fn test_notes_crud() {
+        let conn = setup_db();
+        let pid: i64 = conn.query_row("SELECT id FROM products LIMIT 1", [], |row| row.get(0)).unwrap();
+        conn.execute(
+            "INSERT INTO product_notes (product_id, title, body, is_pinned) VALUES (?1, 'Test Note', 'Test body', 1)",
+            rusqlite::params![pid],
+        ).unwrap();
+        let note_id = conn.last_insert_rowid();
+        let (title, pinned): (String, bool) = conn.query_row(
+            "SELECT title, is_pinned FROM product_notes WHERE id = ?1",
+            rusqlite::params![note_id],
+            |row| Ok((row.get(0)?, row.get::<_, i32>(1)? != 0)),
+        ).unwrap();
+        assert_eq!(title, "Test Note");
+        assert!(pinned);
+        conn.execute("UPDATE product_notes SET body = 'Updated' WHERE id = ?1", rusqlite::params![note_id]).unwrap();
+        let body: String = conn.query_row("SELECT body FROM product_notes WHERE id = ?1", rusqlite::params![note_id], |row| row.get(0)).unwrap();
+        assert_eq!(body, "Updated");
+        conn.execute("DELETE FROM product_notes WHERE id = ?1", rusqlite::params![note_id]).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM product_notes WHERE id = ?1", rusqlite::params![note_id], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_clients_crud() {
+        let conn = setup_db();
+        conn.execute("INSERT INTO clients (name, email, phone) VALUES ('John Doe', 'john@test.com', '555-0100')", []).unwrap();
+        let cid = conn.last_insert_rowid();
+        let email: String = conn.query_row("SELECT email FROM clients WHERE id = ?1", rusqlite::params![cid], |row| row.get(0)).unwrap();
+        assert_eq!(email, "john@test.com");
+        conn.execute("DELETE FROM client_reservations WHERE client_id = ?1", rusqlite::params![cid]).ok();
+        conn.execute("DELETE FROM clients WHERE id = ?1", rusqlite::params![cid]).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM clients WHERE id = ?1", rusqlite::params![cid], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_calendar_events_crud() {
+        let conn = setup_db();
+        conn.execute(
+            "INSERT INTO calendar_events (product_id, title, event_type, event_date) VALUES (1, 'Tasting', 'tasting', '2025-01-15')",
+            [],
+        ).unwrap();
+        let eid = conn.last_insert_rowid();
+        conn.execute("UPDATE calendar_events SET is_completed = 1 WHERE id = ?1", rusqlite::params![eid]).unwrap();
+        let completed: bool = conn.query_row(
+            "SELECT is_completed FROM calendar_events WHERE id = ?1",
+            rusqlite::params![eid],
+            |row| Ok(row.get::<_, i32>(0)? != 0),
+        ).unwrap();
+        assert!(completed);
+        conn.execute("DELETE FROM calendar_events WHERE id = ?1", rusqlite::params![eid]).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM calendar_events WHERE id = ?1", rusqlite::params![eid], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_notifications_crud() {
+        let conn = setup_db();
+        conn.execute(
+            "INSERT INTO product_notifications (product_id, notification_type, message, threshold_value, is_active) VALUES (1, 'low_stock', 'Stock low', 10.0, 1)",
+            [],
+        ).unwrap();
+        let nid = conn.last_insert_rowid();
+        let msg: String = conn.query_row("SELECT message FROM product_notifications WHERE id = ?1", rusqlite::params![nid], |row| row.get(0)).unwrap();
+        assert_eq!(msg, "Stock low");
+        conn.execute("DELETE FROM product_notifications WHERE id = ?1", rusqlite::params![nid]).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM product_notifications WHERE id = ?1", rusqlite::params![nid], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_reservations_with_client() {
+        let conn = setup_db();
+        conn.execute("INSERT INTO clients (name) VALUES ('Test Client')", []).unwrap();
+        let cid = conn.last_insert_rowid();
+        let pid: i64 = conn.query_row("SELECT id FROM products LIMIT 1", [], |row| row.get(0)).unwrap();
+        conn.execute(
+            "INSERT INTO client_reservations (client_id, product_id, quantity, reserved_date, status) VALUES (?1, ?2, 3, '2025-02-01', 'reserved')",
+            rusqlite::params![cid, pid],
+        ).unwrap();
+        let rid = conn.last_insert_rowid();
+        let qty: f64 = conn.query_row("SELECT quantity FROM client_reservations WHERE id = ?1", rusqlite::params![rid], |row| row.get(0)).unwrap();
+        assert!((qty - 3.0).abs() < 0.001);
+        conn.execute("DELETE FROM client_reservations WHERE id = ?1", rusqlite::params![rid]).unwrap();
+        conn.execute("DELETE FROM clients WHERE id = ?1", rusqlite::params![cid]).unwrap();
+    }
+
+    #[test]
+    fn test_unique_sku_constraint() {
+        let conn = setup_db();
+        let result = conn.execute(
+            "INSERT INTO products (category_id, name, sku, base_unit_name) VALUES (1, 'Duplicate SKU', 'WINE-R-001', 'bottle')",
+            [],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unique_category_name() {
+        let conn = setup_db();
+        let result = conn.execute(
+            "INSERT INTO categories (name) VALUES ('Red Wine')",
+            [],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_preferences_path_format() {
+        let home = std::env::var("HOME").unwrap();
+        let expected = std::path::PathBuf::from(&home).join(".dbreader-state.json");
+        assert_eq!(prefs_path().unwrap(), expected);
+    }
+
+    #[test]
+    fn test_strip_sql_comments_line() {
+        let result = strip_sql_comments("-- comment\nSELECT * FROM t");
+        assert_eq!(result.trim(), "SELECT * FROM t");
+    }
+
+    #[test]
+    fn test_strip_sql_comments_block() {
+        let result = strip_sql_comments("/* block */SELECT * FROM t");
+        assert_eq!(result.trim(), "SELECT * FROM t");
+    }
+
+    #[test]
+    fn test_strip_sql_comments_none() {
+        let result = strip_sql_comments("SELECT * FROM t");
+        assert_eq!(result.trim(), "SELECT * FROM t");
+    }
+
+    #[test]
+    fn test_strip_sql_comments_with_cte() {
+        let result = strip_sql_comments("WITH cte AS (SELECT 1) SELECT * FROM cte");
+        assert_eq!(result.trim(), "WITH cte AS (SELECT 1) SELECT * FROM cte");
+    }
+
+    #[test]
+    fn test_strip_sql_comments_mixed() {
+        let sql = "-- line\nSELECT *\n/* block */\nFROM t";
+        let result = strip_sql_comments(sql);
+        assert_eq!(result.trim(), "SELECT *\n\nFROM t");
+    }
+
+    #[test]
+    fn test_is_valid_table_name_valid() {
+        assert!(is_valid_table_name("products"));
+        assert!(is_valid_table_name("inventory_logs"));
+    }
+
+    #[test]
+    fn test_is_valid_table_name_invalid() {
+        assert!(!is_valid_table_name(""));
+        assert!(!is_valid_table_name("products; DROP TABLE"));
+    }
+
+    #[test]
+    fn test_safe_quote() {
+        assert_eq!(safe_quote("products"), "\"products\"");
+        assert_eq!(safe_quote("table\"name"), "\"table\"\"name\"");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(DbState {
-            conn: Mutex::new(None),
-            path: Mutex::new(None),
+            inner: Mutex::new(InnerState {
+                conn: None,
+                path: None,
+            }),
         })
         .invoke_handler(tauri::generate_handler![
             open_database,

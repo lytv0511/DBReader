@@ -130,7 +130,7 @@ export default function Dashboard() {
   }, [fetchData]);
 
   const totalProducts = stockLevels.length;
-  const totalStock = stockLevels.reduce((sum, s) => sum + (s.current_stock > 0 ? s.current_stock : 0), 0);
+  const totalStock = stockLevels.reduce((sum, s) => sum + s.current_stock, 0);
   const alertCount = lowStockItems.length;
 
   const txColor: Record<string, string> = {

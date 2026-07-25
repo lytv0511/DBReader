@@ -44,6 +44,12 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
 
   useEffect(() => {
     fetchNotes();
+    setNewTitle('');
+    setNewBody('');
+    setNewPinned(false);
+    setShowNewForm(false);
+    setExpandedId(null);
+    setError(null);
   }, [productId]);
 
   const handleExpand = (note: Note) => {

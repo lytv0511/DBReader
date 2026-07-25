@@ -158,17 +158,17 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-bg-primary text-text-primary">
       {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary shrink-0">
-        <div className="flex items-center gap-2">
+      <header className="flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary shrink-0 min-w-0">
+        <div className="flex items-center gap-2 shrink-0">
           <Database size={18} className="text-accent" />
           <h1 className="text-sm font-bold tracking-tight">DBReader</h1>
         </div>
 
-        <div className="h-4 w-px bg-border mx-1" />
+        <div className="h-4 w-px bg-border mx-1 shrink-0" />
 
         <button
           onClick={handleOpenFile}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-primary transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-primary transition-colors shrink-0"
         >
           <FolderOpen size={12} />
           Open DB
@@ -176,15 +176,15 @@ export default function App() {
 
         <button
           onClick={handleCreateNew}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-md text-xs text-accent transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-md text-xs text-accent transition-colors shrink-0"
         >
           <Plus size={12} />
           New Inventory DB
         </button>
 
         {isConnected && (
-          <>
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-success/10 border border-success/20 rounded-md text-xs text-success">
+          <div className="flex-1 flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-success/10 border border-success/20 rounded-md text-xs text-success shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
               {fileName}
               <button onClick={handleClose} className="ml-1 hover:text-error transition-colors">
@@ -192,9 +192,7 @@ export default function App() {
               </button>
             </div>
 
-            <div className="h-4 w-px bg-border mx-1" />
-
-            <div className="flex items-center bg-bg-tertiary border border-border rounded-md overflow-hidden">
+            <div className="flex items-center bg-bg-tertiary border border-border rounded-md overflow-hidden shrink-0">
               <button
                 onClick={() => setViewMode('canvas')}
                 className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors ${
@@ -215,14 +213,12 @@ export default function App() {
               </button>
             </div>
 
-            <div className="h-4 w-px bg-border mx-1" />
-
-            <div className="flex items-center bg-bg-tertiary border border-border rounded-md overflow-hidden">
+            <div className="flex items-center bg-bg-tertiary border border-border rounded-md overflow-x-auto">
               {INVENTORY_TABS.map((tab) => (
                 <button
                   key={tab.mode}
                   onClick={() => setViewMode(tab.mode)}
-                  className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs whitespace-nowrap transition-colors ${
                     viewMode === tab.mode ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
@@ -232,21 +228,19 @@ export default function App() {
               ))}
             </div>
 
-            <div className="h-4 w-px bg-border mx-1" />
-
             <button
               onClick={handleSavePreset}
-              className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
+              className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors shrink-0"
             >
               <Save size={10} /> Save
             </button>
             <button
               onClick={handleLoadPreset}
-              className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
+              className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors shrink-0"
             >
               <FolderOpenIcon size={10} /> Load
             </button>
-          </>
+          </div>
         )}
       </header>
 
@@ -287,7 +281,7 @@ export default function App() {
         )}
 
         {/* Center area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden relative">
           {viewMode === 'canvas' && (
             <div className="flex-1 overflow-hidden">
               <Canvas isConnected={isConnected} />

@@ -46,7 +46,7 @@ export default function ProductCalendar({ productId }: { productId: number }) {
         event_date: r[3] as string, end_date: r[4] as string | null,
         quantity: r[5] as number | null, notes: r[6] as string | null, is_completed: !!r[7],
       })));
-    } catch { /* ignore */ }
+    } catch (e) { console.error('Failed to load calendar events:', e); }
   }, [productId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -72,16 +72,16 @@ export default function ProductCalendar({ productId }: { productId: number }) {
       setShowForm(false);
       setFormTitle(''); setFormNotes(''); setFormQty(''); setFormEndDate('');
       await fetchData();
-    } catch { /* ignore */ }
+    } catch (e) { console.error('Failed to save calendar event:', e); }
   };
 
   const handleToggle = async (event: CalEvent) => {
-    try { await toggleCalendarEvent(event.id, !event.is_completed); await fetchData(); } catch { /* ignore */ }
+    try { await toggleCalendarEvent(event.id, !event.is_completed); await fetchData(); } catch (e) { console.error('Failed to toggle event:', e); }
   };
 
   const handleDelete = async (id: number) => {
     if (!confirm('Delete this event?')) return;
-    try { await deleteCalendarEvent(id); await fetchData(); } catch { /* ignore */ }
+    try { await deleteCalendarEvent(id); await fetchData(); } catch (e) { console.error('Failed to delete event:', e); }
   };
 
   const calendarCells: React.ReactNode[] = [];

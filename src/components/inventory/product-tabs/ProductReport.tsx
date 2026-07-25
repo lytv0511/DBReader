@@ -23,7 +23,11 @@ export default function ProductReport({ productId }: { productId: number }) {
     setLoading(true);
     try {
       const result = await getProductReportData(productId);
-      setData(result as unknown as ReportData);
+      if (result && typeof result === 'object' && 'product' in result && 'history' in result) {
+        setData(result as unknown as ReportData);
+      } else {
+        setData(null);
+      }
     } catch { /* ignore */ }
     setLoading(false);
   }, [productId]);

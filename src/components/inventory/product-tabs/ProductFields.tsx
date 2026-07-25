@@ -33,7 +33,7 @@ interface ProductFieldsProps {
   categoryId: number | null;
 }
 
-const ATTRIBUTE_TYPES = ["text", "number", "boolean", "date", "url"] as const;
+const ATTRIBUTE_TYPES = ["string", "number", "boolean", "date", "url"] as const;
 
 export default function ProductFields({
   productId,
@@ -45,9 +45,9 @@ export default function ProductFields({
   const [editForm, setEditForm] = useState({
     key: "",
     value: "",
-    type: "text",
+    type: "string",
   });
-  const [newField, setNewField] = useState({ key: "", value: "", type: "text" });
+  const [newField, setNewField] = useState({ key: "", value: "", type: "string" });
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -112,7 +112,7 @@ export default function ProductFields({
 
   const cancelEdit = () => {
     setEditingId(null);
-    setEditForm({ key: "", value: "", type: "text" });
+    setEditForm({ key: "", value: "", type: "string" });
   };
 
   const saveEdit = async () => {

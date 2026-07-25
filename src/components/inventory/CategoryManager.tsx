@@ -145,7 +145,7 @@ export default function CategoryManager() {
         tplFormKey,
         tplFormType,
         tplFormRequired,
-        templates.length
+        Math.max(0, ...templates.map((t) => t.display_order)) + 1
       );
       setShowNewTemplate(false);
       setTplFormKey('');

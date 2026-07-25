@@ -78,11 +78,13 @@ function CanvasInner({ isConnected }: CanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [tableList, setTableList] = useState<string[]>([]);
+  const [queryTrigger, setQueryTrigger] = useState(0);
 
   // Stable refs for handlers so node data injection doesn't cause re-render loops
   const handleTableChangeRef = useRef<(table: string) => void>(() => {});
   const handleFilterChangeRef = useRef<(column: string, op: string, value: string) => void>(() => {});
   const handleCustomSqlChangeRef = useRef<(sql: string) => void>(() => {});
+  const queryParamsRef = useRef({ selectedTable: '', filterColumn: '', filterOp: '=', filterValue: '', customSql: '' });
 
   useEffect(() => {
     if (!isConnected) return;
@@ -106,6 +108,7 @@ function CanvasInner({ isConnected }: CanvasProps) {
   // Stable handler implementations — stored in refs, never trigger re-renders
   handleTableChangeRef.current = async (table: string) => {
     const columns = await getTableColumns(table);
+    queryParamsRef.current = { ...queryParamsRef.current, selectedTable: table };
     setNodes((nds) =>
       nds.map((n) => {
         if (n.id === 'table-1') return { ...n, data: { ...n.data, selectedTable: table, tables: tableList, columns } };
@@ -114,24 +117,29 @@ function CanvasInner({ isConnected }: CanvasProps) {
         return n;
       })
     );
+    setQueryTrigger((v) => v + 1);
   };
 
   handleFilterChangeRef.current = (column: string, op: string, value: string) => {
+    queryParamsRef.current = { ...queryParamsRef.current, filterColumn: column, filterOp: op, filterValue: value, customSql: '' };
     setNodes((nds) =>
       nds.map((n) => {
         if (n.id === 'filter-1') return { ...n, data: { ...n.data, filterColumn: column, filterOp: op, filterValue: value, customSql: '' } };
         return n;
       })
     );
+    setQueryTrigger((v) => v + 1);
   };
 
   handleCustomSqlChangeRef.current = (sql: string) => {
+    queryParamsRef.current = { ...queryParamsRef.current, customSql: sql };
     setNodes((nds) =>
       nds.map((n) => {
         if (n.id === 'filter-1') return { ...n, data: { ...n.data, customSql: sql } };
         return n;
       })
     );
+    setQueryTrigger((v) => v + 1);
   };
 
   // Inject stable refs into node data ONCE (initial + tableList change)
@@ -161,21 +169,12 @@ function CanvasInner({ isConnected }: CanvasProps) {
     const hasConnection = edges.some((e) => e.target === 'output-1' && e.source === 'filter-1');
     if (!hasConnection) return;
 
-    const tableNode = nodes.find((n) => n.id === 'table-1');
-    const filterNode = nodes.find((n) => n.id === 'filter-1');
-    if (!tableNode || !filterNode) return;
-
-    const selectedTable = tableNode.data.selectedTable as string;
+    const { selectedTable, filterColumn, filterOp, filterValue, customSql } = queryParamsRef.current;
     if (!selectedTable) return;
 
-    const filterData = filterNode.data;
     let query = `SELECT * FROM "${selectedTable}"`;
 
-    const customSql = filterData.customSql as string;
-    const filterColumn = filterData.filterColumn as string;
-    const filterOp = filterData.filterOp as string;
-    const filterValue = filterData.filterValue as string;
-
+    const esc = (s: string) => s.replace(/'/g, "''");
     if (customSql?.trim()) {
       query += ` WHERE ${customSql.trim()}`;
     } else if (filterColumn) {
@@ -184,11 +183,11 @@ function CanvasInner({ isConnected }: CanvasProps) {
       } else if (filterOp === 'IN') {
         query += ` WHERE "${filterColumn}" IN (${filterValue})`;
       } else if (filterOp === 'LIKE') {
-        query += ` WHERE "${filterColumn}" LIKE '%${filterValue}%'`;
+        query += ` WHERE "${filterColumn}" LIKE '%${esc(filterValue)}%'`;
       } else if (filterOp === 'NOT LIKE') {
-        query += ` WHERE "${filterColumn}" NOT LIKE '%${filterValue}%'`;
+        query += ` WHERE "${filterColumn}" NOT LIKE '%${esc(filterValue)}%'`;
       } else {
-        query += ` WHERE "${filterColumn}" ${filterOp} '${filterValue}'`;
+        query += ` WHERE "${filterColumn}" ${filterOp} '${esc(filterValue)}'`;
       }
     }
 
@@ -218,10 +217,12 @@ function CanvasInner({ isConnected }: CanvasProps) {
     }, 400);
 
     return () => clearTimeout(timeout);
-  }, [nodes, edges, setNodes]);
+  }, [edges, queryTrigger, setNodes]);
 
   const handleLoadPreset = useCallback(
-    (preset: PresetData) => {
+    async (preset: PresetData) => {
+      const tables = await getTables();
+      setTableList(tables);
       const nodesWithHandlers = (preset.nodes as Node[]).map((n) => {
         if (n.id === 'table-1') {
           return { ...n, data: { ...n.data, onTableChange: (t: string) => handleTableChangeRef.current(t) } };

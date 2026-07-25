@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { Filter } from 'lucide-react';
 
@@ -18,6 +18,12 @@ function FilterNode({ data }: NodeProps) {
   const { filterColumn, filterOp, filterValue, customSql, columns, onFilterChange, onCustomSqlChange } =
     data as FilterNodeData;
   const [useCustom, setUseCustom] = useState(!filterColumn && !!customSql);
+  const colRef = useRef<HTMLSelectElement>(null);
+  const opRef = useRef<HTMLSelectElement>(null);
+
+  const stopAll = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  };
 
   return (
     <div className="bg-bg-secondary border border-border rounded-lg shadow-lg min-w-[220px]">
@@ -30,6 +36,7 @@ function FilterNode({ data }: NodeProps) {
         <div className="flex gap-1 mb-2">
           <button
             onClick={() => setUseCustom(false)}
+            onPointerDown={stopAll}
             className={`flex-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
               !useCustom ? 'bg-accent text-white' : 'bg-bg-primary text-text-secondary hover:bg-bg-hover'
             }`}
@@ -38,6 +45,7 @@ function FilterNode({ data }: NodeProps) {
           </button>
           <button
             onClick={() => setUseCustom(true)}
+            onPointerDown={stopAll}
             className={`flex-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
               useCustom ? 'bg-accent text-white' : 'bg-bg-primary text-text-secondary hover:bg-bg-hover'
             }`}
@@ -49,9 +57,15 @@ function FilterNode({ data }: NodeProps) {
         {!useCustom ? (
           <div className="flex flex-col gap-2">
             <select
+              ref={colRef}
               value={filterColumn || ''}
-              onChange={(e) => onFilterChange?.(e.target.value, filterOp || '=', filterValue || '')}
-              className="w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-border-focus"
+              onChange={(e) => { colRef.current?.blur(); onFilterChange?.(e.target.value, filterOp || '=', filterValue || ''); }}
+              onPointerDown={stopAll}
+              onPointerUp={stopAll}
+              onMouseDown={stopAll}
+              onMouseUp={stopAll}
+              onClick={stopAll}
+              className="nodrag w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-border-focus"
             >
               <option value="">Column...</option>
               {columns.map((c) => (
@@ -60,11 +74,16 @@ function FilterNode({ data }: NodeProps) {
                 </option>
               ))}
             </select>
-
             <select
+              ref={opRef}
               value={filterOp || '='}
-              onChange={(e) => onFilterChange?.(filterColumn || '', e.target.value, filterValue || '')}
-              className="w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-border-focus"
+              onChange={(e) => { opRef.current?.blur(); onFilterChange?.(filterColumn || '', e.target.value, filterValue || ''); }}
+              onPointerDown={stopAll}
+              onPointerUp={stopAll}
+              onMouseDown={stopAll}
+              onMouseUp={stopAll}
+              onClick={stopAll}
+              className="nodrag w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-border-focus"
             >
               {OPERATORS.map((op) => (
                 <option key={op} value={op}>
@@ -78,6 +97,7 @@ function FilterNode({ data }: NodeProps) {
                 type="text"
                 value={filterValue || ''}
                 onChange={(e) => onFilterChange?.(filterColumn || '', filterOp || '=', e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
                 placeholder="Value..."
                 className="w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-border-focus"
               />
@@ -87,6 +107,7 @@ function FilterNode({ data }: NodeProps) {
           <textarea
             value={customSql || ''}
             onChange={(e) => onCustomSqlChange?.(e.target.value)}
+            onPointerDown={(e) => e.stopPropagation()}
             placeholder="WHERE column = 'value'"
             spellCheck={false}
             className="w-full h-20 p-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary resize-none focus:outline-none focus:border-border-focus"

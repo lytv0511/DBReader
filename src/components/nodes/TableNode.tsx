@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useRef } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { Table } from 'lucide-react';
 import type { ColumnInfo } from '../../types';
@@ -12,6 +12,11 @@ export interface TableNodeData {
 
 function TableNode({ data }: NodeProps) {
   const { selectedTable, tables, columns, onTableChange } = data as TableNodeData;
+  const selectRef = useRef<HTMLSelectElement>(null);
+
+  const stopAll = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  };
 
   return (
     <div className="bg-bg-secondary border border-border rounded-lg shadow-lg min-w-[200px]">
@@ -22,9 +27,15 @@ function TableNode({ data }: NodeProps) {
 
       <div className="p-3">
         <select
+          ref={selectRef}
           value={selectedTable || ''}
-          onChange={(e) => onTableChange?.(e.target.value)}
-          className="w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-border-focus"
+          onChange={(e) => { selectRef.current?.blur(); onTableChange?.(e.target.value); }}
+          onPointerDown={stopAll}
+          onPointerUp={stopAll}
+          onMouseDown={stopAll}
+          onMouseUp={stopAll}
+          onClick={stopAll}
+          className="nodrag w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-border-focus"
         >
           <option value="">Select a table...</option>
           {tables.map((t) => (
