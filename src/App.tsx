@@ -18,6 +18,8 @@ import {
   Grid3X3,
   Undo2,
   Tag,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 import Sidebar from './components/Sidebar';
@@ -60,6 +62,17 @@ export default function App() {
   const [currentSql, setCurrentSql] = useState('SELECT * FROM ');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [initializing, setInitializing] = useState(true);
+  const [lightMode, setLightMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') === 'light';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', lightMode);
+    localStorage.setItem('theme', lightMode ? 'light' : 'dark');
+  }, [lightMode]);
 
   useEffect(() => {
     loadPreferences()
@@ -180,6 +193,14 @@ export default function App() {
         >
           <Plus size={12} />
           New Inventory DB
+        </button>
+
+        <button
+          onClick={() => setLightMode(p => !p)}
+          className="flex items-center justify-center w-7 h-7 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-text-secondary hover:text-text-primary transition-colors shrink-0"
+          title={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
+        >
+          {lightMode ? <Moon size={12} /> : <Sun size={12} />}
         </button>
 
         {isConnected && (

@@ -1,19 +1,51 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg-primary: #0f1117;
-  --color-bg-secondary: #1a1d27;
-  --color-bg-tertiary: #242835;
-  --color-bg-hover: #2d3242;
-  --color-border: #363b4e;
-  --color-border-focus: #5b6abf;
-  --color-text-primary: #e4e6ef;
-  --color-text-secondary: #8b8fa5;
-  --color-accent: #5b6abf;
-  --color-accent-hover: #6e7dd4;
-  --color-success: #4ade80;
-  --color-error: #f87171;
-  --color-warning: #fbbf24;
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-bg-hover: var(--bg-hover);
+  --color-border: var(--border);
+  --color-border-focus: var(--border-focus);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-success: var(--success);
+  --color-error: var(--error);
+  --color-warning: var(--warning);
+}
+
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-tertiary: #242835;
+  --bg-hover: #2d3242;
+  --border: #363b4e;
+  --border-focus: #5b6abf;
+  --text-primary: #e4e6ef;
+  --text-secondary: #8b8fa5;
+  --accent: #5b6abf;
+  --accent-hover: #6e7dd4;
+  --success: #4ade80;
+  --error: #f87171;
+  --warning: #fbbf24;
+}
+
+:root.light {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f3f4f6;
+  --bg-tertiary: #e5e7eb;
+  --bg-hover: #d1d5db;
+  --border: #d1d5db;
+  --border-focus: #5b6abf;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --accent: #5b6abf;
+  --accent-hover: #4a58a8;
+  --success: #16a34a;
+  --error: #dc2626;
+  --warning: #d97706;
 }
 
 html, body, #root {
