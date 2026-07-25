@@ -1,0 +1,116 @@
+{
+  "name": "DBReader Demo Layout",
+  "timestamp": 1753000000000,
+  "nodes": [
+    {
+      "id": "table-1",
+      "type": "tableNode",
+      "position": { "x": 80, "y": 120 },
+      "data": {
+        "selectedTable": "products",
+        "tables": ["categories","category_attribute_templates","products","product_attributes","unit_conversions","locations","batches","inventory_logs","product_notes","clients","client_reservations","calendar_events","product_notifications"],
+        "columns": [
+          {"name":"id","data_type":"INTEGER","not_null":true,"default_value":null,"primary_key":true},
+          {"name":"category_id","data_type":"INTEGER","not_null":false,"default_value":null,"primary_key":false},
+          {"name":"name","data_type":"VARCHAR(255)","not_null":true,"default_value":null,"primary_key":false},
+          {"name":"sku","data_type":"VARCHAR(100)","not_null":false,"default_value":null,"primary_key":false},
+          {"name":"base_unit_name","data_type":"VARCHAR(50)","not_null":true,"default_value":"'unit'","primary_key":false},
+          {"name":"reorder_threshold","data_type":"NUMERIC(10, 2)","not_null":false,"default_value":"0","primary_key":false},
+          {"name":"created_at","data_type":"TIMESTAMP","not_null":false,"default_value":"CURRENT_TIMESTAMP","primary_key":false}
+        ]
+      }
+    },
+    {
+      "id": "table-2",
+      "type": "tableNode",
+      "position": { "x": 420, "y": 40 },
+      "data": {
+        "selectedTable": "batches",
+        "tables": ["categories","category_attribute_templates","products","product_attributes","unit_conversions","locations","batches","inventory_logs","product_notes","clients","client_reservations","calendar_events","product_notifications"],
+        "columns": [
+          {"name":"id","data_type":"INTEGER","not_null":true,"default_value":null,"primary_key":true},
+          {"name":"product_id","data_type":"INTEGER","not_null":true,"default_value":null,"primary_key":false},
+          {"name":"batch_number","data_type":"VARCHAR(100)","not_null":false,"default_value":null,"primary_key":false},
+          {"name":"supplier_name","data_type":"VARCHAR(255)","not_null":false,"default_value":null,"primary_key":false},
+          {"name":"unit_cost_price","data_type":"NUMERIC(12, 2)","not_null":true,"default_value":null,"primary_key":false},
+          {"name":"purchase_date","data_type":"DATE","not_null":true,"default_value":null,"primary_key":false},
+          {"name":"status","data_type":"VARCHAR(30)","not_null":false,"default_value":"'in_inventory'","primary_key":false},
+          {"name":"notes","data_type":"TEXT","not_null":false,"default_value":null,"primary_key":false}
+        ]
+      }
+    },
+    {
+      "id": "table-3",
+      "type": "tableNode",
+      "position": { "x": 420, "y": 360 },
+      "data": {
+        "selectedTable": "inventory_logs",
+        "tables": ["categories","category_attribute_templates","products","product_attributes","unit_conversions","locations","batches","inventory_logs","product_notes","clients","client_reservations","calendar_events","product_notifications"],
+        "columns": [
+          {"name":"id","data_type":"INTEGER","not_null":true,"default_value":null,"primary_key":true},
+          {"name":"batch_id","data_type":"INTEGER","not_null":true,"default_value":null,"primary_key":false},
+          {"name":"location_id","data_type":"INTEGER","not_null":false,"default_value":null,"primary_key":false},
+          {"name":"quantity_change","data_type":"NUMERIC(10, 2)","not_null":true,"default_value":null,"primary_key":false},
+          {"name":"transaction_type","data_type":"VARCHAR(50)","not_null":true,"default_value":null,"primary_key":false},
+          {"name":"notes","data_type":"TEXT","not_null":false,"default_value":null,"primary_key":false},
+          {"name":"created_at","data_type":"TIMESTAMP","not_null":false,"default_value":"CURRENT_TIMESTAMP","primary_key":false}
+        ]
+      }
+    },
+    {
+      "id": "filter-1",
+      "type": "filterNode",
+      "position": { "x": 780, "y": 120 },
+      "data": {
+        "filterColumn": "",
+        "filterOp": "=",
+        "filterValue": "",
+        "customSql": "quantity_change > 0",
+        "columns": ["id","batch_id","location_id","quantity_change","transaction_type","notes","created_at"]
+      }
+    },
+    {
+      "id": "output-1",
+      "type": "outputNode",
+      "position": { "x": 1050, "y": 180 },
+      "data": {
+        "columns": ["product", "sku", "stock"],
+        "rows": [
+          ["Penfolds Grange 2018", "WIN-001", 24],
+          ["Château Margaux 2015", "WIN-002", 18],
+          ["Cloudy Bay Sauvignon Blanc", "WIN-004", 30],
+          ["Veuve Clicquot Brut", "WIN-007", 20],
+          ["Hendrick's Gin", "SPI-001", 14]
+        ],
+        "loading": false,
+        "error": null
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-products-batches",
+      "source": "table-1",
+      "target": "table-2",
+      "label": "products.id = batches.product_id"
+    },
+    {
+      "id": "e-batches-logs",
+      "source": "table-2",
+      "target": "table-3",
+      "label": "batches.id = inventory_logs.batch_id"
+    },
+    {
+      "id": "e-logs-filter",
+      "source": "table-3",
+      "target": "filter-1",
+      "label": "quantity_change"
+    },
+    {
+      "id": "e-filter-output",
+      "source": "filter-1",
+      "target": "output-1",
+      "label": "filtered rows"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "ignorePatterns": [
+    "src-tauri/target/**",
+    "dist/**",
+    "node_modules/**"
+  ]
+}
