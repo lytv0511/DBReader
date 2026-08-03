@@ -1,6 +1,7 @@
 import { memo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { Filter, X } from 'lucide-react';
+import { useI18n } from '../../lib/language';
 
 export interface FilterNodeData {
   filterColumn: string;
@@ -16,6 +17,7 @@ export interface FilterNodeData {
 const OPERATORS = ['=', '!=', '>', '<', '>=', '<=', 'LIKE', 'NOT LIKE', 'IN', 'IS NULL', 'IS NOT NULL'];
 
 function FilterNode({ id, data }: NodeProps) {
+  const { t } = useI18n();
   const { filterColumn, filterOp, filterValue, customSql, columns, onFilterChange, onCustomSqlChange, onDelete } =
     data as FilterNodeData;
   const [useCustom, setUseCustom] = useState(!filterColumn && !!customSql);
@@ -30,7 +32,7 @@ function FilterNode({ id, data }: NodeProps) {
     <div className="bg-bg-secondary border border-border rounded-lg shadow-lg min-w-[220px]">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-tertiary rounded-t-lg">
         <Filter size={14} className="text-warning" />
-        <span className="text-xs font-semibold text-text-primary">Filter</span>
+        <span className="text-xs font-semibold text-text-primary">{t('node.filter.title')}</span>
         {onDelete && (
           <button
             onClick={() => onDelete(id)}
@@ -51,7 +53,7 @@ function FilterNode({ id, data }: NodeProps) {
               !useCustom ? 'bg-accent text-white' : 'bg-bg-primary text-text-secondary hover:bg-bg-hover'
             }`}
           >
-            GUI
+            {t('node.filter.gui')}
           </button>
           <button
             onClick={() => setUseCustom(true)}
@@ -60,7 +62,7 @@ function FilterNode({ id, data }: NodeProps) {
               useCustom ? 'bg-accent text-white' : 'bg-bg-primary text-text-secondary hover:bg-bg-hover'
             }`}
           >
-            SQL
+            {t('node.filter.sql')}
           </button>
         </div>
 
@@ -77,7 +79,7 @@ function FilterNode({ id, data }: NodeProps) {
               onClick={stopAll}
               className="nodrag w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-border-focus"
             >
-              <option value="">Column...</option>
+              <option value="">{t('node.filter.columnPlaceholder')}</option>
               {columns.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -108,7 +110,7 @@ function FilterNode({ id, data }: NodeProps) {
                 value={filterValue || ''}
                 onChange={(e) => onFilterChange?.(filterColumn || '', filterOp || '=', e.target.value)}
                 onPointerDown={(e) => e.stopPropagation()}
-                placeholder="Value..."
+                placeholder={t('node.filter.valuePlaceholder')}
                 className="w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-border-focus"
               />
             )}
@@ -118,7 +120,7 @@ function FilterNode({ id, data }: NodeProps) {
             value={customSql || ''}
             onChange={(e) => onCustomSqlChange?.(e.target.value)}
             onPointerDown={(e) => e.stopPropagation()}
-            placeholder="WHERE column = 'value'"
+            placeholder={t('node.filter.customSql')}
             spellCheck={false}
             className="w-full h-20 p-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary resize-none focus:outline-none focus:border-border-focus"
           />

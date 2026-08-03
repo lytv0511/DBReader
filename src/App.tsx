@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { Fragment, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import {
   Database,
@@ -18,14 +18,16 @@ import {
   Grid3X3,
   Undo2,
   Tag,
-  Sun,
-  Moon,
+  Settings as SettingsIcon,
+  HelpCircle,
 } from 'lucide-react';
 
 import Sidebar from './components/Sidebar';
 import QueryEditor from './components/QueryEditor';
 import ResultsGrid from './components/ResultsGrid';
 import Canvas from './components/Canvas';
+import SettingsView from './components/SettingsView';
+import HelpChat from './components/HelpChat';
 import Dashboard from './components/inventory/Dashboard';
 import ProductManager from './components/inventory/ProductManager';
 import BatchManager from './components/inventory/BatchManager';
@@ -38,19 +40,30 @@ import UseHistory from './components/inventory/UseHistory';
 import CategoryManager from './components/inventory/CategoryManager';
 import { openDatabase, closeDatabase, createNewDatabase, migrateSchema, savePreferences, loadPreferences } from './lib/db';
 import { savePreset, loadPreset } from './lib/presets';
-import type { QueryResult, PresetData, ViewMode } from './types';
+import { t as translate, resolveLang } from './lib/i18n';
+import { I18nProvider } from './lib/language';
+import type { QueryResult, PresetData, ViewMode, AppPreferences } from './types';
 import type { Product } from './components/inventory/ProductGallery';
 
-const INVENTORY_TABS: { mode: ViewMode; label: string; icon: React.ReactNode }[] = [
-  { mode: 'quickuse', label: 'Quick Use', icon: <Search size={12} /> },
-  { mode: 'gallery', label: 'Gallery', icon: <Grid3X3 size={12} /> },
-  { mode: 'categories', label: 'Categories', icon: <Tag size={12} /> },
-  { mode: 'adjust', label: 'Adjust', icon: <RefreshCw size={12} /> },
-  { mode: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={12} /> },
-  { mode: 'used', label: 'Used', icon: <Undo2 size={12} /> },
-  { mode: 'products', label: 'Products', icon: <Package size={12} /> },
-  { mode: 'batches', label: 'Batches', icon: <Boxes size={12} /> },
-  { mode: 'logs', label: 'Logs', icon: <ScrollText size={12} /> },
+const DEFAULT_PREFS: AppPreferences = {
+  lastDbPath: null,
+  theme: 'dark',
+  language: 'system',
+  openOnStartup: true,
+  defaultQueryLimit: 100,
+  inventoryTabOrder: null,
+};
+
+const INVENTORY_TABS: { mode: ViewMode; labelKey: string; icon: React.ReactNode }[] = [
+  { mode: 'quickuse', labelKey: 'tab.quickuse', icon: <Search size={12} /> },
+  { mode: 'gallery', labelKey: 'tab.gallery', icon: <Grid3X3 size={12} /> },
+  { mode: 'categories', labelKey: 'tab.categories', icon: <Tag size={12} /> },
+  { mode: 'adjust', labelKey: 'tab.adjust', icon: <RefreshCw size={12} /> },
+  { mode: 'dashboard', labelKey: 'tab.dashboard', icon: <LayoutDashboard size={12} /> },
+  { mode: 'used', labelKey: 'tab.used', icon: <Undo2 size={12} /> },
+  { mode: 'products', labelKey: 'tab.products', icon: <Package size={12} /> },
+  { mode: 'batches', labelKey: 'tab.batches', icon: <Boxes size={12} /> },
+  { mode: 'logs', labelKey: 'tab.logs', icon: <ScrollText size={12} /> },
 ];
 
 export default function App() {
@@ -62,34 +75,131 @@ export default function App() {
   const [currentSql, setCurrentSql] = useState('SELECT * FROM ');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [initializing, setInitializing] = useState(true);
-  const [lightMode, setLightMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('theme') === 'light';
+  const [prefs, setPrefs] = useState<AppPreferences>(DEFAULT_PREFS);
+  const prefsLoadedRef = useRef(false);
+  const [dragTab, setDragTab] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const suppressClickRef = useRef(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  const orderedTabs = useMemo(() => {
+    const order = prefs.inventoryTabOrder ?? INVENTORY_TABS.map((t) => t.mode);
+    const byMode = new Map<string, (typeof INVENTORY_TABS)[number]>(INVENTORY_TABS.map((t) => [t.mode, t]));
+    const seen = new Set<string>();
+    const result: typeof INVENTORY_TABS = [];
+    for (const m of order) {
+      const tab = byMode.get(m);
+      if (tab && !seen.has(m)) {
+        result.push(tab);
+        seen.add(m);
+      }
     }
-    return false;
-  });
+    for (const tab of INVENTORY_TABS) {
+      if (!seen.has(tab.mode)) result.push(tab);
+    }
+    return result;
+  }, [prefs.inventoryTabOrder]);
+
+  const getDropIndex = (clientX: number) => {
+    let idx = orderedTabs.length;
+    for (let i = 0; i < orderedTabs.length; i++) {
+      const el = tabRefs.current[i];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (clientX < r.left + r.width / 2) {
+        idx = i;
+        break;
+      }
+    }
+    return idx;
+  };
+
+  const reorderTab = (from: string, idx: number) => {
+    const order = prefs.inventoryTabOrder ?? INVENTORY_TABS.map((t) => t.mode);
+    const next = order.filter((m) => m !== from);
+    const fromOriginal = order.indexOf(from);
+    let target = idx;
+    if (fromOriginal !== -1 && fromOriginal < idx) target = Math.max(0, idx - 1);
+    next.splice(Math.min(target, next.length), 0, from);
+    setPrefs((p) => ({ ...p, inventoryTabOrder: next }));
+  };
+
+  const handleTabDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!dragTab) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const idx = getDropIndex(e.clientX);
+    if (idx !== dropIndex) setDropIndex(idx);
+  };
+
+  const handleTabDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const from = dragTab;
+    suppressClickRef.current = true;
+    setDragTab(null);
+    setDropIndex(null);
+    if (from) reorderTab(from, getDropIndex(e.clientX));
+  };
+
+  const handleTabDragEnd = () => {
+    setDragTab(null);
+    setDropIndex(null);
+  };
+
+  const lang = resolveLang(prefs.language);
+  const t = (key: string) => translate(lang, key);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('light', lightMode);
-    localStorage.setItem('theme', lightMode ? 'light' : 'dark');
-  }, [lightMode]);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const dark =
+        prefs.theme === 'dark' || (prefs.theme === 'system' && mq.matches);
+      document.documentElement.classList.toggle('light', !dark);
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [prefs.theme]);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+
+  useEffect(() => {
+    if (!prefsLoadedRef.current) return;
+    savePreferences(prefs).catch(() => {});
+  }, [prefs]);
 
   useEffect(() => {
     loadPreferences()
-      .then(async (prefs) => {
-        if (prefs.lastDbPath) {
+      .then(async (loaded) => {
+        const merged: AppPreferences = {
+          ...DEFAULT_PREFS,
+          ...loaded,
+          lastDbPath: loaded.lastDbPath ?? null,
+          theme: loaded.theme ?? DEFAULT_PREFS.theme,
+          language: loaded.language ?? DEFAULT_PREFS.language,
+          openOnStartup: loaded.openOnStartup ?? DEFAULT_PREFS.openOnStartup,
+          defaultQueryLimit: loaded.defaultQueryLimit ?? DEFAULT_PREFS.defaultQueryLimit,
+          inventoryTabOrder: loaded.inventoryTabOrder ?? null,
+        };
+        prefsLoadedRef.current = true;
+        setPrefs(merged);
+        if (merged.openOnStartup && merged.lastDbPath) {
           try {
-            await openDatabase(prefs.lastDbPath);
+            await openDatabase(merged.lastDbPath);
             await migrateSchema().catch(() => {});
             setIsConnected(true);
-            setDbPath(prefs.lastDbPath);
+            setDbPath(merged.lastDbPath);
           } catch {
-            // File may have been deleted - clear saved path
-            savePreferences(null).catch(() => {});
+            setPrefs((p) => ({ ...p, lastDbPath: null }));
           }
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        prefsLoadedRef.current = true;
+      })
       .finally(() => setInitializing(false));
   }, []);
 
@@ -111,7 +221,7 @@ export default function App() {
       await migrateSchema().catch(() => {});
       setIsConnected(true);
       setDbPath(selected);
-      savePreferences(selected).catch(() => {});
+      setPrefs((p) => ({ ...p, lastDbPath: selected }));
     } catch (err) {
       console.error('Failed to open database:', err);
     }
@@ -134,7 +244,7 @@ export default function App() {
       await createNewDatabase(path);
       setIsConnected(true);
       setDbPath(path);
-      savePreferences(path).catch(() => {});
+      setPrefs((p) => ({ ...p, lastDbPath: path }));
     } catch (err) {
       console.error('Failed to create database:', err);
     }
@@ -145,7 +255,7 @@ export default function App() {
     setIsConnected(false);
     setDbPath(null);
     setQueryResult(null);
-    savePreferences(null).catch(() => {});
+    setPrefs((p) => ({ ...p, lastDbPath: null }));
   }, []);
 
   const handleSavePreset = useCallback(async () => {
@@ -153,11 +263,11 @@ export default function App() {
     const edges = (window as unknown as Record<string, () => unknown[]>).__canvasGetEdges?.() || [];
 
     await savePreset({
-      name: 'Current Layout',
+      name: t('preset.currentLayout'),
       nodes,
       edges,
     });
-  }, []);
+  }, [t]);
 
   const handleLoadPreset = useCallback(async () => {
     const preset = await loadPreset();
@@ -169,7 +279,8 @@ export default function App() {
   const fileName = dbPath?.split(/[\\/]/).pop() || '';
 
   return (
-    <div className="h-screen flex flex-col bg-bg-primary text-text-primary">
+    <I18nProvider language={prefs.language}>
+      <div className="h-screen flex flex-col bg-bg-primary text-text-primary">
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary shrink-0 min-w-0">
         <div className="flex items-center gap-2 shrink-0">
@@ -184,7 +295,7 @@ export default function App() {
           className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-primary transition-colors shrink-0"
         >
           <FolderOpen size={12} />
-          Open DB
+          {t('app.open')}
         </button>
 
         <button
@@ -192,15 +303,25 @@ export default function App() {
           className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-md text-xs text-accent transition-colors shrink-0"
         >
           <Plus size={12} />
-          New Inventory DB
+          {t('app.new')}
         </button>
 
         <button
-          onClick={() => setLightMode(p => !p)}
-          className="flex items-center justify-center w-7 h-7 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-text-secondary hover:text-text-primary transition-colors shrink-0"
-          title={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
+          onClick={() => setViewMode(viewMode === 'settings' ? 'canvas' : 'settings')}
+          className={`flex items-center justify-center w-7 h-7 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md transition-colors shrink-0 ${
+            viewMode === 'settings' ? 'text-accent border-accent/50' : 'text-text-secondary hover:text-text-primary'
+          }`}
+          title={t('app.settings')}
         >
-          {lightMode ? <Moon size={12} /> : <Sun size={12} />}
+          <SettingsIcon size={12} />
+        </button>
+
+        <button
+          onClick={() => setHelpOpen(true)}
+          className="flex items-center justify-center w-7 h-7 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-text-secondary hover:text-text-primary transition-colors shrink-0"
+          title={t('app.help')}
+        >
+          <HelpCircle size={12} className="help-icon-anim" />
         </button>
 
         {isConnected && (
@@ -221,7 +342,7 @@ export default function App() {
                 }`}
               >
                 <Workflow size={12} />
-                Canvas
+                {t('view.canvas')}
               </button>
               <button
                 onClick={() => setViewMode('query')}
@@ -230,36 +351,62 @@ export default function App() {
                 }`}
               >
                 <Terminal size={12} />
-                Query
+                {t('view.query')}
               </button>
             </div>
 
-            <div className="flex items-center bg-bg-tertiary border border-border rounded-md overflow-x-auto">
-              {INVENTORY_TABS.map((tab) => (
-                <button
-                  key={tab.mode}
-                  onClick={() => setViewMode(tab.mode)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs whitespace-nowrap transition-colors ${
-                    viewMode === tab.mode ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  {tab.icon}
-                  {tab.label}
-                </button>
+            <div
+              className="flex items-center bg-bg-tertiary border border-border rounded-md overflow-x-auto"
+              onDragOver={handleTabDragOver}
+              onDrop={handleTabDrop}
+            >
+              {orderedTabs.map((tab, i) => (
+                <Fragment key={tab.mode}>
+                  {dragTab && dropIndex === i && (
+                    <div className="w-0.5 shrink-0 self-stretch bg-accent rounded my-1.5 transition-all" />
+                  )}
+                  <button
+                    ref={(el) => { tabRefs.current[i] = el; }}
+                    draggable
+                    onDragStart={(e) => {
+                      setDragTab(tab.mode);
+                      setDropIndex(i);
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', tab.mode);
+                    }}
+                    onDragEnd={handleTabDragEnd}
+                    onClick={() => {
+                      if (suppressClickRef.current) {
+                        suppressClickRef.current = false;
+                        return;
+                      }
+                      setViewMode(tab.mode);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs whitespace-nowrap transition-colors cursor-grab active:cursor-grabbing ${
+                      viewMode === tab.mode ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'
+                    } ${dragTab === tab.mode ? 'opacity-50' : ''}`}
+                  >
+                    {tab.icon}
+                    {t(tab.labelKey)}
+                  </button>
+                </Fragment>
               ))}
+              {dragTab && dropIndex === orderedTabs.length && (
+                <div className="w-0.5 shrink-0 self-stretch bg-accent rounded my-1.5 transition-all" />
+              )}
             </div>
 
             <button
               onClick={handleSavePreset}
               className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors shrink-0"
             >
-              <Save size={10} /> Save
+              <Save size={10} /> {t('action.save')}
             </button>
             <button
               onClick={handleLoadPreset}
               className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors shrink-0"
             >
-              <FolderOpenIcon size={10} /> Load
+              <FolderOpenIcon size={10} /> {t('action.load')}
             </button>
           </div>
         )}
@@ -272,7 +419,7 @@ export default function App() {
           <div className="w-64 border-r border-border bg-bg-secondary shrink-0 overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-border">
               <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                Schema
+                {t('sidebar.schema')}
               </span>
               <button
                 onClick={() => setSidebarOpen(false)}
@@ -284,8 +431,9 @@ export default function App() {
             <div className="flex-1 overflow-hidden">
               <Sidebar
                 isConnected={isConnected}
+                dbPath={dbPath}
                 onSelectTable={(table) => {
-                  setCurrentSql(`SELECT * FROM "${table}" LIMIT 100`);
+                  setCurrentSql(`SELECT * FROM "${table}" LIMIT ${prefs.defaultQueryLimit}`);
                 }}
               />
             </div>
@@ -303,11 +451,9 @@ export default function App() {
 
         {/* Center area */}
         <div className="flex-1 flex flex-col overflow-hidden relative">
-          {viewMode === 'canvas' && (
-            <div className="flex-1 overflow-hidden">
-              <Canvas isConnected={isConnected} />
-            </div>
-          )}
+          <div className={viewMode === 'canvas' ? 'flex-1 overflow-hidden' : 'hidden'}>
+            <Canvas isConnected={isConnected} dbPath={dbPath} />
+          </div>
           {viewMode === 'query' && (
             <>
               <div className="h-[200px] shrink-0 border-b border-border">
@@ -345,35 +491,45 @@ export default function App() {
           {viewMode === 'products' && <ProductManager />}
           {viewMode === 'batches' && <BatchManager />}
           {viewMode === 'logs' && <InventoryLog />}
+          {viewMode === 'settings' && (
+            <SettingsView
+              prefs={prefs}
+              onChange={(patch) => setPrefs((p) => ({ ...p, ...patch }))}
+              onReset={() => setPrefs((p) => ({ ...DEFAULT_PREFS, lastDbPath: p.lastDbPath }))}
+              t={t}
+            />
+          )}
         </div>
       </div>
 
-      {/* Welcome overlay */}
-      {!isConnected && viewMode === 'canvas' && !initializing && (
+      {/* Welcome overlay */}      {!isConnected && viewMode === 'canvas' && !initializing && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="text-center pointer-events-auto">
             <Database size={64} className="mx-auto mb-4 text-text-secondary/30" />
             <h2 className="text-xl font-bold text-text-primary mb-2">DBReader</h2>
             <p className="text-sm text-text-secondary mb-6">
-              A local database GUI and query visualizer
+              {t('welcome.tagline')}
             </p>
             <div className="flex items-center gap-3">
               <button
                 onClick={handleOpenFile}
                 className="px-4 py-2 bg-accent hover:bg-accent-hover rounded-lg text-sm font-medium text-white transition-colors"
               >
-                Open a Database File
+                {t('welcome.open')}
               </button>
               <button
                 onClick={handleCreateNew}
                 className="px-4 py-2 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-lg text-sm font-medium text-accent transition-colors"
               >
-                Create New Inventory DB
+                {t('welcome.create')}
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
+      </div>
+
+      <HelpChat open={helpOpen} onClose={() => setHelpOpen(false)} />
+    </I18nProvider>
   );
 }

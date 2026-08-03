@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Undo2, MessageSquare } from 'lucide-react';
 import { executeQuery, deleteInventoryLog, updateInventoryLogNotes } from '../../lib/db';
+import { useI18n } from '../../lib/language';
 
 interface UsedEntry {
   id: number;
@@ -14,6 +15,7 @@ interface UsedEntry {
 }
 
 export default function UseHistory() {
+  const { t } = useI18n();
   const [entries, setEntries] = useState<UsedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +64,7 @@ export default function UseHistory() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleUndo = async (logId: number) => {
-    if (!confirm('Undo this usage? This will restore the stock.')) return;
+    if (!confirm(t('used.confirmUndo'))) return;
     try {
       await deleteInventoryLog(logId);
       await fetchData();
@@ -90,7 +92,7 @@ export default function UseHistory() {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <RefreshCw size={20} className="animate-spin mr-2" />
-        Loading usage history...
+        {t('used.loading')}
       </div>
     );
   }
@@ -99,9 +101,9 @@ export default function UseHistory() {
     <div className="h-full flex flex-col">
       <div className="px-6 py-4 border-b border-border bg-bg-secondary flex items-center justify-between shrink-0">
         <div>
-          <h2 className="text-lg font-bold text-text-primary">Usage History</h2>
+          <h2 className="text-lg font-bold text-text-primary">{t('used.title')}</h2>
           <p className="text-xs text-text-secondary mt-0.5">
-            {entries.length} item{entries.length !== 1 ? 's' : ''} used · Undo any entry to restore stock
+            {t('used.subtitle', { count: entries.length })}
           </p>
         </div>
         <button onClick={fetchData} className="p-2 text-text-secondary hover:text-text-primary transition-colors">
@@ -112,18 +114,18 @@ export default function UseHistory() {
       <div className="flex-1 overflow-y-auto">
         {entries.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-secondary text-sm">
-            No usage records yet
+            {t('used.empty')}
           </div>
         ) : (
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-bg-secondary border-b border-border">
               <tr>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Date</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Product</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Batch</th>
-                <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">Qty</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Notes</th>
-                <th className="text-center px-4 py-2.5 text-text-secondary font-semibold">Actions</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('used.col.date')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('used.col.product')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('used.col.batch')}</th>
+                <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">{t('used.col.qty')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('used.col.notes')}</th>
+                <th className="text-center px-4 py-2.5 text-text-secondary font-semibold">{t('used.col.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -148,16 +150,16 @@ export default function UseHistory() {
                           className="flex-1 px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
                           autoFocus
                         />
-                        <button onClick={() => saveNotes(entry.id)} className="text-accent hover:text-accent-hover text-[10px]">Save</button>
-                        <button onClick={() => setEditingNotes(null)} className="text-text-secondary hover:text-text-primary text-[10px]">Cancel</button>
+                        <button onClick={() => saveNotes(entry.id)} className="text-accent hover:text-accent-hover text-[10px]">{t('common.save')}</button>
+                        <button onClick={() => setEditingNotes(null)} className="text-text-secondary hover:text-text-primary text-[10px]">{t('common.cancel')}</button>
                       </div>
                     ) : (
                       <span
                         onClick={() => startEditNotes(entry.id, entry.notes)}
                         className="cursor-pointer hover:text-text-primary transition-colors"
-                        title="Click to edit notes"
+                        title={t('used.clickToEdit')}
                       >
-                        {entry.notes || <span className="text-text-secondary/50 italic">add note...</span>}
+                        {entry.notes || <span className="text-text-secondary/50 italic">{t('used.addNote')}</span>}
                       </span>
                     )}
                   </td>
@@ -166,14 +168,14 @@ export default function UseHistory() {
                       <button
                         onClick={() => startEditNotes(entry.id, entry.notes)}
                         className="p-1.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-accent transition-colors"
-                        title="Edit notes"
+                        title={t('used.editNotes')}
                       >
                         <MessageSquare size={12} />
                       </button>
                       <button
                         onClick={() => handleUndo(entry.id)}
                         className="p-1.5 rounded hover:bg-warning/10 text-text-secondary hover:text-warning transition-colors"
-                        title="Undo usage (restore stock)"
+                        title={t('used.undoUsage')}
                       >
                         <Undo2 size={12} />
                       </button>
@@ -189,7 +191,7 @@ export default function UseHistory() {
       {error && (
         <div className="fixed bottom-4 right-4 bg-error/10 border border-error/20 text-error px-4 py-2 rounded-lg text-xs shadow-lg z-50">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 hover:underline">dismiss</button>
+          <button onClick={() => setError(null)} className="ml-2 hover:underline">{t('common.dismiss')}</button>
         </div>
       )}
     </div>

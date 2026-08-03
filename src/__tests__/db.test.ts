@@ -356,16 +356,40 @@ describe('getProductReportData', () => {
 })
 
 describe('savePreferences', () => {
-  it('should invoke with path', async () => {
+  it('should invoke with full prefs object', async () => {
     mockInvoke.mockResolvedValueOnce(undefined)
-    await savePreferences('/tmp/test.db')
-    expect(mockInvoke).toHaveBeenCalledWith('save_preferences', { lastDbPath: '/tmp/test.db' })
+    const prefs = {
+      lastDbPath: '/tmp/test.db',
+      theme: 'dark' as const,
+      language: 'en' as const,
+      openOnStartup: true,
+      defaultQueryLimit: 100,
+      inventoryTabOrder: null,
+    }
+    await savePreferences(prefs)
+    expect(mockInvoke).toHaveBeenCalledWith('save_preferences', { prefs })
   })
 
-  it('should pass null', async () => {
+  it('should pass null path', async () => {
     mockInvoke.mockResolvedValueOnce(undefined)
-    await savePreferences(null)
-    expect(mockInvoke).toHaveBeenCalledWith('save_preferences', { lastDbPath: null })
+    await savePreferences({
+      lastDbPath: null,
+      theme: 'light' as const,
+      language: 'zh-CN' as const,
+      openOnStartup: true,
+      defaultQueryLimit: 50,
+      inventoryTabOrder: null,
+    })
+    expect(mockInvoke).toHaveBeenCalledWith('save_preferences', {
+      prefs: {
+        lastDbPath: null,
+        theme: 'light',
+        language: 'zh-CN',
+        openOnStartup: true,
+        defaultQueryLimit: 50,
+        inventoryTabOrder: null,
+      },
+    })
   })
 })
 

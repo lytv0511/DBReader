@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, ChevronUp, ChevronDown, Search } from 'lucide-react';
 import { executeQuery } from '../../../lib/db';
+import { useI18n } from '../../../lib/language';
 
 interface LogEntry {
   id: number;
@@ -28,6 +29,7 @@ const TX_COLORS: Record<string, { text: string; bg: string; border: string }> = 
 };
 
 export default function ProductHistory({ productId }: ProductHistoryProps) {
+  const { t } = useI18n();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -180,7 +182,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <RefreshCw size={20} className="animate-spin mr-2" />
-        Loading history...
+        {t('phist.loading')}
       </div>
     );
   }
@@ -190,8 +192,8 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
       <div className="px-6 py-3 border-b border-border bg-bg-secondary shrink-0">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <h3 className="text-sm font-bold text-text-primary">Transaction History</h3>
-            <span className="text-[10px] text-text-secondary">{filtered.length} of {logs.length} entries</span>
+            <h3 className="text-sm font-bold text-text-primary">{t('phist.title')}</h3>
+            <span className="text-[10px] text-text-secondary">{t('phist.entriesCount', { shown: filtered.length, total: logs.length })}</span>
           </div>
           <div className="flex items-center gap-2">
             {hasFilters && (
@@ -199,7 +201,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
                 onClick={() => { setFilterType(''); setFilterDateFrom(''); setFilterDateTo(''); setFilterNotes(''); }}
                 className="text-[10px] text-error hover:text-error/80 transition-colors"
               >
-                Clear filters
+                {t('phist.clearFilters')}
               </button>
             )}
             <button
@@ -217,11 +219,11 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
             onChange={(e) => setFilterType(e.target.value)}
             className="px-2 py-1 bg-bg-primary border border-border rounded text-[10px] text-text-primary focus:outline-none focus:border-accent"
           >
-            <option value="">All Types</option>
-            <option value="PURCHASE">PURCHASE</option>
-            <option value="USAGE">USAGE</option>
-            <option value="SPOILAGE">SPOILAGE</option>
-            <option value="ADJUSTMENT">ADJUSTMENT</option>
+            <option value="">{t('phist.allTypes')}</option>
+            <option value="PURCHASE">{t('common.tx.PURCHASE')}</option>
+            <option value="USAGE">{t('common.tx.USAGE')}</option>
+            <option value="SPOILAGE">{t('common.tx.SPOILAGE')}</option>
+            <option value="ADJUSTMENT">{t('common.tx.ADJUSTMENT')}</option>
           </select>
 
           <input
@@ -230,7 +232,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
             onChange={(e) => setFilterDateFrom(e.target.value)}
             className="px-2 py-1 bg-bg-primary border border-border rounded text-[10px] text-text-primary focus:outline-none focus:border-accent"
           />
-          <span className="text-[10px] text-text-secondary">to</span>
+          <span className="text-[10px] text-text-secondary">{t('phist.to')}</span>
           <input
             type="date"
             value={filterDateTo}
@@ -243,7 +245,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
             <input
               value={filterNotes}
               onChange={(e) => setFilterNotes(e.target.value)}
-              placeholder="Search notes..."
+              placeholder={t('phist.searchNotes')}
               className="pl-6 pr-2 py-1 bg-bg-primary border border-border rounded text-[10px] text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-[160px]"
             />
           </div>
@@ -253,7 +255,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-secondary text-xs">
-            {logs.length === 0 ? 'No transaction history for this product' : 'No entries match current filters'}
+            {logs.length === 0 ? t('phist.empty') : t('phist.emptyFiltered')}
           </div>
         ) : (
           <table className="w-full text-xs">
@@ -263,37 +265,37 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
                   onClick={() => handleSort('created_at')}
                   className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
                 >
-                  <span className="inline-flex items-center gap-1">Date <SortIcon field="created_at" /></span>
+                  <span className="inline-flex items-center gap-1">{t('phist.col.date')} <SortIcon field="created_at" /></span>
                 </th>
                 <th
                   onClick={() => handleSort('transaction_type')}
                   className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
                 >
-                  <span className="inline-flex items-center gap-1">Type <SortIcon field="transaction_type" /></span>
+                  <span className="inline-flex items-center gap-1">{t('phist.col.type')} <SortIcon field="transaction_type" /></span>
                 </th>
                 <th
                   onClick={() => handleSort('batch_number')}
                   className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
                 >
-                  <span className="inline-flex items-center gap-1">Batch# <SortIcon field="batch_number" /></span>
+                  <span className="inline-flex items-center gap-1">{t('phist.col.batch')} <SortIcon field="batch_number" /></span>
                 </th>
                 <th
                   onClick={() => handleSort('quantity_change')}
                   className={`text-right px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
                 >
-                  <span className="inline-flex items-center gap-1 justify-end">Qty <SortIcon field="quantity_change" /></span>
+                  <span className="inline-flex items-center gap-1 justify-end">{t('phist.col.qty')} <SortIcon field="quantity_change" /></span>
                 </th>
                 <th
                   onClick={() => handleSort('notes')}
                   className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
                 >
-                  <span className="inline-flex items-center gap-1">Notes <SortIcon field="notes" /></span>
+                  <span className="inline-flex items-center gap-1">{t('phist.col.notes')} <SortIcon field="notes" /></span>
                 </th>
                 <th
                   onClick={() => handleSort('location_name')}
                   className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
                 >
-                  <span className="inline-flex items-center gap-1">Location <SortIcon field="location_name" /></span>
+                  <span className="inline-flex items-center gap-1">{t('phist.col.location')} <SortIcon field="location_name" /></span>
                 </th>
               </tr>
             </thead>
@@ -324,7 +326,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
             </tbody>
             <tfoot className="border-t border-border bg-bg-tertiary">
               <tr className="text-[10px] font-semibold">
-                <td className="px-4 py-2.5 text-text-secondary" colSpan={3}>Summary</td>
+                <td className="px-4 py-2.5 text-text-secondary" colSpan={3}>{t('phist.summary')}</td>
                 <td className="px-4 py-2.5 text-right space-x-3">
                   <span className="text-success">+{summary.totalPurchased}</span>
                   <span className="text-warning">{summary.totalUsed}</span>
@@ -332,10 +334,10 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
                   <span className="text-text-primary">= {summary.net}</span>
                 </td>
                 <td className="px-4 py-2.5 text-text-secondary">
-                  <span className="text-success">Purchased</span>{' '}
-                  <span className="text-warning">Used</span>{' '}
-                  <span className="text-error">Spoiled</span>{' '}
-                  <span className="text-text-primary">Net</span>
+                  <span className="text-success">{t('phist.purchased')}</span>{' '}
+                  <span className="text-warning">{t('phist.used')}</span>{' '}
+                  <span className="text-error">{t('phist.spoiled')}</span>{' '}
+                  <span className="text-text-primary">{t('phist.net')}</span>
                 </td>
                 <td />
               </tr>
@@ -347,7 +349,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
       {error && (
         <div className="fixed bottom-4 right-4 bg-error/10 border border-error/20 text-error px-4 py-2 rounded-lg text-xs shadow-lg z-50">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 hover:underline">dismiss</button>
+          <button onClick={() => setError(null)} className="ml-2 hover:underline">{t('phist.dismiss')}</button>
         </div>
       )}
     </div>

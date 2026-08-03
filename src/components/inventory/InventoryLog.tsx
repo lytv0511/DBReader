@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Filter, X } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
+import { useI18n } from '../../lib/language';
 
 interface LogEntry {
   id: number;
@@ -15,6 +16,7 @@ interface LogEntry {
 }
 
 export default function InventoryLog() {
+  const { t } = useI18n();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,8 +93,8 @@ export default function InventoryLog() {
       {/* Header */}
       <div className="px-6 py-4 border-b border-border bg-bg-secondary flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-bold text-text-primary">Inventory Log</h2>
-          <span className="text-xs text-text-secondary">{logs.length} entries</span>
+          <h2 className="text-lg font-bold text-text-primary">{t('logs.title')}</h2>
+          <span className="text-xs text-text-secondary">{t('logs.entryCount', { count: logs.length })}</span>
         </div>
         <div className="flex items-center gap-2">
           {hasFilters && (
@@ -100,7 +102,7 @@ export default function InventoryLog() {
               onClick={() => { setFilterType(''); setFilterProduct(''); }}
               className="flex items-center gap-1 px-2 py-1 bg-error/10 hover:bg-error/20 border border-error/20 rounded-md text-[10px] text-error transition-colors"
             >
-              <X size={10} /> Clear filters
+              <X size={10} /> {t('logs.clearFilters')}
             </button>
           )}
           <button
@@ -110,7 +112,7 @@ export default function InventoryLog() {
             }`}
           >
             <Filter size={12} />
-            Filters
+            {t('logs.filters')}
           </button>
           <button
             onClick={fetchLogs}
@@ -125,13 +127,13 @@ export default function InventoryLog() {
       {showFilters && (
         <div className="px-6 py-3 border-b border-border bg-bg-secondary flex items-center gap-4 shrink-0">
           <div className="flex items-center gap-2">
-            <label className="text-xs text-text-secondary">Type:</label>
+            <label className="text-xs text-text-secondary">{t('logs.type')}</label>
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
               className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
             >
-              <option value="">All</option>
+              <option value="">{t('logs.all')}</option>
               <option value="PURCHASE">PURCHASE</option>
               <option value="USAGE">USAGE</option>
               <option value="SPOILAGE">SPOILAGE</option>
@@ -139,11 +141,11 @@ export default function InventoryLog() {
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-text-secondary">Product:</label>
+            <label className="text-xs text-text-secondary">{t('logs.product')}:</label>
             <input
               value={filterProduct}
               onChange={(e) => setFilterProduct(e.target.value)}
-              placeholder="Search product name..."
+              placeholder={t('logs.searchPlaceholder')}
               className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-[200px]"
             />
           </div>
@@ -155,25 +157,25 @@ export default function InventoryLog() {
         {loading ? (
           <div className="flex items-center justify-center h-full text-text-secondary">
             <RefreshCw size={20} className="animate-spin mr-2" />
-            Loading logs...
+            {t('logs.loading')}
           </div>
         ) : error ? (
           <div className="flex items-center justify-center h-full text-error">{error}</div>
         ) : logs.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-secondary text-sm">
-            No inventory log entries found
+            {t('logs.empty')}
           </div>
         ) : (
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-bg-secondary border-b border-border">
               <tr>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Date</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Type</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Product</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Batch</th>
-                <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">Qty Change</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Location</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Notes</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.date')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.type')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.product')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.batch')}</th>
+                <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.qtyChange')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.location')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.notes')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">

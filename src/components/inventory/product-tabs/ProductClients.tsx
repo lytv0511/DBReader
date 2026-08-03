@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Users, UserPlus, Plus, Trash2, Save, X, Edit2 } from 'lucide-react';
 import { executeQuery, upsertClient, deleteClient, upsertReservation, deleteReservation } from '../../../lib/db';
+import { todayLocalISO } from '../../../lib/dates';
+import { useI18n } from '../../../lib/language';
 
 interface Client { id: number; name: string; email: string | null; phone: string | null; company: string | null; notes: string | null; }
 interface Reservation { id: number; client_id: number; client_name: string; quantity: number; reserved_date: string; status: string; notes: string | null; }
@@ -11,6 +13,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default function ProductClients({ productId }: { productId: number }) {
+  const { t } = useI18n();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,7 +31,7 @@ export default function ProductClients({ productId }: { productId: number }) {
 
   const [rClientId, setRClientId] = useState<number | ''>('');
   const [rQty, setRQty] = useState('1');
-  const [rDate, setRDate] = useState(new Date().toISOString().slice(0, 10));
+  const [rDate, setRDate] = useState(todayLocalISO());
   const [rStatus, setRStatus] = useState('reserved');
   const [rNotes, setRNotes] = useState('');
 
@@ -71,7 +74,7 @@ export default function ProductClients({ productId }: { productId: number }) {
   };
 
   const handleDeleteClient = async (id: number) => {
-    if (!confirm('Delete this client and all their reservations?')) return;
+    if (!confirm(t('pclients.confirmDeleteClient'))) return;
     try { await deleteClient(id); setError(null); await fetchData(); } catch (err) { setError(String(err)); }
   };
 
@@ -94,14 +97,14 @@ export default function ProductClients({ productId }: { productId: number }) {
   };
 
   const handleDeleteRes = async (id: number) => {
-    if (!confirm('Delete this reservation?')) return;
+    if (!confirm(t('pclients.confirmDeleteReservation'))) return;
     try { await deleteReservation(id); setError(null); await fetchData(); } catch (err) { setError(String(err)); }
   };
 
   const totalReserved = reservations.filter((r) => r.status === 'reserved' || r.status === 'partial').reduce((s, r) => s + r.quantity, 0);
   const statusCounts = reservations.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {} as Record<string, number>);
 
-  if (loading) return <div className="flex items-center justify-center h-full text-text-secondary text-sm">Loading clients...</div>;
+  if (loading) return <div className="flex items-center justify-center h-full text-text-secondary text-sm">{t('pclients.loading')}</div>;
 
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
@@ -112,12 +115,12 @@ export default function ProductClients({ productId }: { productId: number }) {
       <div className="grid grid-cols-5 gap-3">
         <div className="bg-bg-secondary border border-border rounded-lg p-3 text-center">
           <p className="text-lg font-bold text-text-primary">{totalReserved}</p>
-          <p className="text-[10px] text-text-secondary">Total Reserved</p>
+          <p className="text-[10px] text-text-secondary">{t('pclients.totalReserved')}</p>
         </div>
         {['reserved', 'partial', 'fulfilled', 'cancelled'].map((s) => (
           <div key={s} className="bg-bg-secondary border border-border rounded-lg p-3 text-center">
             <p className={`text-lg font-bold ${STATUS_STYLES[s]?.split(' ')[1] || 'text-text-secondary'}`}>{statusCounts[s] || 0}</p>
-            <p className="text-[10px] text-text-secondary capitalize">{s}</p>
+            <p className="text-[10px] text-text-secondary capitalize">{t(`common.status.${s}`)}</p>
           </div>
         ))}
       </div>
@@ -125,30 +128,30 @@ export default function ProductClients({ productId }: { productId: number }) {
       {/* Reservations */}
       <div className="bg-bg-secondary border border-border rounded-lg">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text-primary">Reservations</h3>
+          <h3 className="text-sm font-semibold text-text-primary">{t('pclients.reservations')}</h3>
           <button onClick={() => setShowResForm(!showResForm)} className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-[10px] text-text-secondary">
-            <Plus size={10} /> Reserve
+            <Plus size={10} /> {t('pclients.reserve')}
           </button>
         </div>
         {showResForm && (
           <div className="px-4 py-3 border-b border-border bg-accent/5 space-y-2">
             <div className="grid grid-cols-4 gap-2">
               <select value={rClientId} onChange={(e) => setRClientId(e.target.value === '' ? '' : Number(e.target.value))} className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent">
-                <option value="">Select client...</option>
+                <option value="">{t('pclients.selectClient')}</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <input value={rQty} onChange={(e) => setRQty(e.target.value)} type="number" placeholder="Qty" className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
+              <input value={rQty} onChange={(e) => setRQty(e.target.value)} type="number" placeholder={t('pclients.phQty')} className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
               <input value={rDate} onChange={(e) => setRDate(e.target.value)} type="date" className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
               <select value={rStatus} onChange={(e) => setRStatus(e.target.value)} className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent">
-                <option value="reserved">Reserved</option>
-                <option value="partial">Partial</option>
-                <option value="fulfilled">Fulfilled</option>
-                <option value="cancelled">Cancelled</option>
+                <option value="reserved">{t('common.status.reserved')}</option>
+                <option value="partial">{t('common.status.partial')}</option>
+                <option value="fulfilled">{t('common.status.fulfilled')}</option>
+                <option value="cancelled">{t('common.status.cancelled')}</option>
               </select>
             </div>
             <div className="flex gap-2">
-              <input value={rNotes} onChange={(e) => setRNotes(e.target.value)} placeholder="Notes" className="flex-1 px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
-              <button onClick={saveReservation} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded text-xs text-white"><Save size={10} /> Save</button>
+              <input value={rNotes} onChange={(e) => setRNotes(e.target.value)} placeholder={t('pclients.phNotes')} className="flex-1 px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+              <button onClick={saveReservation} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded text-xs text-white"><Save size={10} /> {t('common.save')}</button>
               <button onClick={() => setShowResForm(false)} className="px-2 py-1.5 bg-bg-tertiary rounded text-xs text-text-secondary"><X size={10} /></button>
             </div>
           </div>
@@ -161,38 +164,38 @@ export default function ProductClients({ productId }: { productId: number }) {
               <span className="text-xs text-text-secondary">×{r.quantity}</span>
               <span className="text-[10px] text-text-secondary">{r.reserved_date?.slice(0, 10)}</span>
               <select value={r.status} onChange={(e) => updateResStatus(r, e.target.value)} className={`px-2 py-0.5 rounded text-[10px] font-semibold ${STATUS_STYLES[r.status] || ''} bg-transparent border border-current`}>
-                {['reserved', 'partial', 'fulfilled', 'cancelled'].map((s) => <option key={s} value={s}>{s}</option>)}
+                {['reserved', 'partial', 'fulfilled', 'cancelled'].map((s) => <option key={s} value={s}>{t(`common.status.${s}`)}</option>)}
               </select>
               <span className="text-[10px] text-text-secondary flex-1 truncate">{r.notes || ''}</span>
               <button onClick={() => handleDeleteRes(r.id)} className="text-text-secondary hover:text-error"><Trash2 size={10} /></button>
             </div>
           ))}
-          {reservations.length === 0 && <div className="p-4 text-xs text-text-secondary text-center">No reservations</div>}
+          {reservations.length === 0 && <div className="p-4 text-xs text-text-secondary text-center">{t('pclients.empty')}</div>}
         </div>
       </div>
 
       {/* Client Manager */}
       <div className="bg-bg-secondary border border-border rounded-lg">
         <button onClick={() => setClientSectionOpen(!clientSectionOpen)} className="w-full px-4 py-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text-primary">Client Manager ({clients.length})</h3>
+          <h3 className="text-sm font-semibold text-text-primary">{t('pclients.clientManager', { count: clients.length })}</h3>
           <span className="text-text-secondary text-xs">{clientSectionOpen ? '▲' : '▼'}</span>
         </button>
         {clientSectionOpen && (
           <div className="border-t border-border">
             <div className="px-4 py-2 border-b border-border flex justify-between items-center">
-              <span className="text-[10px] text-text-secondary">{clients.length} clients</span>
-              <button onClick={() => { setShowClientForm(true); setEditingClient(null); setCName(''); setCEmail(''); setCPhone(''); setCCompany(''); setCNotes(''); }} className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-[10px] text-text-secondary"><UserPlus size={10} /> Add Client</button>
+              <span className="text-[10px] text-text-secondary">{t('pclients.clientsCount', { count: clients.length })}</span>
+              <button onClick={() => { setShowClientForm(true); setEditingClient(null); setCName(''); setCEmail(''); setCPhone(''); setCCompany(''); setCNotes(''); }} className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-[10px] text-text-secondary"><UserPlus size={10} /> {t('pclients.addClient')}</button>
             </div>
             {showClientForm && (
               <div className="px-4 py-3 border-b border-border bg-accent/5 space-y-2">
                 <div className="grid grid-cols-2 gap-2">
-                  <input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="Name *" className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
-                  <input value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="Email" className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
-                  <input value={cPhone} onChange={(e) => setCPhone(e.target.value)} placeholder="Phone" className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
-                  <input value={cCompany} onChange={(e) => setCCompany(e.target.value)} placeholder="Company" className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
+                  <input value={cName} onChange={(e) => setCName(e.target.value)} placeholder={t('pclients.phName')} className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
+                  <input value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder={t('pclients.phEmail')} className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
+                  <input value={cPhone} onChange={(e) => setCPhone(e.target.value)} placeholder={t('pclients.phPhone')} className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
+                  <input value={cCompany} onChange={(e) => setCCompany(e.target.value)} placeholder={t('pclients.phCompany')} className="px-2 py-1.5 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" />
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={saveClient} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded text-xs text-white"><Save size={10} /> Save</button>
+                  <button onClick={saveClient} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded text-xs text-white"><Save size={10} /> {t('common.save')}</button>
                   <button onClick={() => setShowClientForm(false)} className="px-2 py-1.5 bg-bg-tertiary rounded text-xs text-text-secondary"><X size={10} /></button>
                 </div>
               </div>

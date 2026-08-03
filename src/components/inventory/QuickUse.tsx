@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw, Plus, Minus, Search, Check, Code, X } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
+import { useI18n } from '../../lib/language';
 
 interface MatchedItem {
   product_id: number;
@@ -27,18 +28,18 @@ interface ParsedQuery {
   rawInput: string;
 }
 
-const SAMPLE_PROMPTS = [
-  '4 red wine',
-  '2 merlot from batch LOT-2024-001',
-  'wine from pacific wines ltd',
-  'bottles of Dom Perignon',
-  'sparkling from January',
-  'any 6 spirits',
-  '4 red wines closest to expiration from pacific or grand cru from italy with at least 4 years vintage',
-  'white wine from france grape chardonnay',
+const SAMPLE_PROMPT_KEYS = [
+  'quse.prompt.0',
+  'quse.prompt.1',
+  'quse.prompt.2',
+  'quse.prompt.3',
+  'quse.prompt.4',
+  'quse.prompt.5',
+  'quse.prompt.6',
+  'quse.prompt.7',
 ];
 
-function parseNaturalLanguage(input: string): ParsedQuery {
+export function parseNaturalLanguage(input: string): ParsedQuery {
   const raw = input.trim();
   if (!raw) return { quantity: 0, searchTerm: '', batchFilter: '', categoryFilter: '', supplierFilters: [], locationFilter: '', attributeFilters: [], sortByExpiry: false, rawInput: raw };
 
@@ -83,9 +84,9 @@ function parseNaturalLanguage(input: string): ParsedQuery {
     .trim();
 
   // Extract "closest to expiration" / "nearest expiry" / "expiring soon"
-  if (/\b(closest\s+to\s+expir|nearest\s+expir|expir\w*\s+soon|soonest|earliest\s+expir)\b/i.test(cleaned)) {
+  if (/\b(closest\s+to\s+expir\w*|nearest\s+expir\w*|expir\w*\s+soon|soonest|earliest\s+expir\w*)\b/i.test(cleaned)) {
     sortByExpiry = true;
-    cleaned = cleaned.replace(/\b(closest\s+to\s+expir|nearest\s+expir|expir\w*\s+soon|soonest|earliest\s+expir)\b/i, '').trim();
+    cleaned = cleaned.replace(/\b(closest\s+to\s+expir\w*|nearest\s+expir\w*|expir\w*\s+soon|soonest|earliest\s+expir\w*)\b/i, '').trim();
   }
 
   // Extract batch filter — "from batch X" or "from LOT-XXX"
@@ -164,6 +165,24 @@ function parseNaturalLanguage(input: string): ParsedQuery {
     }
   }
 
+  // Extract supplier filter — "from pacific or grand cru" → multiple suppliers
+  // Also "from pacific wines ltd" → single supplier
+  // NOTE: must run BEFORE the origin attribute pattern, which would otherwise swallow the supplier text.
+  // Stops at attribute keywords so "from france grape chardonnay" keeps the grape, and
+  // "from pacific or grand cru from italy" splits into two suppliers + origin.
+  const supplierMatch = cleaned.match(/\bfrom\s+(.+?)(?=\s+(?:from|with|grape|region|type|vintage|closest|expir|batch|that|who)\b|\s*$)/i);
+  if (supplierMatch) {
+    const rawSupplier = supplierMatch[1].trim();
+    // Check for "X or Y" pattern — multiple suppliers
+    const orMatch = rawSupplier.match(/^(.+?)\s+or\s+(.+?)$/i);
+    if (orMatch) {
+      supplierFilters.push(orMatch[1].trim(), orMatch[2].trim());
+    } else {
+      supplierFilters.push(rawSupplier);
+    }
+    cleaned = cleaned.replace(supplierMatch[0], '').trim();
+  }
+
   // Extract attribute filters — "from italy", "grape cabernet", "region burgundy", "type dry"
   const attrPatterns: [RegExp, string][] = [
     [/\b(?:from|origin(?:ally)?\s+(?:from|in)?)\s+(?!batch|the|january|february|march|april|may|june|july|august|september|october|november|december|cellar|warehouse)([a-zA-Z][\w\s]*?)(?=\s+(?:and|that|with|who|from|grape|region|type|batch|closest|expir)|\s*$)/i, 'origin'],
@@ -188,21 +207,6 @@ function parseNaturalLanguage(input: string): ParsedQuery {
     }
   }
 
-  // Extract supplier filter — "from pacific or grand cru" → multiple suppliers
-  // Also "from pacific wines ltd" → single supplier
-  const supplierMatch = cleaned.match(/\bfrom\s+(.+?)$/i);
-  if (supplierMatch) {
-    const rawSupplier = supplierMatch[1].trim();
-    // Check for "X or Y" pattern — multiple suppliers
-    const orMatch = rawSupplier.match(/^(.+?)\s+or\s+(.+?)$/i);
-    if (orMatch) {
-      supplierFilters.push(orMatch[1].trim(), orMatch[2].trim());
-    } else {
-      supplierFilters.push(rawSupplier);
-    }
-    cleaned = cleaned.replace(supplierMatch[0], '').trim();
-  }
-
   // Clean up remaining filler words
   searchTerm = cleaned
     .replace(/^(of|the|a|an|and|or|any|all|some|from|bottle|bottles|that|are|with|who|minimum|at|least|years?|old|vintage)\s+/i, '')
@@ -216,8 +220,6 @@ function parseNaturalLanguage(input: string): ParsedQuery {
 }
 
 function buildSearchSQL(parsed: ParsedQuery): string {
-  const hasExpiry = parsed.attributeFilters.some((f) => f.key === 'expiry');
-
   let sql = `
     SELECT
       b.id AS batch_id,
@@ -229,7 +231,6 @@ function buildSearchSQL(parsed: ParsedQuery): string {
       p.sku,
       COALESCE(c.name, 'Uncategorized') AS category_name,
       COALESCE(SUM(il.quantity_change), 0) AS current_stock
-      ${hasExpiry ? ', MIN(CASE WHEN pa.attr_key = \'expiry\' THEN pa.attr_value END) AS nearest_expiry' : ''}
     FROM batches b
     JOIN products p ON b.product_id = p.id
     LEFT JOIN categories c ON p.category_id = c.id
@@ -239,7 +240,7 @@ function buildSearchSQL(parsed: ParsedQuery): string {
   // Join product_attributes for each unique attribute key we need
   const attrKeys = [...new Set(parsed.attributeFilters.map((f) => f.key))];
   for (let i = 0; i < attrKeys.length; i++) {
-    sql += ` LEFT JOIN product_attributes pa${i} ON pa${i}.product_id = p.id AND pa${i}.attr_key = '${attrKeys[i]}'`;
+    sql += ` LEFT JOIN product_attributes pa${i} ON pa${i}.product_id = p.id AND LOWER(pa${i}.attr_key) = LOWER('${attrKeys[i]}')`;
   }
 
   sql += ` WHERE 1=1`;
@@ -267,12 +268,18 @@ function buildSearchSQL(parsed: ParsedQuery): string {
     sql += ` AND (${supplierConditions})`;
   }
 
-  if (parsed.locationFilter && parsed.locationFilter.includes('-')) {
-    sql += ` AND b.purchase_date LIKE '${parsed.locationFilter}%'`;
-  } else if (parsed.locationFilter) {
-    sql += ` AND (l.name LIKE '%${parsed.locationFilter.replace(/'/g, "''")}%' OR l.sub_location LIKE '%${parsed.locationFilter.replace(/'/g, "''")}%')`;
-    if (!sql.includes('LEFT JOIN locations')) {
-      sql = sql.replace('LEFT JOIN inventory_logs il', 'LEFT JOIN locations l ON il.location_id = l.id\n    LEFT JOIN inventory_logs il');
+  if (parsed.locationFilter) {
+    const lf = parsed.locationFilter.replace(/'/g, "''");
+    if (parsed.locationFilter.includes('-')) {
+      sql += ` AND b.purchase_date LIKE '${lf}%'`;
+    } else {
+      sql += ` AND (l.name LIKE '%${lf}%' OR l.sub_location LIKE '%${lf}%')`;
+      if (!sql.includes('LEFT JOIN locations')) {
+        sql = sql.replace(
+          'LEFT JOIN inventory_logs il ON il.batch_id = b.id',
+          'LEFT JOIN inventory_logs il ON il.batch_id = b.id\n    LEFT JOIN locations l ON il.location_id = l.id'
+        );
+      }
     }
   }
 
@@ -287,7 +294,11 @@ function buildSearchSQL(parsed: ParsedQuery): string {
       }
       // For numeric comparisons, cast attr_value to real
       if (f.op === '=' || f.op === '>=' || f.op === '<=' || f.op === '>' || f.op === '<') {
-        return `CAST(pa${i}.attr_value AS REAL) ${f.op} ${Number(val)}`;
+        const numVal = Number(val);
+        if (Number.isFinite(numVal)) {
+          return `CAST(pa${i}.attr_value AS REAL) ${f.op} ${numVal}`;
+        }
+        return `LOWER(pa${i}.attr_value) = '${val.toLowerCase()}'`;
       }
       return `pa${i}.attr_value ${f.op} '${val}'`;
     });
@@ -297,11 +308,7 @@ function buildSearchSQL(parsed: ParsedQuery): string {
   sql += ` GROUP BY b.id, b.batch_number, b.purchase_date, b.supplier_name, p.id, p.name, p.sku, c.name`;
   sql += ` HAVING current_stock > 0`;
 
-  if (parsed.sortByExpiry && hasExpiry) {
-    sql += ` ORDER BY nearest_expiry ASC NULLS LAST, p.name`;
-  } else {
-    sql += ` ORDER BY p.name, b.purchase_date DESC`;
-  }
+  sql += ` ORDER BY p.name, b.purchase_date DESC`;
 
   sql += ` LIMIT 50`;
 
@@ -313,6 +320,7 @@ interface QuickUseProps {
 }
 
 export default function QuickUse({ onRefresh }: QuickUseProps) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<'use' | 'add'>('use');
   const [queryInput, setQueryInput] = useState('');
   const [parsed, setParsed] = useState<ParsedQuery | null>(null);
@@ -402,6 +410,8 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
 
   const selectedItems = results.filter((r) => r.selected);
 
+  const SAMPLE_PROMPTS = SAMPLE_PROMPT_KEYS.map((key) => t(key));
+
   const handleSubmit = async () => {
     const qtyNum = Number(qty);
     if (selectedItems.length === 0 || qtyNum <= 0) return;
@@ -418,7 +428,7 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
 
         const notesVal = notes.trim()
           ? `'${notes.trim().replace(/'/g, "''")}'`
-          : `'Quick ${mode === 'use' ? 'Usage' : 'Purchase'} via search'`;
+          : `'${t(mode === 'use' ? 'quse.note.usage' : 'quse.note.purchase')}'`;
 
         await executeQuery(`
           INSERT INTO inventory_logs (batch_id, location_id, quantity_change, transaction_type, notes)
@@ -428,7 +438,10 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
 
       const totalQty = qtyNum * selectedItems.length;
       setSuccessMsg(
-        `${mode === 'use' ? 'Removed' : 'Added'} ${totalQty} unit${totalQty !== 1 ? 's' : ''} from ${selectedItems.length} item${selectedItems.length !== 1 ? 's' : ''}`
+        t(mode === 'use' ? 'quse.success.removed' : 'quse.success.added', {
+          qty: totalQty,
+          count: selectedItems.length,
+        })
       );
 
       // Reset selection and re-search to refresh stock levels
@@ -463,7 +476,7 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
               }`}
             >
               <Minus size={14} />
-              Use
+              {t('quse.mode.use')}
             </button>
             <button
               onClick={() => setMode('add')}
@@ -472,7 +485,7 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
               }`}
             >
               <Plus size={14} />
-              Add
+              {t('quse.mode.add')}
             </button>
           </div>
 
@@ -484,7 +497,7 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
               value={queryInput}
               onChange={(e) => setQueryInput(e.target.value)}
                onKeyDown={(e) => { if (e.key === 'Enter') { clearTimeout(debounceRef.current); handleSearch(); } }}
-              placeholder="Search like: 4 red wine, 2 merlot from batch LOT-2024-001, any 6 sparkling..."
+               placeholder={t('quse.searchPlaceholder')}
               className="w-full pl-9 pr-4 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
             />
             {queryInput && (
@@ -521,13 +534,13 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
           {searching ? (
             <div className="flex items-center justify-center h-full text-text-secondary">
               <RefreshCw size={16} className="animate-spin mr-2" />
-              Searching...
+              {t('quse.searching')}
             </div>
           ) : results.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-text-secondary">
               <Search size={32} className="mb-3 opacity-30" />
               <p className="text-sm">
-                {queryInput ? 'No items match your search' : 'Type a search query to find inventory items'}
+                {queryInput ? t('quse.noResults') : t('quse.searchHint')}
               </p>
             </div>
           ) : (
@@ -535,16 +548,16 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
               {/* Results header */}
               <div className="sticky top-0 bg-bg-primary border-b border-border px-4 py-2 flex items-center justify-between z-10">
                 <span className="text-xs text-text-secondary">
-                  {results.length} item{results.length !== 1 ? 's' : ''} found
+                  {t('quse.resultsFound', { count: results.length })}
                   {selectedItems.length > 0 && (
                     <span className="ml-2 text-accent font-semibold">
-                      · {selectedItems.length} selected
+                      {t('quse.selectedCount', { count: selectedItems.length })}
                     </span>
                   )}
                 </span>
                 <div className="flex gap-2">
-                  <button onClick={selectAll} className="text-[10px] text-accent hover:text-accent-hover transition-colors">Select all</button>
-                  <button onClick={deselectAll} className="text-[10px] text-text-secondary hover:text-text-primary transition-colors">Clear</button>
+                  <button onClick={selectAll} className="text-[10px] text-accent hover:text-accent-hover transition-colors">{t('quse.selectAll')}</button>
+                  <button onClick={deselectAll} className="text-[10px] text-text-secondary hover:text-text-primary transition-colors">{t('quse.clear')}</button>
                 </div>
               </div>
 
@@ -589,7 +602,7 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
                       }`}>
                         {Math.round(item.current_stock)}
                       </span>
-                      <span className="text-[10px] text-text-secondary ml-1">in stock</span>
+                      <span className="text-[10px] text-text-secondary ml-1">{t('quse.inStock')}</span>
                     </div>
                   </button>
                 ))}
@@ -602,12 +615,12 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
         <div className="w-[280px] border-l border-border bg-bg-secondary flex flex-col shrink-0">
           <div className="p-4 border-b border-border">
             <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">
-              {mode === 'use' ? 'Use Stock' : 'Add Stock'}
+              {t(mode === 'use' ? 'quse.panel.use' : 'quse.panel.add')}
             </h3>
 
             {/* Quantity */}
             <div className="mb-3">
-              <label className="text-[10px] text-text-secondary mb-1 block">Quantity per item</label>
+              <label className="text-[10px] text-text-secondary mb-1 block">{t('quse.qtyPerItem')}</label>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setQty(String(Math.max(1, Number(qty) - 1)))}
@@ -644,11 +657,11 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
 
             {/* Notes */}
             <div>
-              <label className="text-[10px] text-text-secondary mb-1 block">Notes (optional)</label>
+              <label className="text-[10px] text-text-secondary mb-1 block">{t('quse.notesLabel')}</label>
               <input
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. VIP dinner, restock..."
+                placeholder={t('quse.notesPlaceholder')}
                 className="w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
               />
             </div>
@@ -659,10 +672,10 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
             {selectedItems.length > 0 && (
               <div className="mb-3 p-3 bg-bg-primary border border-border rounded-lg">
                 <p className="text-[10px] text-text-secondary mb-1">
-                  {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} selected
+                  {t('quse.itemsSelected', { count: selectedItems.length })}
                 </p>
                 <p className="text-sm font-bold text-text-primary">
-                  Total: {Number(qty) * selectedItems.length} unit{(Number(qty) * selectedItems.length) !== 1 ? 's' : ''}
+                  {t('quse.totalUnits', { count: Number(qty) * selectedItems.length })}
                 </p>
                 <div className="mt-2 space-y-1 max-h-[100px] overflow-y-auto">
                   {selectedItems.map((item) => (
@@ -702,7 +715,7 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
                 ) : (
                   <>
                     {mode === 'use' ? <Minus size={14} /> : <Plus size={14} />}
-                    {mode === 'use' ? 'Use' : 'Add'} {Number(qty) * selectedItems.length} unit{(Number(qty) * selectedItems.length) !== 1 ? 's' : ''}
+                    {t(mode === 'use' ? 'quse.submit.use' : 'quse.submit.add', { count: Number(qty) * selectedItems.length })}
                   </>
                 )}
               </button>
@@ -716,20 +729,20 @@ export default function QuickUse({ onRefresh }: QuickUseProps) {
         <div className="border-t border-border bg-bg-secondary px-6 py-3 shrink-0">
           <div className="flex items-center gap-2 mb-1.5">
             <Code size={12} className="text-accent" />
-            <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wide">Generated SQL</span>
+            <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wide">{t('quse.sqlHeader')}</span>
             {parsed && (
               <span className="text-[10px] text-text-secondary ml-auto flex flex-wrap gap-x-2 justify-end">
                 {parsed.quantity > 0 && <span className="text-accent">{parsed.quantity}×</span>}
                 {parsed.searchTerm && <span className="ml-1">"{parsed.searchTerm}"</span>}
-                {parsed.batchFilter && <span className="ml-1 text-warning">batch:{parsed.batchFilter}</span>}
-                {parsed.categoryFilter && <span className="ml-1 text-success">cat:{parsed.categoryFilter}</span>}
+                {parsed.batchFilter && <span className="ml-1 text-warning">{t('quse.filter.batch', { value: parsed.batchFilter })}</span>}
+                {parsed.categoryFilter && <span className="ml-1 text-success">{t('quse.filter.category', { value: parsed.categoryFilter })}</span>}
                 {parsed.supplierFilters.length > 0 && (
-                  <span className="ml-1 text-purple-400">supplier:{parsed.supplierFilters.join(' | ')}</span>
+                  <span className="ml-1 text-purple-400">{t('quse.filter.supplier', { value: parsed.supplierFilters.join(' | ') })}</span>
                 )}
                 {parsed.attributeFilters.map((af, i) => (
                   <span key={i} className="ml-1 text-cyan-400">{af.key}{af.op}{af.value}</span>
                 ))}
-                {parsed.sortByExpiry && <span className="ml-1 text-amber-400">by expiry</span>}
+                {parsed.sortByExpiry && <span className="ml-1 text-amber-400">{t('quse.filter.byExpiry')}</span>}
               </span>
             )}
           </div>

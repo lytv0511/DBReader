@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag } from 'lucide-react';
-import { executeQuery, upsertProductAttribute } from '../../lib/db';
+import { executeQuery, upsertProductAttribute, deleteCategory } from '../../lib/db';
+import { useI18n } from '../../lib/language';
 
 interface Product {
   id: number;
@@ -35,6 +36,7 @@ interface UnitConversion {
 type ModalMode = 'product' | 'category' | 'attribute' | 'unit' | null;
 
 export default function ProductManager() {
+  const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,14 +156,16 @@ export default function ProductManager() {
   };
 
   const deleteProduct = async (id: number) => {
-    if (!confirm('Delete this product? Associated attributes, batches, and logs will also be deleted.')) return;
+    if (!confirm(t('prods.confirmDeleteProduct'))) return;
     try {
       await executeQuery(`DELETE FROM inventory_logs WHERE batch_id IN (SELECT id FROM batches WHERE product_id = ${id})`);
       await executeQuery(`DELETE FROM batches WHERE product_id = ${id}`);
       await executeQuery(`DELETE FROM product_attributes WHERE product_id = ${id}`);
       await executeQuery(`DELETE FROM unit_conversions WHERE product_id = ${id}`);
       await executeQuery(`DELETE FROM product_notes WHERE product_id = ${id}`);
-      await executeQuery(`DELETE FROM reservations WHERE product_id = ${id}`);
+      await executeQuery(`DELETE FROM client_reservations WHERE product_id = ${id}`);
+      await executeQuery(`DELETE FROM calendar_events WHERE product_id = ${id}`);
+      await executeQuery(`DELETE FROM product_notifications WHERE product_id = ${id}`);
       await executeQuery(`DELETE FROM products WHERE id = ${id}`);
       setSelectedProduct(null);
       await fetchData();
@@ -181,10 +185,10 @@ export default function ProductManager() {
     }
   };
 
-  const deleteCategory = async (id: number) => {
-    if (!confirm('Delete this category? Products will be set to Uncategorized.')) return;
+    const handleDeleteCategory = async (id: number) => {
+    if (!confirm(t('prods.confirmDeleteCategory'))) return;
     try {
-      await executeQuery(`DELETE FROM categories WHERE id = ${id}`);
+      await deleteCategory(id);
       await fetchData();
     } catch (err) {
       setError(String(err));
@@ -235,7 +239,7 @@ export default function ProductManager() {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <RefreshCw size={20} className="animate-spin mr-2" />
-        Loading products...
+        {t('prods.loading')}
       </div>
     );
   }
@@ -245,19 +249,19 @@ export default function ProductManager() {
       {/* Product List */}
       <div className="w-[340px] border-r border-border bg-bg-secondary flex flex-col shrink-0">
         <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Products</h3>
+          <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">{t('prods.title')}</h3>
           <div className="flex gap-1">
             <button
               onClick={() => { setFormCategoryName(''); setModalMode('category'); }}
               className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
-              title="Add Category"
+              title={t('prods.addCategory')}
             >
               <Tag size={12} />
             </button>
             <button
               onClick={openNewProduct}
               className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
-              title="Add Product"
+              title={t('prods.addProduct')}
             >
               <Plus size={12} />
             </button>
@@ -286,7 +290,7 @@ export default function ProductManager() {
       <div className="flex-1 overflow-y-auto p-6">
         {!selectedProduct ? (
           <div className="flex items-center justify-center h-full text-text-secondary text-sm">
-            Select a product to view details
+            {t('prods.selectEmpty')}
           </div>
         ) : (
           <div className="space-y-6">
@@ -300,13 +304,13 @@ export default function ProductManager() {
                   onClick={() => openEditProduct(selectedProduct)}
                   className="flex items-center gap-1 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
                 >
-                  <Pencil size={10} /> Edit
+                  <Pencil size={10} /> {t('common.edit')}
                 </button>
                 <button
                   onClick={() => deleteProduct(selectedProduct.id)}
                   className="flex items-center gap-1 px-3 py-1.5 bg-error/10 hover:bg-error/20 border border-error/20 rounded-md text-xs text-error transition-colors"
                 >
-                  <Trash2 size={10} /> Delete
+                  <Trash2 size={10} /> {t('common.delete')}
                 </button>
               </div>
             </div>
@@ -314,17 +318,17 @@ export default function ProductManager() {
             {/* Attributes */}
             <div className="bg-bg-secondary border border-border rounded-lg">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-text-primary">Attributes</h3>
+                <h3 className="text-sm font-semibold text-text-primary">{t('prods.attributes')}</h3>
                 <button
                   onClick={() => { setFormAttrKey(''); setFormAttrValue(''); setFormAttrType('string'); setModalMode('attribute'); }}
                   className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-[10px] text-text-secondary transition-colors"
                 >
-                  <Plus size={10} /> Add
+                  <Plus size={10} /> {t('common.add')}
                 </button>
               </div>
               <div className="divide-y divide-border">
                 {productAttrs.length === 0 ? (
-                  <div className="p-4 text-xs text-text-secondary text-center">No attributes</div>
+                  <div className="p-4 text-xs text-text-secondary text-center">{t('prods.noAttributes')}</div>
                 ) : (
                   productAttrs.map((attr) => (
                     <div key={attr.id} className="px-4 py-2.5 flex items-center justify-between">
@@ -345,23 +349,23 @@ export default function ProductManager() {
             {/* Unit Conversions */}
             <div className="bg-bg-secondary border border-border rounded-lg">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-text-primary">Unit Conversions</h3>
+                <h3 className="text-sm font-semibold text-text-primary">{t('prods.conversions')}</h3>
                 <button
                   onClick={() => { setFormUnitName2(''); setFormConversionFactor('1'); setModalMode('unit'); }}
                   className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-[10px] text-text-secondary transition-colors"
                 >
-                  <Plus size={10} /> Add
+                  <Plus size={10} /> {t('common.add')}
                 </button>
               </div>
               <div className="divide-y divide-border">
                 {productUnits.length === 0 ? (
-                  <div className="p-4 text-xs text-text-secondary text-center">No unit conversions</div>
+                  <div className="p-4 text-xs text-text-secondary text-center">{t('prods.noConversions')}</div>
                 ) : (
                   productUnits.map((unit) => (
                     <div key={unit.id} className="px-4 py-2.5 flex items-center justify-between">
                       <div>
                         <span className="text-xs text-text-primary font-medium">{unit.unit_name}</span>
-                        <span className="text-xs text-text-secondary ml-2">= {unit.conversion_factor} × base unit</span>
+                        <span className="text-xs text-text-secondary ml-2">{t('prods.conversionBaseUnit', { factor: unit.conversion_factor })}</span>
                       </div>
                       <button onClick={() => deleteUnit(unit.id)} className="text-text-secondary hover:text-error transition-colors">
                         <Trash2 size={10} />
@@ -375,13 +379,13 @@ export default function ProductManager() {
             {/* Categories Manager */}
             <div className="bg-bg-secondary border border-border rounded-lg">
               <div className="px-4 py-3 border-b border-border">
-                <h3 className="text-sm font-semibold text-text-primary">All Categories</h3>
+                <h3 className="text-sm font-semibold text-text-primary">{t('prods.allCategories')}</h3>
               </div>
               <div className="divide-y divide-border max-h-[200px] overflow-y-auto">
                 {categories.map((cat) => (
                   <div key={cat.id} className="px-4 py-2.5 flex items-center justify-between">
                     <span className="text-xs text-text-primary">{cat.name}</span>
-                    <button onClick={() => deleteCategory(cat.id)} className="text-text-secondary hover:text-error transition-colors">
+                    <button onClick={() => handleDeleteCategory(cat.id)} className="text-text-secondary hover:text-error transition-colors">
                       <Trash2 size={10} />
                     </button>
                   </div>
@@ -398,10 +402,10 @@ export default function ProductManager() {
           <div className="bg-bg-secondary border border-border rounded-lg p-5 w-[380px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-text-primary">
-                {modalMode === 'product' && (editingProduct ? 'Edit Product' : 'New Product')}
-                {modalMode === 'category' && 'New Category'}
-                {modalMode === 'attribute' && 'New Attribute'}
-                {modalMode === 'unit' && 'New Unit Conversion'}
+                {modalMode === 'product' && (editingProduct ? t('prods.editProduct') : t('prods.newProduct'))}
+                {modalMode === 'category' && t('prods.newCategory')}
+                {modalMode === 'attribute' && t('prods.newAttribute')}
+                {modalMode === 'unit' && t('prods.newConversion')}
               </h3>
               <button onClick={() => setModalMode(null)} className="text-text-secondary hover:text-text-primary">
                 <X size={14} />
@@ -410,43 +414,43 @@ export default function ProductManager() {
 
             {modalMode === 'product' && (
               <div className="space-y-3">
-                <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Product name" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
-                <input value={formSku} onChange={(e) => setFormSku(e.target.value)} placeholder="SKU (optional)" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder={t('prods.ph.productName')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formSku} onChange={(e) => setFormSku(e.target.value)} placeholder={t('prods.ph.sku')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
                 <select value={formCategoryId} onChange={(e) => setFormCategoryId(e.target.value === '' ? '' : Number(e.target.value))} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
-                  <option value="">Uncategorized</option>
+                  <option value="">{t('common.uncategorized')}</option>
                   {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
-                <input value={formUnitName} onChange={(e) => setFormUnitName(e.target.value)} placeholder="Base unit (e.g. bottle)" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
-                <input value={formReorderThreshold} onChange={(e) => setFormReorderThreshold(e.target.value)} type="number" placeholder="Reorder threshold" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formUnitName} onChange={(e) => setFormUnitName(e.target.value)} placeholder={t('prods.ph.baseUnit')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formReorderThreshold} onChange={(e) => setFormReorderThreshold(e.target.value)} type="number" placeholder={t('prods.ph.reorder')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
               </div>
             )}
 
             {modalMode === 'category' && (
-              <input value={formCategoryName} onChange={(e) => setFormCategoryName(e.target.value)} placeholder="Category name" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+              <input value={formCategoryName} onChange={(e) => setFormCategoryName(e.target.value)} placeholder={t('prods.ph.categoryName')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
             )}
 
             {modalMode === 'attribute' && (
               <div className="space-y-3">
-                <input value={formAttrKey} onChange={(e) => setFormAttrKey(e.target.value)} placeholder="Attribute key (e.g. Vintage)" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
-                <input value={formAttrValue} onChange={(e) => setFormAttrValue(e.target.value)} placeholder="Value" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formAttrKey} onChange={(e) => setFormAttrKey(e.target.value)} placeholder={t('prods.ph.attrKey')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formAttrValue} onChange={(e) => setFormAttrValue(e.target.value)} placeholder={t('prods.ph.attrValue')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
                 <select value={formAttrType} onChange={(e) => setFormAttrType(e.target.value)} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
-                  <option value="string">String</option>
-                  <option value="number">Number</option>
-                  <option value="boolean">Boolean</option>
+                  <option value="string">{t('common.attrType.string')}</option>
+                  <option value="number">{t('common.attrType.number')}</option>
+                  <option value="boolean">{t('common.attrType.boolean')}</option>
                 </select>
               </div>
             )}
 
             {modalMode === 'unit' && (
               <div className="space-y-3">
-                <input value={formUnitName2} onChange={(e) => setFormUnitName2(e.target.value)} placeholder="Unit name (e.g. Case)" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
-                <input value={formConversionFactor} onChange={(e) => setFormConversionFactor(e.target.value)} type="number" placeholder="Conversion factor" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formUnitName2} onChange={(e) => setFormUnitName2(e.target.value)} placeholder={t('prods.ph.unitName')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formConversionFactor} onChange={(e) => setFormConversionFactor(e.target.value)} type="number" placeholder={t('prods.ph.conversionFactor')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
               </div>
             )}
 
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setModalMode(null)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 onClick={() => {
@@ -457,7 +461,7 @@ export default function ProductManager() {
                 }}
                 className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors"
               >
-                <Save size={10} /> Save
+                <Save size={10} /> {t('common.save')}
               </button>
             </div>
           </div>
@@ -467,7 +471,7 @@ export default function ProductManager() {
       {error && (
         <div className="fixed bottom-4 right-4 bg-error/10 border border-error/20 text-error px-4 py-2 rounded-lg text-xs shadow-lg z-50">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 hover:underline">dismiss</button>
+          <button onClick={() => setError(null)} className="ml-2 hover:underline">{t('common.dismiss')}</button>
         </div>
       )}
     </div>

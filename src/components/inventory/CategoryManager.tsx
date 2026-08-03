@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag } from 'lucide-react';
 import { executeQuery, upsertCategory, deleteCategory, getCategoryTemplates, upsertCategoryTemplate, deleteCategoryTemplate } from '../../lib/db';
+import { useI18n } from '../../lib/language';
 
 interface Category {
   id: number;
@@ -28,6 +29,7 @@ const COLOR_OPTIONS = [
 ];
 
 export default function CategoryManager() {
+  const { t } = useI18n();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export default function CategoryManager() {
   };
 
   const handleDeleteCategory = async (cat: Category) => {
-    if (!confirm(`Delete "${cat.name}"? Products will become uncategorized.`)) return;
+    if (!confirm(t('cats.confirmDelete', { name: cat.name }))) return;
     try {
       await deleteCategory(cat.id);
       if (selectedCategory?.id === cat.id) setSelectedCategory(null);
@@ -171,7 +173,7 @@ export default function CategoryManager() {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <RefreshCw size={20} className="animate-spin mr-2" />
-        Loading categories...
+        {t('cats.loading')}
       </div>
     );
   }
@@ -181,11 +183,11 @@ export default function CategoryManager() {
       {/* Category list */}
       <div className="w-[300px] border-r border-border bg-bg-secondary flex flex-col shrink-0">
         <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Categories</span>
+          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">{t('cats.title')}</span>
           <button
             onClick={openNewCategory}
             className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
-            title="Add Category"
+            title={t('cats.addCategory')}
           >
             <Plus size={12} />
           </button>
@@ -203,14 +205,14 @@ export default function CategoryManager() {
                 <span className="text-xl" style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}>{cat.icon}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-text-primary truncate">{cat.name}</p>
-                  <p className="text-[10px] text-text-secondary">{cat.product_count} product{cat.product_count !== 1 ? 's' : ''}</p>
+                  <p className="text-[10px] text-text-secondary">{t('cats.productCount', { count: cat.product_count })}</p>
                 </div>
                 <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
               </div>
             </button>
           ))}
           {categories.length === 0 && (
-            <div className="p-4 text-xs text-text-secondary text-center">No categories yet</div>
+            <div className="p-4 text-xs text-text-secondary text-center">{t('cats.noCategories')}</div>
           )}
         </div>
       </div>
@@ -219,11 +221,11 @@ export default function CategoryManager() {
       <div className="flex-1 overflow-y-auto">
         {editingCategory ? (
           <div className="p-6 max-w-[500px]">
-            <h3 className="text-sm font-bold text-text-primary mb-4">{selectedCategory ? 'Edit Category' : 'New Category'}</h3>
+            <h3 className="text-sm font-bold text-text-primary mb-4">{selectedCategory ? t('cats.editCategory') : t('cats.newCategory')}</h3>
             <div className="space-y-4">
               {/* Icon picker */}
               <div>
-                <label className="text-xs text-text-secondary mb-1.5 block">Icon</label>
+                <label className="text-xs text-text-secondary mb-1.5 block">{t('cats.icon')}</label>
                 <div className="flex gap-1.5 flex-wrap">
                   {EMOJI_OPTIONS.map((emoji) => (
                     <button
@@ -241,7 +243,7 @@ export default function CategoryManager() {
 
               {/* Color picker */}
               <div>
-                <label className="text-xs text-text-secondary mb-1.5 block">Color</label>
+                <label className="text-xs text-text-secondary mb-1.5 block">{t('cats.color')}</label>
                 <div className="flex gap-1.5 flex-wrap">
                   {COLOR_OPTIONS.map((color) => (
                     <button
@@ -257,31 +259,31 @@ export default function CategoryManager() {
               </div>
 
               <div>
-                <label className="text-xs text-text-secondary mb-1 block">Name</label>
-                <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Category name" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <label className="text-xs text-text-secondary mb-1 block">{t('cats.name')}</label>
+                <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder={t('cats.ph.categoryName')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
               </div>
 
               <div>
-                <label className="text-xs text-text-secondary mb-1 block">Description (optional)</label>
-                <textarea value={formDesc} onChange={(e) => setFormDesc(e.target.value)} rows={2} placeholder="Brief description..." className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none" />
+                <label className="text-xs text-text-secondary mb-1 block">{t('cats.description')} {t('common.optional')}</label>
+                <textarea value={formDesc} onChange={(e) => setFormDesc(e.target.value)} rows={2} placeholder={t('cats.ph.description')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none" />
               </div>
 
               {/* Preview */}
               <div className="p-4 bg-bg-primary border border-border rounded-lg flex items-center gap-3">
                 <span className="text-3xl">{formIcon}</span>
                 <div>
-                  <p className="text-sm font-bold text-text-primary">{formName || 'Category Name'}</p>
-                  <p className="text-xs text-text-secondary">{formDesc || 'No description'}</p>
+                  <p className="text-sm font-bold text-text-primary">{formName || t('cats.previewName')}</p>
+                  <p className="text-xs text-text-secondary">{formDesc || t('cats.noDescription')}</p>
                 </div>
                 <div className="ml-auto w-4 h-4 rounded-full" style={{ backgroundColor: formColor }} />
               </div>
 
               <div className="flex gap-2">
                 <button onClick={saveCategory} className="flex items-center gap-1 px-4 py-2 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors">
-                  <Save size={10} /> Save
+                  <Save size={10} /> {t('common.save')}
                 </button>
                 <button onClick={() => setEditingCategory(false)} className="px-4 py-2 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
@@ -292,7 +294,7 @@ export default function CategoryManager() {
               <span className="text-3xl">{selectedCategory.icon}</span>
               <div className="flex-1">
                 <h2 className="text-lg font-bold text-text-primary">{selectedCategory.name}</h2>
-                <p className="text-xs text-text-secondary">{selectedCategory.description || 'No description'} · {selectedCategory.product_count} products</p>
+                <p className="text-xs text-text-secondary">{selectedCategory.description || t('cats.noDescription')} · {t('cats.productCount', { count: selectedCategory.product_count })}</p>
               </div>
               <div className="w-4 h-4 rounded-full" style={{ backgroundColor: selectedCategory.color }} />
               <button onClick={() => openEditCategory(selectedCategory)} className="p-2 rounded-lg hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors">
@@ -307,14 +309,14 @@ export default function CategoryManager() {
             <div className="bg-bg-secondary border border-border rounded-lg">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold text-text-primary">Attribute Templates</h3>
-                  <p className="text-[10px] text-text-secondary">Expected attributes for products in this category</p>
+                  <h3 className="text-sm font-semibold text-text-primary">{t('cats.templates')}</h3>
+                  <p className="text-[10px] text-text-secondary">{t('cats.templatesSubtitle')}</p>
                 </div>
                 <button
                   onClick={() => setShowNewTemplate(true)}
                   className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-[10px] text-text-secondary transition-colors"
                 >
-                  <Plus size={10} /> Add
+                  <Plus size={10} /> {t('common.add')}
                 </button>
               </div>
               <div className="divide-y divide-border">
@@ -323,8 +325,8 @@ export default function CategoryManager() {
                     <Tag size={12} className="text-accent" />
                     <span className="text-xs font-medium text-text-primary">{tpl.attr_key}</span>
                     <span className="text-[10px] text-text-secondary px-1.5 py-0.5 bg-bg-primary border border-border rounded">{tpl.attr_type}</span>
-                    {tpl.is_required && <span className="text-[10px] text-warning font-semibold">required</span>}
-                    <span className="text-[10px] text-text-secondary ml-auto">order: {tpl.display_order}</span>
+                    {tpl.is_required && <span className="text-[10px] text-warning font-semibold">{t('cats.required')}</span>}
+                    <span className="text-[10px] text-text-secondary ml-auto">{t('cats.templateOrder', { count: tpl.display_order })}</span>
                     <button onClick={() => handleDeleteTemplate(tpl.id)} className="text-text-secondary hover:text-error transition-colors">
                       <Trash2 size={10} />
                     </button>
@@ -333,29 +335,29 @@ export default function CategoryManager() {
                 {showNewTemplate && (
                   <div className="px-4 py-2.5 flex items-center gap-3 bg-accent/5">
                     <Tag size={12} className="text-accent" />
-                    <input value={tplFormKey} onChange={(e) => setTplFormKey(e.target.value)} placeholder="Attribute name" className="w-32 px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" autoFocus />
+                    <input value={tplFormKey} onChange={(e) => setTplFormKey(e.target.value)} placeholder={t('cats.ph.attributeName')} className="w-32 px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" autoFocus />
                     <select value={tplFormType} onChange={(e) => setTplFormType(e.target.value)} className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent">
-                      <option value="string">String</option>
-                      <option value="number">Number</option>
-                      <option value="boolean">Boolean</option>
+                      <option value="string">{t('common.attrType.string')}</option>
+                      <option value="number">{t('common.attrType.number')}</option>
+                      <option value="boolean">{t('common.attrType.boolean')}</option>
                     </select>
                     <label className="flex items-center gap-1 text-[10px] text-text-secondary cursor-pointer">
                       <input type="checkbox" checked={tplFormRequired} onChange={(e) => setTplFormRequired(e.target.checked)} className="rounded border-border" />
-                      Required
+                      {t('cats.required')}
                     </label>
                     <button onClick={saveTemplate} className="p-1 bg-accent hover:bg-accent-hover rounded text-white"><Save size={10} /></button>
                     <button onClick={() => setShowNewTemplate(false)} className="p-1 bg-bg-tertiary hover:bg-bg-hover rounded text-text-secondary"><X size={10} /></button>
                   </div>
                 )}
                 {templates.length === 0 && !showNewTemplate && (
-                  <div className="p-4 text-xs text-text-secondary text-center">No templates — add expected attributes for this category</div>
+                  <div className="p-4 text-xs text-text-secondary text-center">{t('cats.noTemplates')}</div>
                 )}
               </div>
             </div>
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-text-secondary text-sm">
-            Select a category to manage
+            {t('cats.selectCategory')}
           </div>
         )}
       </div>
@@ -363,7 +365,7 @@ export default function CategoryManager() {
       {error && (
         <div className="fixed bottom-4 right-4 bg-error/10 border border-error/20 text-error px-4 py-2 rounded-lg text-xs shadow-lg z-50">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 hover:underline">dismiss</button>
+          <button onClick={() => setError(null)} className="ml-2 hover:underline">{t('common.dismiss')}</button>
         </div>
       )}
     </div>

@@ -3,6 +3,7 @@ import { Save, FolderOpen, Trash2 } from 'lucide-react';
 import { savePreset, loadPreset } from '../lib/presets';
 import type { PresetData } from '../types';
 import type { Node, Edge } from 'reactflow';
+import { useI18n } from '../lib/language';
 
 interface PresetManagerProps {
   nodes: Node[];
@@ -11,11 +12,12 @@ interface PresetManagerProps {
 }
 
 export default function PresetManager({ nodes, edges, onLoad }: PresetManagerProps) {
+  const { t } = useI18n();
   const [presets, setPresets] = useState<PresetData[]>([]);
   const [name, setName] = useState('');
 
   async function handleSave() {
-    const presetName = name.trim() || 'Untitled Preset';
+    const presetName = name.trim() || t('preset.unnamed');
     const success = await savePreset({
       name: presetName,
       nodes: nodes as unknown[],
@@ -52,20 +54,20 @@ export default function PresetManager({ nodes, edges, onLoad }: PresetManagerPro
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Preset name..."
+          placeholder={t('preset.namePlaceholder')}
           className="flex-1 px-2 py-1 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-border-focus"
         />
         <button
           onClick={handleSave}
           className="flex items-center gap-1 px-2 py-1 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors"
         >
-          <Save size={10} /> Save
+          <Save size={10} /> {t('preset.save')}
         </button>
         <button
           onClick={handleLoad}
           className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
         >
-          <FolderOpen size={10} /> Load
+          <FolderOpen size={10} /> {t('preset.load')}
         </button>
       </div>
 

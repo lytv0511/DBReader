@@ -2,6 +2,7 @@ import { memo, useRef } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { Table, X } from 'lucide-react';
 import type { ColumnInfo } from '../../types';
+import { useI18n } from '../../lib/language';
 
 export interface TableNodeData {
   selectedTable: string;
@@ -12,6 +13,7 @@ export interface TableNodeData {
 }
 
 function TableNode({ id, data }: NodeProps) {
+  const { t } = useI18n();
   const { selectedTable, tables, columns, onTableChange, onDelete } = data as TableNodeData;
   const selectRef = useRef<HTMLSelectElement>(null);
 
@@ -23,7 +25,7 @@ function TableNode({ id, data }: NodeProps) {
     <div className="bg-bg-secondary border border-border rounded-lg shadow-lg min-w-[200px]">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-tertiary rounded-t-lg">
         <Table size={14} className="text-accent" />
-        <span className="text-xs font-semibold text-text-primary">Table Source</span>
+        <span className="text-xs font-semibold text-text-primary">{t('node.table.title')}</span>
         {onDelete && (
           <button
             onClick={() => onDelete(id)}
@@ -47,10 +49,10 @@ function TableNode({ id, data }: NodeProps) {
           onClick={stopAll}
           className="nodrag w-full px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-border-focus"
         >
-          <option value="">Select a table...</option>
-          {tables.map((t) => (
-            <option key={t} value={t}>
-              {t}
+          <option value="">{t('node.table.selectTable')}</option>
+          {tables.map((name) => (
+            <option key={name} value={name}>
+              {name}
             </option>
           ))}
         </select>

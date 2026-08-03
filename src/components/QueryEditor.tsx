@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Play, Loader2 } from 'lucide-react';
 import { executeQuery } from '../lib/db';
+import { useI18n } from '../lib/language';
 import type { QueryResult } from '../types';
 
 interface QueryEditorProps {
@@ -16,9 +17,15 @@ export default function QueryEditor({
   initialSql,
   onSqlChange,
 }: QueryEditorProps) {
+  const { t } = useI18n();
   const [sql, setSql] = useState(initialSql || 'SELECT * FROM ');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialSql !== undefined && initialSql !== sql) setSql(initialSql);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSql]);
 
   const handleChange = (val: string) => {
     setSql(val);
@@ -50,7 +57,7 @@ export default function QueryEditor({
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <span className="text-xs text-text-secondary font-medium uppercase tracking-wide">
-          SQL Query
+          {t('query.title')}
         </span>
         <button
           onClick={handleExecute}
@@ -62,7 +69,7 @@ export default function QueryEditor({
           ) : (
             <Play size={12} />
           )}
-          Run
+          {t('query.runButton')}
           <kbd className="ml-1 text-[10px] opacity-60">⌘↵</kbd>
         </button>
       </div>
@@ -73,7 +80,7 @@ export default function QueryEditor({
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={!isConnected}
-          placeholder={isConnected ? 'Enter SQL query...' : 'Open a database first'}
+          placeholder={isConnected ? t('query.placeholderConnected') : t('query.placeholderNot')}
           spellCheck={false}
           className="w-full h-full p-3 bg-bg-primary text-text-primary text-sm resize-none focus:outline-none placeholder:text-text-secondary disabled:opacity-40"
         />

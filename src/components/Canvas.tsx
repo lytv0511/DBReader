@@ -20,6 +20,7 @@ import FilterNode from './nodes/FilterNode';
 import OutputNode from './nodes/OutputNode';
 import { getTables, getTableColumns, executeQuery } from '../lib/db';
 import type { PresetData } from '../types';
+import { useI18n } from '../lib/language';
 
 const nodeTypes: NodeTypes = {
   tableNode: TableNode,
@@ -73,9 +74,11 @@ const initialEdges: Edge[] = [
 
 interface CanvasProps {
   isConnected: boolean;
+  dbPath?: string | null;
 }
 
-function CanvasInner({ isConnected }: CanvasProps) {
+function CanvasInner({ isConnected, dbPath }: CanvasProps) {
+  const { t } = useI18n();
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [tableList, setTableList] = useState<string[]>([]);
@@ -143,27 +146,50 @@ function CanvasInner({ isConnected }: CanvasProps) {
       setTableList(tables);
       setNodes((nds) =>
         nds.map((n) =>
-          n.id === 'table-1' ? { ...n, data: { ...n.data, tables, columns: [] } } : n
+          n.id === 'table-1' ? { ...n, data: { ...n.data, tables, columns: [], selectedTable: '' } } : n
         )
       );
     });
-  }, [isConnected, setNodes]);
+  }, [isConnected, dbPath, setNodes]);
+
+  const removeNode = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => nds.filter((n) => n.id !== nodeId));
+      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+    },
+    [setNodes, setEdges]
+  );
 
   const addTableNode = useCallback((x?: number, y?: number) => {
     counterRef.current += 1;
     const id = `table-${counterRef.current}`;
+    if (!tableCallbacksRef.current.has(id)) {
+      tableCallbacksRef.current.set(id, (table: string) => handleTableChangeRef.current(id, table));
+    }
     const newNode: Node = {
       id,
       type: 'tableNode',
       position: { x: x ?? 250, y: y ?? 50 },
-      data: { selectedTable: '', tables: tableListRef.current, columns: [] },
+      data: {
+        selectedTable: '',
+        tables: tableListRef.current,
+        columns: [],
+        onTableChange: tableCallbacksRef.current.get(id)!,
+        onDelete: removeNode,
+      },
     };
     setNodes((nds) => [...nds, newNode]);
-  }, [setNodes]);
+  }, [setNodes, removeNode]);
 
   const addFilterNode = useCallback((x?: number, y?: number) => {
     counterRef.current += 1;
     const id = `filter-${counterRef.current}`;
+    if (!filterCallbacksRef.current.has(id)) {
+      filterCallbacksRef.current.set(id, (c: string, o: string, v: string) => handleFilterChangeRef.current(id, c, o, v));
+    }
+    if (!customSqlCallbacksRef.current.has(id)) {
+      customSqlCallbacksRef.current.set(id, (s: string) => handleCustomSqlChangeRef.current(id, s));
+    }
     const newNode: Node = {
       id,
       type: 'filterNode',
@@ -174,10 +200,13 @@ function CanvasInner({ isConnected }: CanvasProps) {
         filterValue: '',
         customSql: '',
         columns: [],
+        onFilterChange: filterCallbacksRef.current.get(id)!,
+        onCustomSqlChange: customSqlCallbacksRef.current.get(id)!,
+        onDelete: removeNode,
       },
     };
     setNodes((nds) => [...nds, newNode]);
-  }, [setNodes]);
+  }, [setNodes, removeNode]);
 
   const addOutputNode = useCallback((x?: number, y?: number) => {
     counterRef.current += 1;
@@ -203,14 +232,6 @@ function CanvasInner({ isConnected }: CanvasProps) {
       );
     },
     [setNodes]
-  );
-
-  const removeNode = useCallback(
-    (nodeId: string) => {
-      setNodes((nds) => nds.filter((n) => n.id !== nodeId));
-      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
-    },
-    [setNodes, setEdges]
   );
 
   // Stable handler implementations stored in refs — never trigger re-renders
@@ -294,6 +315,30 @@ function CanvasInner({ isConnected }: CanvasProps) {
   // When edges change, sync queryParamsRef from the connected nodes' data
   useEffect(() => {
     const filterEdge = edges.find((e) => e.target === 'output-1');
+
+    // Populate filter node columns whenever it is fed by a table node
+    for (const fnode of nodes) {
+      if (fnode.type !== 'filterNode') continue;
+      const fedBy = edges.find((e) => e.target === fnode.id);
+      if (!fedBy) continue;
+      const tableNode = nodes.find((n) => n.id === fedBy.source);
+      if (!tableNode || tableNode.type !== 'tableNode') continue;
+      const tdata = tableNode.data as Record<string, unknown>;
+      const tableColumns = (((tdata.columns as Array<{ name?: string } | string>) || [])
+        .map((c) => (typeof c === 'string' ? c : c?.name || ''))
+        .filter((c) => c));
+      const fdata = fnode.data as Record<string, unknown>;
+      const filterColumns = (fdata.columns as string[]) || [];
+      if (
+        tableColumns.length &&
+        (filterColumns.length !== tableColumns.length || filterColumns.some((c, i) => c !== tableColumns[i]))
+      ) {
+        setNodes((nds) =>
+          nds.map((n) => (n.id === fnode.id ? { ...n, data: { ...n.data, columns: tableColumns } } : n))
+        );
+      }
+    }
+
     if (!filterEdge) return;
     const filterNode = nodes.find((n) => n.id === filterEdge.source);
     if (!filterNode || filterNode.type !== 'filterNode') return;
@@ -311,7 +356,7 @@ function CanvasInner({ isConnected }: CanvasProps) {
       filterValue: (fdata.filterValue as string) || '',
       customSql: (fdata.customSql as string) || '',
     };
-  }, [edges, nodes]);
+  }, [edges, nodes, setNodes]);
 
   // Auto-run query when output node has incoming edge
   useEffect(() => {
@@ -429,13 +474,12 @@ function CanvasInner({ isConnected }: CanvasProps) {
                   onClick={() => { clearNode(pos.nodeId); closeMenu(); }}
                   className="w-full px-3 py-1.5 text-left text-xs text-text-primary hover:bg-bg-hover transition-colors"
                 >
-                  Clear Node
-                </button>
-                <button
+                  {t('canvas.clearNode')}
+                </button>                <button
                   onClick={() => { removeNode(pos.nodeId); closeMenu(); }}
                   className="w-full px-3 py-1.5 text-left text-xs text-error hover:bg-bg-hover transition-colors"
                 >
-                  Delete Node
+                  {t('canvas.deleteNode')}
                 </button>
               </>
             ) : (
@@ -444,19 +488,19 @@ function CanvasInner({ isConnected }: CanvasProps) {
                   onClick={() => { addTableNode(pos.fx, pos.fy); closeMenu(); }}
                   className="w-full px-3 py-1.5 text-left text-xs text-text-primary hover:bg-bg-hover transition-colors"
                 >
-                  Add Table
+                  {t('canvas.addTable')}
                 </button>
                 <button
                   onClick={() => { addFilterNode(pos.fx, pos.fy); closeMenu(); }}
                   className="w-full px-3 py-1.5 text-left text-xs text-text-primary hover:bg-bg-hover transition-colors"
                 >
-                  Add Filter
+                  {t('canvas.addFilter')}
                 </button>
                 <button
                   onClick={() => { addOutputNode(pos.fx, pos.fy); closeMenu(); }}
                   className="w-full px-3 py-1.5 text-left text-xs text-text-primary hover:bg-bg-hover transition-colors"
                 >
-                  Add Output
+                  {t('canvas.addOutput')}
                 </button>
               </>
             )}
@@ -489,10 +533,10 @@ function CanvasInner({ isConnected }: CanvasProps) {
   );
 }
 
-export default function Canvas({ isConnected }: CanvasProps) {
+export default function Canvas({ isConnected, dbPath }: CanvasProps) {
   return (
     <ReactFlowProvider>
-      <CanvasInner isConnected={isConnected} />
+      <CanvasInner isConnected={isConnected} dbPath={dbPath} />
     </ReactFlowProvider>
   );
 }

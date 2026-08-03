@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react
 import { PieChart, Pie, Cell, Sector } from 'recharts';
 import { DollarSign, Package, ArrowLeft } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
+import { useI18n } from '../../lib/language';
 
 interface PieItem {
   id: number;
@@ -64,6 +65,7 @@ function PieSector(props: Record<string, unknown>) {
 }
 
 export default function PieChartWidget({ mode }: PieChartWidgetProps) {
+  const { t } = useI18n();
   const isSpending = mode === 'spending';
   const [metricMode, setMetricMode] = useState<'historical' | 'current'>('current');
   const [selectedCategory, setSelectedCategory] = useState<{ id: number; name: string; icon: string; color: string } | null>(null);
@@ -237,13 +239,12 @@ export default function PieChartWidget({ mode }: PieChartWidgetProps) {
     const angleRad = Math.atan2(dy, dx);
     const angleDeg = (angleRad * 180) / Math.PI;
     const rechartsAngle = ((-angleDeg) % 360 + 360) % 360;
-    const normalizedAngle = (rechartsAngle - 90 + 360) % 360;
     const total = data.reduce((s, d) => s + d.value, 0);
     if (total === 0) return;
     let cumulative = 0;
     for (let i = 0; i < data.length; i++) {
       const sweep = (data[i].value / total) * 360;
-      if (normalizedAngle >= cumulative && normalizedAngle < cumulative + sweep) {
+      if (rechartsAngle >= cumulative && rechartsAngle < cumulative + sweep) {
         setHoveredIndex(i);
         return;
       }
@@ -256,10 +257,10 @@ export default function PieChartWidget({ mode }: PieChartWidgetProps) {
   }, []);
 
   const headerTitle = isSpending
-    ? (metricMode === 'current' ? 'Inventory Value' : 'Historical Spending')
-    : (metricMode === 'current' ? 'Current Stock' : 'Historical Purchased');
+    ? (metricMode === 'current' ? t('pie.header.invValue') : t('pie.header.histSpend'))
+    : (metricMode === 'current' ? t('pie.header.currentStock') : t('pie.header.histPurch'));
 
-  const emptyMsg = isSpending ? 'No spending data yet' : 'No quantity data yet';
+  const emptyMsg = isSpending ? t('pie.empty.spend') : t('pie.empty.qty');
 
   return (
     <div className="bg-bg-secondary border border-border rounded-lg">
@@ -271,20 +272,20 @@ export default function PieChartWidget({ mode }: PieChartWidgetProps) {
             onClick={() => setMetricMode('current')}
             className={`px-2 py-1 text-[10px] font-medium transition-colors ${metricMode === 'current' ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'}`}
           >
-            Current
+            {t('pie.toggle.current')}
           </button>
           <button
             onClick={() => setMetricMode('historical')}
             className={`px-2 py-1 text-[10px] font-medium transition-colors ${metricMode === 'historical' ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'}`}
           >
-            Historical
+            {t('pie.toggle.hist')}
           </button>
         </div>
       </div>
 
       <div className="p-4" style={{ maxHeight: 300, overflowY: 'auto' }}>
         {loading ? (
-          <div className="flex items-center justify-center h-[200px] text-xs text-text-secondary">Loading...</div>
+          <div className="flex items-center justify-center h-[200px] text-xs text-text-secondary">{t('pie.loading')}</div>
         ) : error ? (
           <div className="flex items-center justify-center h-[200px] text-xs text-error">{error}</div>
         ) : data.length === 0 ? (
@@ -298,7 +299,7 @@ export default function PieChartWidget({ mode }: PieChartWidgetProps) {
                   className="flex items-center gap-1 text-[10px] text-text-secondary hover:text-text-primary mb-2 transition-colors"
                 >
                   <ArrowLeft size={10} />
-                  Back
+                  {t('pie.back')}
                 </button>
               )}
               <PieChart width={180} height={180}>
@@ -317,8 +318,8 @@ export default function PieChartWidget({ mode }: PieChartWidgetProps) {
                   onClick={handleSliceClick}
                   cursor={selectedCategory ? 'default' : 'pointer'}
                 >
-                  {data.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
+                  {data.map((entry, index) => (
+                    <Cell key={`${mode}-${index}-${entry.name}`} fill={entry.color} />
                   ))}
                 </Pie>
               </PieChart>
@@ -359,7 +360,7 @@ export default function PieChartWidget({ mode }: PieChartWidgetProps) {
               })}
               {data.length > 12 && (
                 <div className="text-[10px] text-text-secondary text-center pt-1">
-                  +{data.length - 12} more
+                  {t('pie.more', { count: data.length - 12 })}
                 </div>
               )}
             </div>

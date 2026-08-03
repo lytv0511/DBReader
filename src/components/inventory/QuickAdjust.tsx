@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Minus, ShoppingCart, Trash2, Wrench, AlertTriangle } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
+import { todayLocalISO } from '../../lib/dates';
+import { useI18n } from '../../lib/language';
 
 interface Product {
   id: number;
@@ -27,15 +29,16 @@ interface RecentAdjustment {
 }
 
 const TX_TYPES = [
-  { value: 'PURCHASE', label: 'Stock In', icon: <ShoppingCart size={16} />, color: 'bg-success/10 border-success/30 text-success hover:bg-success/20', activeColor: 'bg-success/20 border-success text-success' },
-  { value: 'USAGE', label: 'Usage', icon: <Minus size={16} />, color: 'bg-warning/10 border-warning/30 text-warning hover:bg-warning/20', activeColor: 'bg-warning/20 border-warning text-warning' },
-  { value: 'SPOILAGE', label: 'Spoilage', icon: <Trash2 size={16} />, color: 'bg-error/10 border-error/30 text-error hover:bg-error/20', activeColor: 'bg-error/20 border-error text-error' },
-  { value: 'ADJUSTMENT', label: 'Adjust', icon: <Wrench size={16} />, color: 'bg-accent/10 border-accent/30 text-accent hover:bg-accent/20', activeColor: 'bg-accent/20 border-accent text-accent' },
+  { value: 'PURCHASE', labelKey: 'common.tx.PURCHASE', icon: <ShoppingCart size={16} />, color: 'bg-success/10 border-success/30 text-success hover:bg-success/20', activeColor: 'bg-success/20 border-success text-success' },
+  { value: 'USAGE', labelKey: 'common.tx.USAGE', icon: <Minus size={16} />, color: 'bg-warning/10 border-warning/30 text-warning hover:bg-warning/20', activeColor: 'bg-warning/20 border-warning text-warning' },
+  { value: 'SPOILAGE', labelKey: 'common.tx.SPOILAGE', icon: <Trash2 size={16} />, color: 'bg-error/10 border-error/30 text-error hover:bg-error/20', activeColor: 'bg-error/20 border-error text-error' },
+  { value: 'ADJUSTMENT', labelKey: 'common.tx.ADJUSTMENT', icon: <Wrench size={16} />, color: 'bg-accent/10 border-accent/30 text-accent hover:bg-accent/20', activeColor: 'bg-accent/20 border-accent text-accent' },
 ];
 
 const QUICK_QTY = [1, 6, 12, 24];
 
 export default function QuickAdjust() {
+  const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [recent, setRecent] = useState<RecentAdjustment[]>([]);
@@ -132,10 +135,11 @@ export default function QuickAdjust() {
         batchId = batchResult.rows[0][0] as number;
       } else {
         // Auto-create a batch
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalISO();
+        const autoNote = t('adjust.autoNote').replace(/'/g, "''");
         await executeQuery(`
           INSERT INTO batches (product_id, batch_number, supplier_name, unit_cost_price, purchase_date, notes)
-          VALUES (${selectedProductId}, NULL, NULL, 0, '${today}', 'Auto-created by Quick Adjust')
+          VALUES (${selectedProductId}, NULL, NULL, 0, '${today}', '${autoNote}')
         `);
         const newBatch = await executeQuery(`SELECT last_insert_rowid()`);
         batchId = newBatch.rows[0][0] as number;
@@ -183,7 +187,7 @@ export default function QuickAdjust() {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <RefreshCw size={20} className="animate-spin mr-2" />
-        Loading inventory...
+        {t('adjust.loading')}
       </div>
     );
   }
@@ -193,20 +197,20 @@ export default function QuickAdjust() {
       {/* Left: Adjust form */}
       <div className="w-[420px] border-r border-border bg-bg-secondary flex flex-col shrink-0 overflow-y-auto">
         <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-base font-bold text-text-primary">Quick Adjust</h2>
-          <p className="text-xs text-text-secondary mt-0.5">Add, remove, or adjust stock levels</p>
+          <h2 className="text-base font-bold text-text-primary">{t('adjust.title')}</h2>
+          <p className="text-xs text-text-secondary mt-0.5">{t('adjust.subtitle')}</p>
         </div>
 
         <div className="p-5 space-y-5">
           {/* Product selector */}
           <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">Product</label>
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.productLabel')}</label>
             <select
               value={selectedProductId}
               onChange={(e) => setSelectedProductId(e.target.value === '' ? '' : Number(e.target.value))}
               className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
             >
-              <option value="">Select a product...</option>
+              <option value="">{t('adjust.productPlaceholder')}</option>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}{p.sku ? ` (${p.sku})` : ''}
@@ -225,7 +229,7 @@ export default function QuickAdjust() {
                   : 'bg-success/5 border-success/20'
             }`}>
               <div>
-                <p className="text-xs text-text-secondary">Current Stock</p>
+                <p className="text-xs text-text-secondary">{t('adjust.currentStock')}</p>
                 <p className={`text-2xl font-bold ${
                   selectedProduct.current_stock <= 0 ? 'text-error' :
                   selectedProduct.current_stock <= selectedProduct.reorder_threshold ? 'text-warning' : 'text-success'
@@ -237,7 +241,7 @@ export default function QuickAdjust() {
                 <div className="flex items-center gap-1.5 text-warning">
                   <AlertTriangle size={14} />
                   <span className="text-xs font-medium">
-                    {selectedProduct.current_stock <= 0 ? 'Out of stock!' : 'Low stock'}
+                    {selectedProduct.current_stock <= 0 ? t('adjust.outOfStock') : t('adjust.lowStock')}
                   </span>
                 </div>
               )}
@@ -246,18 +250,18 @@ export default function QuickAdjust() {
 
           {/* Transaction type */}
           <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">Action</label>
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.actionLabel')}</label>
             <div className="grid grid-cols-2 gap-2">
-              {TX_TYPES.map((t) => (
+              {TX_TYPES.map((tx) => (
                 <button
-                  key={t.value}
-                  onClick={() => setTxType(t.value)}
+                  key={tx.value}
+                  onClick={() => setTxType(tx.value)}
                   className={`flex items-center gap-2 px-3 py-3 rounded-lg border text-sm font-medium transition-all ${
-                    txType === t.value ? t.activeColor : t.color
+                    txType === tx.value ? tx.activeColor : tx.color
                   }`}
                 >
-                  {t.icon}
-                  {t.label}
+                  {tx.icon}
+                  {t(tx.labelKey)}
                 </button>
               ))}
             </div>
@@ -265,7 +269,7 @@ export default function QuickAdjust() {
 
           {/* Quantity */}
           <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">Quantity</label>
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.quantityLabel')}</label>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setQty(String(Math.max(1, Number(qty) - 1)))}
@@ -310,14 +314,14 @@ export default function QuickAdjust() {
           {/* Location (optional) */}
           <div>
             <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
-              Location <span className="font-normal text-text-secondary/60">(optional)</span>
+              Location <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
             </label>
             <select
               value={locationId}
               onChange={(e) => setLocationId(e.target.value === '' ? '' : Number(e.target.value))}
               className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
             >
-              <option value="">No location</option>
+              <option value="">{t('adjust.noLocation')}</option>
               {locations.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}{l.sub_location ? ` - ${l.sub_location}` : ''}
@@ -329,12 +333,12 @@ export default function QuickAdjust() {
           {/* Notes (optional) */}
           <div>
             <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
-              Notes <span className="font-normal text-text-secondary/60">(optional)</span>
+              Notes <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Restock from supplier, event service..."
+              placeholder={t('adjust.notesPlaceholder')}
               rows={2}
               className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent resize-none"
             />
@@ -356,7 +360,7 @@ export default function QuickAdjust() {
                       : 'bg-accent hover:bg-accent-hover text-white'
             }`}
           >
-            {submitting ? 'Saving...' : `Record ${TX_TYPES.find((t) => t.value === txType)?.label || 'Transaction'}`}
+            {submitting ? t('adjust.saving') : t('adjust.record', { action: t(TX_TYPES.find((tx) => tx.value === txType)?.labelKey || 'adjust.transaction') })}
           </button>
         </div>
       </div>
@@ -366,14 +370,14 @@ export default function QuickAdjust() {
         {/* Recent adjustments */}
         <div className="border-b border-border">
           <div className="px-5 py-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-text-primary">Recent Adjustments</h3>
+            <h3 className="text-sm font-semibold text-text-primary">{t('adjust.recent')}</h3>
             <button onClick={fetchData} className="text-text-secondary hover:text-text-primary transition-colors">
               <RefreshCw size={12} />
             </button>
           </div>
           <div className="divide-y divide-border max-h-[280px] overflow-y-auto">
             {recent.length === 0 ? (
-              <div className="px-5 py-6 text-center text-xs text-text-secondary">No adjustments yet</div>
+              <div className="px-5 py-6 text-center text-xs text-text-secondary">{t('adjust.noRecent')}</div>
             ) : (
               recent.map((r) => (
                 <div key={r.id} className="px-5 py-2.5 flex items-center justify-between">
@@ -400,7 +404,7 @@ export default function QuickAdjust() {
 
         {/* Stock overview */}
         <div className="px-5 py-3">
-          <h3 className="text-sm font-semibold text-text-primary mb-3">All Stock Levels</h3>
+          <h3 className="text-sm font-semibold text-text-primary mb-3">{t('adjust.allStock')}</h3>
           <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
             {products.map((p) => {
               const stock = Math.round(p.current_stock);
@@ -437,7 +441,7 @@ export default function QuickAdjust() {
       {error && (
         <div className="fixed bottom-4 right-4 bg-error/10 border border-error/20 text-error px-4 py-2 rounded-lg text-xs shadow-lg z-50">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 hover:underline">dismiss</button>
+          <button onClick={() => setError(null)} className="ml-2 hover:underline">{t('common.dismiss')}</button>
         </div>
       )}
     </div>

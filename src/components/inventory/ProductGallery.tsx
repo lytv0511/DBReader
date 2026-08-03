@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
+import { useI18n } from '../../lib/language';
 
 interface Product {
   id: number;
@@ -12,6 +13,7 @@ interface Product {
   category_color: string;
   current_stock: number;
   reorder_threshold: number;
+  base_unit_name: string;
 }
 
 interface ProductGalleryProps {
@@ -19,6 +21,7 @@ interface ProductGalleryProps {
 }
 
 export default function ProductGallery({ onSelectProduct }: ProductGalleryProps) {
+  const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,12 +41,13 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
             COALESCE(c.icon, '📋') AS category_icon,
             COALESCE(c.color, '#5b6abf') AS category_color,
             COALESCE(SUM(il.quantity_change), 0) AS current_stock,
-            p.reorder_threshold
+            p.reorder_threshold,
+            p.base_unit_name
           FROM products p
           LEFT JOIN categories c ON p.category_id = c.id
           LEFT JOIN batches b ON b.product_id = p.id
           LEFT JOIN inventory_logs il ON il.batch_id = b.id
-          GROUP BY p.id, p.name, p.sku, c.name, p.category_id, c.icon, c.color, p.reorder_threshold
+          GROUP BY p.id, p.name, p.sku, c.name, p.category_id, c.icon, c.color, p.reorder_threshold, p.base_unit_name
           ORDER BY c.name, p.name
         `),
         executeQuery(`
@@ -65,6 +69,7 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
         category_color: r[6] as string || '#5b6abf',
         current_stock: r[7] as number,
         reorder_threshold: r[8] as number,
+        base_unit_name: r[9] as string || 'unit',
       })));
 
       const cats = categoriesResult.rows.map((r) => ({
@@ -99,7 +104,7 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <RefreshCw size={20} className="animate-spin mr-2" />
-        Loading products...
+        {t('gallery.loading')}
       </div>
     );
   }
@@ -109,7 +114,7 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
       {/* Category bar */}
       <div className="px-6 py-4 border-b border-border bg-bg-secondary shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-text-primary">Product Gallery</h2>
+          <h2 className="text-lg font-bold text-text-primary">{t('gallery.title')}</h2>
           <button onClick={fetchData} className="p-2 text-text-secondary hover:text-text-primary transition-colors">
             <RefreshCw size={14} />
           </button>
@@ -121,7 +126,7 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
               filterCategoryId === null ? 'bg-accent text-white border-accent' : 'bg-bg-primary border-border text-text-secondary hover:border-accent/50'
             }`}
           >
-            All ({products.length})
+            {t('gallery.all', { count: products.length })}
           </button>
           {categories.map((cat) => (
             <button
@@ -145,7 +150,7 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
           <div className="text-center text-error text-sm">{error}</div>
         ) : filtered.length === 0 ? (
           <div className="text-center text-text-secondary text-sm">
-            {filterCategoryId !== null ? 'No products in this category' : 'No products found'}
+            {filterCategoryId !== null ? t('gallery.noInCategory') : t('gallery.noFound')}
           </div>
         ) : (
           <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -173,7 +178,7 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
                   <div className={`text-lg font-bold ${isOut ? 'text-error' : isLow ? 'text-warning' : 'text-success'}`}>
                     {stock}
                   </div>
-                  <p className="text-[10px] text-text-secondary">in stock</p>
+                  <p className="text-[10px] text-text-secondary">{t('gallery.inStock')}</p>
                 </button>
               );
             })}

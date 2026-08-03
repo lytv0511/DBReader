@@ -120,3 +120,20 @@ html, body, #root {
 textarea {
   font-family: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, Consolas, monospace;
 }
+
+@keyframes help-wave {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  20% { transform: scale(1.18) rotate(-10deg); }
+  40% { transform: scale(1.08) rotate(8deg); }
+  60% { transform: scale(1.18) rotate(-6deg); }
+  80% { transform: scale(1.08) rotate(4deg); }
+}
+
+.help-icon-anim {
+  animation: help-wave 2.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.help-icon-anim:hover {
+  animation-play-state: paused;
+}

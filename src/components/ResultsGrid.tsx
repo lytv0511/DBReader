@@ -1,15 +1,17 @@
 import type { QueryResult } from '../types';
 import { ArrowUpDown } from 'lucide-react';
+import { useI18n } from '../lib/language';
 
 interface ResultsGridProps {
   result: QueryResult | null;
 }
 
 export default function ResultsGrid({ result }: ResultsGridProps) {
+  const { t } = useI18n();
   if (!result) {
     return (
       <div className="h-full flex items-center justify-center text-text-secondary text-sm">
-        Run a query to see results
+        {t('results.emptyPlaceholder')}
       </div>
     );
   }
@@ -17,7 +19,7 @@ export default function ResultsGrid({ result }: ResultsGridProps) {
   if (result.columns.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-text-secondary text-sm">
-        Query executed. {result.rows_affected ?? 0} row(s) affected.
+        {t('results.rowsAffected', { count: result.rows_affected ?? 0 })}
       </div>
     );
   }
@@ -75,9 +77,9 @@ export default function ResultsGrid({ result }: ResultsGridProps) {
       </table>
 
       <div className="px-3 py-2 border-t border-border text-xs text-text-secondary">
-        {result.rows.length} row{result.rows.length !== 1 ? 's' : ''}
+        {t('results.rowsFooter', { count: result.rows.length })}
         {result.rows_affected !== null && result.rows_affected !== result.rows.length && (
-          <> · {result.rows_affected} affected</>
+          <> {t('results.rowsAffectedSuffix', { count: result.rows_affected })}</>
         )}
       </div>
     </div>

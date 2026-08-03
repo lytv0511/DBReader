@@ -10,6 +10,7 @@ import {
   Search,
 } from 'lucide-react';
 import { getTables, getTableColumns } from '../lib/db';
+import { useI18n } from '../lib/language';
 import type { ColumnInfo } from '../types';
 
 interface TableSchema {
@@ -19,12 +20,14 @@ interface TableSchema {
 
 interface SidebarProps {
   isConnected: boolean;
+  dbPath?: string | null;
   onSelectTable?: (table: string) => void;
   tables?: string[];
   onRefresh?: () => void;
 }
 
-export default function Sidebar({ isConnected, onSelectTable, tables: externalTables }: SidebarProps) {
+export default function Sidebar({ isConnected, dbPath, onSelectTable, tables: externalTables }: SidebarProps) {
+  const { t } = useI18n();
   const [tables, setTables] = useState<TableSchema[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
@@ -36,7 +39,7 @@ export default function Sidebar({ isConnected, onSelectTable, tables: externalTa
       return;
     }
     loadSchema();
-  }, [isConnected, externalTables]);
+  }, [isConnected, dbPath, externalTables]);
 
   async function loadSchema() {
     setLoading(true);
@@ -71,7 +74,7 @@ export default function Sidebar({ isConnected, onSelectTable, tables: externalTa
       <div className="h-full flex flex-col items-center justify-center p-6 text-center">
         <Database size={48} className="text-text-secondary mb-4" />
         <p className="text-text-secondary text-sm">
-          Open a database file to explore its schema
+          {t('sidebar.notConnected')}
         </p>
       </div>
     );
@@ -84,7 +87,7 @@ export default function Sidebar({ isConnected, onSelectTable, tables: externalTa
           <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary" />
           <input
             type="text"
-            placeholder="Search tables..."
+            placeholder={t('sidebar.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-7 pr-3 py-1.5 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-border-focus"
@@ -94,9 +97,9 @@ export default function Sidebar({ isConnected, onSelectTable, tables: externalTa
 
       <div className="flex-1 overflow-y-auto p-2">
         {loading ? (
-          <div className="text-text-secondary text-sm p-3">Loading schema...</div>
+          <div className="text-text-secondary text-sm p-3">{t('sidebar.schemaLoading')}</div>
         ) : filtered.length === 0 ? (
-          <div className="text-text-secondary text-sm p-3">No tables found</div>
+          <div className="text-text-secondary text-sm p-3">{t('sidebar.noTablesFound')}</div>
         ) : (
           filtered.map((table) => (
             <div key={table.name} className="mb-1">
@@ -156,7 +159,7 @@ export default function Sidebar({ isConnected, onSelectTable, tables: externalTa
           onClick={loadSchema}
           className="w-full px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
         >
-          Refresh Schema
+          {t('sidebar.refreshSchema')}
         </button>
       </div>
     </div>

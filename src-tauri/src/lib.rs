@@ -415,6 +415,10 @@ fn open_database(path: String, state: State<DbState>) -> Result<TableInfo, Strin
 
 #[tauri::command]
 fn create_new_database(path: String, state: State<DbState>) -> Result<TableInfo, String> {
+    if std::path::Path::new(&path).exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to replace existing database: {}", e))?;
+    }
     let conn = Connection::open(&path).map_err(|e| format!("Failed to create database: {}", e))?;
     conn.execute_batch("BEGIN;")
         .map_err(|e| format!("Failed to start transaction: {}", e))?;
@@ -422,16 +426,10 @@ fn create_new_database(path: String, state: State<DbState>) -> Result<TableInfo,
         conn.execute_batch("ROLLBACK;").ok();
         return Err(format!("Failed to create schema: {}", e));
     }
-    if let Err(e) = conn.execute_batch("PRAGMA foreign_keys = ON;") {
-        conn.execute_batch("ROLLBACK;").ok();
-        return Err(format!("Failed to enable foreign keys: {}", e));
-    }
-    if let Err(e) = conn.execute_batch(SEED_DATA) {
-        conn.execute_batch("ROLLBACK;").ok();
-        return Err(format!("Failed to seed data: {}", e));
-    }
     conn.execute_batch("COMMIT;")
         .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
     let tables = get_tables_internal(&conn)?;
     let mut columns = Vec::new();
     if let Some(first) = tables.first() {
@@ -1083,9 +1081,28 @@ fn get_product_report_data(product_id: i64, state: State<DbState>) -> Result<ser
     })
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct AppPreferences {
     last_db_path: Option<String>,
+    theme: Option<String>,
+    language: Option<String>,
+    open_on_startup: Option<bool>,
+    default_query_limit: Option<i64>,
+    inventory_tab_order: Option<Vec<String>>,
+}
+
+impl Default for AppPreferences {
+    fn default() -> Self {
+        AppPreferences {
+            last_db_path: None,
+            theme: None,
+            language: None,
+            open_on_startup: Some(true),
+            default_query_limit: Some(100),
+            inventory_tab_order: None,
+        }
+    }
 }
 
 fn prefs_path() -> Result<std::path::PathBuf, String> {
@@ -1094,8 +1111,7 @@ fn prefs_path() -> Result<std::path::PathBuf, String> {
 }
 
 #[tauri::command]
-fn save_preferences(last_db_path: Option<String>) -> Result<(), String> {
-    let prefs = AppPreferences { last_db_path };
+fn save_preferences(prefs: AppPreferences) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?;
     std::fs::write(prefs_path()?, json).map_err(|e| e.to_string())
 }
@@ -1104,7 +1120,7 @@ fn save_preferences(last_db_path: Option<String>) -> Result<(), String> {
 fn load_preferences() -> Result<AppPreferences, String> {
     let path = prefs_path()?;
     if !path.exists() {
-        return Ok(AppPreferences { last_db_path: None });
+        return Ok(AppPreferences::default());
     }
     let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     serde_json::from_str(&data).map_err(|e| e.to_string())

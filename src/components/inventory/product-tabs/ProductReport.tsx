@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Printer } from 'lucide-react';
 import { getProductReportData } from '../../../lib/db';
+import { todayLocalISO } from '../../../lib/dates';
+import { useI18n } from '../../../lib/language';
 
 interface ReportData {
   product: { name: string; sku: string | null; category: string; icon: string; color: string };
@@ -16,6 +18,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 export default function ProductReport({ productId }: { productId: number }) {
+  const { t } = useI18n();
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -34,19 +37,19 @@ export default function ProductReport({ productId }: { productId: number }) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  if (loading) return <div className="flex items-center justify-center h-full text-text-secondary text-sm">Generating report...</div>;
-  if (!data) return <div className="flex items-center justify-center h-full text-text-secondary text-sm">No data available</div>;
+  if (loading) return <div className="flex items-center justify-center h-full text-text-secondary text-sm">{t('preport.loading')}</div>;
+  if (!data) return <div className="flex items-center justify-center h-full text-text-secondary text-sm">{t('preport.noData')}</div>;
 
   const months = [...new Set(data.history.map((h) => h.month))].sort();
   const purchaseByMonth: Record<string, number> = {};
   const usageByMonth: Record<string, number> = {};
   data.history.forEach((h) => {
-    if (h.type === 'PURCHASE') purchaseByMonth[h.month] = (purchaseByMonth[h.month] || 0) + h.qty;
-    if (h.type === 'USAGE') usageByMonth[h.month] = (usageByMonth[h.month] || 0) + h.qty;
+    if (h.type === 'PURCHASE') purchaseByMonth[h.month] = (purchaseByMonth[h.month] || 0) + Math.abs(h.qty);
+    if (h.type === 'USAGE') usageByMonth[h.month] = (usageByMonth[h.month] || 0) + Math.abs(h.qty);
   });
   const maxQty = Math.max(1, ...months.map((m) => Math.max(purchaseByMonth[m] || 0, usageByMonth[m] || 0)));
 
-  const now = new Date().toISOString().slice(0, 10);
+  const now = todayLocalISO();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -60,9 +63,9 @@ export default function ProductReport({ productId }: { productId: number }) {
       `}</style>
 
       <div className="no-print px-6 py-4 border-b border-border bg-bg-secondary flex items-center justify-between sticky top-0 z-10">
-        <h2 className="text-sm font-bold text-text-primary">Product Report</h2>
+        <h2 className="text-sm font-bold text-text-primary">{t('preport.title')}</h2>
         <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white">
-          <Printer size={12} /> Print / Save PDF
+          <Printer size={12} /> {t('preport.print')}
         </button>
       </div>
 
@@ -74,18 +77,18 @@ export default function ProductReport({ productId }: { productId: number }) {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{data.product.name}</h1>
-            <p className="text-sm text-gray-500">{data.product.category}{data.product.sku ? ` · SKU: ${data.product.sku}` : ''}</p>
+            <p className="text-sm text-gray-500">{data.product.category}{data.product.sku ? t('preport.sku', { sku: data.product.sku }) : ''}</p>
           </div>
           <div className="ml-auto text-right text-xs text-gray-400">
-            <p>Generated: {now}</p>
-            <p>DBReader Report</p>
+            <p>{t('preport.generated', { date: now })}</p>
+            <p>{t('preport.reportTitle')}</p>
           </div>
         </div>
 
         {/* Attributes */}
         {data.attributes.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">Product Details</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">{t('preport.details')}</h2>
             <div className="grid grid-cols-2 gap-2">
               {data.attributes.map((a, i) => (
                 <div key={i} className="flex justify-between py-1 border-b border-gray-100">
@@ -100,12 +103,12 @@ export default function ProductReport({ productId }: { productId: number }) {
         {/* Usage/Purchase Graph */}
         {months.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">Usage & Purchase History</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">{t('preport.history')}</h2>
             <div className="flex items-end gap-1 h-40 border-b border-l border-gray-300 pl-1 pb-1">
               {months.map((m) => (
                 <div key={m} className="flex-1 flex items-end gap-px h-full" title={m}>
-                  <div className="flex-1 rounded-t" style={{ height: `${((purchaseByMonth[m] || 0) / maxQty) * 100}%`, backgroundColor: TYPE_COLORS.PURCHASE, minHeight: purchaseByMonth[m] ? 2 : 0 }} title={`Purchased: ${purchaseByMonth[m] || 0}`} />
-                  <div className="flex-1 rounded-t" style={{ height: `${((usageByMonth[m] || 0) / maxQty) * 100}%`, backgroundColor: TYPE_COLORS.USAGE, minHeight: usageByMonth[m] ? 2 : 0 }} title={`Used: ${usageByMonth[m] || 0}`} />
+                  <div className="flex-1 rounded-t" style={{ height: `${((purchaseByMonth[m] || 0) / maxQty) * 100}%`, backgroundColor: TYPE_COLORS.PURCHASE, minHeight: purchaseByMonth[m] ? 2 : 0 }} title={`${t('preport.purchased')}: ${purchaseByMonth[m] || 0}`} />
+                  <div className="flex-1 rounded-t" style={{ height: `${((usageByMonth[m] || 0) / maxQty) * 100}%`, backgroundColor: TYPE_COLORS.USAGE, minHeight: usageByMonth[m] ? 2 : 0 }} title={`${t('preport.used')}: ${usageByMonth[m] || 0}`} />
                 </div>
               ))}
             </div>
@@ -115,8 +118,8 @@ export default function ProductReport({ productId }: { productId: number }) {
               ))}
             </div>
             <div className="flex gap-4 mt-2">
-              <span className="flex items-center gap-1 text-xs"><span className="w-3 h-3 rounded" style={{ backgroundColor: TYPE_COLORS.PURCHASE }} /> Purchased</span>
-              <span className="flex items-center gap-1 text-xs"><span className="w-3 h-3 rounded" style={{ backgroundColor: TYPE_COLORS.USAGE }} /> Used</span>
+              <span className="flex items-center gap-1 text-xs"><span className="w-3 h-3 rounded" style={{ backgroundColor: TYPE_COLORS.PURCHASE }} /> {t('preport.purchased')}</span>
+              <span className="flex items-center gap-1 text-xs"><span className="w-3 h-3 rounded" style={{ backgroundColor: TYPE_COLORS.USAGE }} /> {t('preport.used')}</span>
             </div>
           </div>
         )}
@@ -124,12 +127,12 @@ export default function ProductReport({ productId }: { productId: number }) {
         {/* Cost History */}
         {data.cost_data.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">Cost History</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">{t('preport.costHistory')}</h2>
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-gray-200">
-                  <th className="text-left py-1 text-gray-500 font-medium">Date</th>
-                  <th className="text-right py-1 text-gray-500 font-medium">Unit Cost</th>
+                  <th className="text-left py-1 text-gray-500 font-medium">{t('preport.date')}</th>
+                  <th className="text-right py-1 text-gray-500 font-medium">{t('batch.col.unitCost')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -147,7 +150,7 @@ export default function ProductReport({ productId }: { productId: number }) {
         {/* Notes */}
         {data.notes.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">Notes</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">{t('preport.notes')}</h2>
             <div className="space-y-2">
               {data.notes.map((n, i) => (
                 <div key={i} className="p-3 bg-gray-50 rounded border border-gray-200">
@@ -162,14 +165,14 @@ export default function ProductReport({ productId }: { productId: number }) {
         {/* Reservations */}
         {data.reservations.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">Reservations</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-3 pb-1 border-b border-gray-200">{t('preport.reservations')}</h2>
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-gray-200">
-                  <th className="text-left py-1 text-gray-500 font-medium">Client</th>
-                  <th className="text-right py-1 text-gray-500 font-medium">Qty</th>
-                  <th className="text-left py-1 text-gray-500 font-medium">Date</th>
-                  <th className="text-left py-1 text-gray-500 font-medium">Status</th>
+                  <th className="text-left py-1 text-gray-500 font-medium">{t('preport.client')}</th>
+                  <th className="text-right py-1 text-gray-500 font-medium">{t('preport.qty')}</th>
+                  <th className="text-left py-1 text-gray-500 font-medium">{t('preport.date')}</th>
+                  <th className="text-left py-1 text-gray-500 font-medium">{t('preport.status')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -178,7 +181,7 @@ export default function ProductReport({ productId }: { productId: number }) {
                     <td className="py-1 text-gray-900">{r.client}</td>
                     <td className="py-1 text-right font-mono text-gray-700">{r.qty}</td>
                     <td className="py-1 text-gray-600">{r.date?.slice(0, 10)}</td>
-                    <td className="py-1 text-gray-600 capitalize">{r.status}</td>
+                    <td className="py-1 text-gray-600 capitalize">{t(`common.status.${r.status}`)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -188,7 +191,7 @@ export default function ProductReport({ productId }: { productId: number }) {
 
         {/* Footer */}
         <div className="pt-4 border-t border-gray-200 text-center text-[10px] text-gray-400">
-          Generated by DBReader · {now}
+          {t('preport.generatedBy', { date: now })}
         </div>
       </div>
     </div>

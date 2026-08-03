@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Bell, BellOff, Plus, Trash2, Save, X, AlertTriangle, TrendingDown } from 'lucide-react';
 import { executeQuery, upsertNotification, deleteNotification } from '../../../lib/db';
+import { useI18n } from '../../../lib/language';
 
 interface Notification {
   id: number;
@@ -23,7 +24,16 @@ const NOTIFICATION_TYPES = [
   { value: 'reservation', label: 'Reservation', color: 'pink' },
 ];
 
+const NOTIFICATION_LABEL_KEYS: Record<string, string> = {
+  low_stock: 'pnotif.type.lowStock',
+  expiry: 'pnotif.type.expiry',
+  custom: 'pnotif.type.custom',
+  reorder: 'pnotif.type.reorder',
+  reservation: 'pnotif.type.reservation',
+};
+
 export default function ProductNotifications({ productId }: ProductNotificationsProps) {
+  const { t } = useI18n();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentStock, setCurrentStock] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,7 +118,7 @@ export default function ProductNotifications({ productId }: ProductNotifications
   };
 
   const handleDelete = async (notifId: number) => {
-    if (!confirm('Delete this notification?')) return;
+    if (!confirm(t('pnotif.confirmDelete'))) return;
     try {
       await deleteNotification(notifId);
       await fetchData();
@@ -137,7 +147,7 @@ export default function ProductNotifications({ productId }: ProductNotifications
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <Bell size={20} className="animate-spin mr-2" />
-        Loading notifications...
+        {t('pnotif.loading')}
       </div>
     );
   }
@@ -150,12 +160,12 @@ export default function ProductNotifications({ productId }: ProductNotifications
           <div className="flex items-center gap-3">
             <Bell size={16} className="text-accent" />
             <div>
-              <h3 className="text-sm font-semibold text-text-primary">Notifications</h3>
+              <h3 className="text-sm font-semibold text-text-primary">{t('pnotif.title')}</h3>
               <p className="text-[10px] text-text-secondary">
-                {notifications.length} configured
+                {t('pnotif.configured', { count: notifications.length })}
                 {currentStock !== null && (
                   <span className="ml-2">
-                    · Current stock: <span className={`font-bold ${currentStock <= 0 ? 'text-error' : currentStock <= 5 ? 'text-warning' : 'text-success'}`}>{currentStock}</span>
+                    {t('pnotif.currentStock', { stock: currentStock })}
                   </span>
                 )}
               </p>
@@ -166,7 +176,7 @@ export default function ProductNotifications({ productId }: ProductNotifications
             className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors"
           >
             {showForm ? <X size={12} /> : <Plus size={12} />}
-            {showForm ? 'Cancel' : 'Add Alert'}
+            {showForm ? t('common.cancel') : t('pnotif.addAlert')}
           </button>
         </div>
       </div>
@@ -176,31 +186,31 @@ export default function ProductNotifications({ productId }: ProductNotifications
         <div className="px-6 py-4 border-b border-border bg-bg-primary/50 shrink-0">
           <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <label className="text-xs text-text-secondary w-16 shrink-0">Type</label>
+              <label className="text-xs text-text-secondary w-16 shrink-0">{t('pnotif.type')}</label>
               <select
                 value={formType}
                 onChange={(e) => setFormType(e.target.value)}
                 className="flex-1 px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent"
               >
-                {NOTIFICATION_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
+                {NOTIFICATION_TYPES.map((nt) => (
+                  <option key={nt.value} value={nt.value}>{t(NOTIFICATION_LABEL_KEYS[nt.value])}</option>
                 ))}
               </select>
-              <label className="text-xs text-text-secondary w-16 shrink-0 text-right">Threshold</label>
+              <label className="text-xs text-text-secondary w-16 shrink-0 text-right">{t('pnotif.threshold')}</label>
               <input
                 value={formThreshold}
                 onChange={(e) => setFormThreshold(e.target.value)}
                 type="number"
-                placeholder="Optional"
+                placeholder={t('pnotif.optional')}
                 className="w-24 px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent"
               />
             </div>
             <div className="flex items-start gap-3">
-              <label className="text-xs text-text-secondary w-16 shrink-0 mt-1.5">Message</label>
+              <label className="text-xs text-text-secondary w-16 shrink-0 mt-1.5">{t('pnotif.message')}</label>
               <textarea
                 value={formMessage}
                 onChange={(e) => setFormMessage(e.target.value)}
-                placeholder="Alert message..."
+                placeholder={t('pnotif.phMessage')}
                 rows={2}
                 className="flex-1 px-2 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none"
               />
@@ -214,12 +224,12 @@ export default function ProductNotifications({ productId }: ProductNotifications
                 >
                   <span className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-white rounded-full transition-transform ${formActive ? 'translate-x-[14px]' : ''}`} />
                 </button>
-                Active
+                {t('pnotif.active')}
               </label>
               <div className="flex gap-2">
-                <button onClick={() => setShowForm(false)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">Cancel</button>
+                <button onClick={() => setShowForm(false)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">{t('common.cancel')}</button>
                 <button onClick={handleSave} disabled={!formMessage.trim()} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                  <Save size={10} /> Save
+                  <Save size={10} /> {t('common.save')}
                 </button>
               </div>
             </div>
@@ -235,8 +245,8 @@ export default function ProductNotifications({ productId }: ProductNotifications
         {notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-text-secondary">
             <BellOff size={32} className="mb-3 opacity-30" />
-            <p className="text-sm">No notifications configured</p>
-            <p className="text-[10px] mt-1">Add an alert to get notified about this product</p>
+            <p className="text-sm">{t('pnotif.empty')}</p>
+            <p className="text-[10px] mt-1">{t('pnotif.emptyHint')}</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
@@ -244,7 +254,7 @@ export default function ProductNotifications({ productId }: ProductNotifications
               <div key={notif.id} className="px-6 py-3 flex items-center gap-3 hover:bg-bg-hover transition-colors">
                 <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-semibold shrink-0 ${badgeStyles[notif.notification_type] || badgeStyles.custom}`}>
                   {typeIcon[notif.notification_type] || typeIcon.custom}
-                  {notif.notification_type.replace('_', ' ')}
+                  {t(NOTIFICATION_LABEL_KEYS[notif.notification_type] || notif.notification_type.replace('_', ' '))}
                 </span>
                 <span className="text-xs text-text-primary flex-1 truncate">{notif.message}</span>
                 {notif.threshold_value !== null && (
@@ -253,19 +263,19 @@ export default function ProductNotifications({ productId }: ProductNotifications
                   </span>
                 )}
                 <span className="text-[10px] text-text-secondary whitespace-nowrap">
-                  {notif.last_triggered ? new Date(notif.last_triggered).toLocaleDateString() : 'Never'}
+                  {notif.last_triggered ? new Date(notif.last_triggered).toLocaleDateString() : t('pnotif.never')}
                 </span>
                 <button
                   onClick={() => handleToggleActive(notif)}
                   className={`p-1 rounded transition-colors ${notif.is_active ? 'text-accent hover:text-accent-hover' : 'text-text-secondary hover:text-text-primary'}`}
-                  title={notif.is_active ? 'Deactivate' : 'Activate'}
+                  title={notif.is_active ? t('pnotif.deactivate') : t('pnotif.activate')}
                 >
                   {notif.is_active ? <Bell size={12} /> : <BellOff size={12} />}
                 </button>
                 <button
                   onClick={() => handleDelete(notif.id)}
                   className="p-1 rounded text-text-secondary hover:text-error hover:bg-error/10 transition-colors"
-                  title="Delete"
+                  title={t('common.delete')}
                 >
                   <Trash2 size={12} />
                 </button>

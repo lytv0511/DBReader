@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { AppPreferences } from '../types';
 import type { ColumnInfo, QueryResult, TableInfo } from '../types';
 
 export async function openDatabase(path: string): Promise<TableInfo> {
@@ -173,10 +174,10 @@ export async function getProductReportData(productId: number): Promise<Record<st
   return invoke<Record<string, unknown>>('get_product_report_data', { productId });
 }
 
-export async function savePreferences(lastDbPath: string | null): Promise<void> {
-  return invoke<void>('save_preferences', { lastDbPath: lastDbPath ?? null });
+export async function savePreferences(prefs: AppPreferences): Promise<void> {
+  return invoke<void>('save_preferences', { prefs });
 }
 
-export async function loadPreferences(): Promise<{ lastDbPath: string | null }> {
-  return invoke<{ lastDbPath: string | null }>('load_preferences');
+export async function loadPreferences(): Promise<AppPreferences> {
+  return invoke<AppPreferences>('load_preferences');
 }

@@ -12,6 +12,7 @@ import {
   getCategoryTemplates,
   executeQuery,
 } from "../../../lib/db";
+import { useI18n } from "../../../lib/language";
 
 interface ProductAttribute {
   id: number;
@@ -39,6 +40,7 @@ export default function ProductFields({
   productId,
   categoryId,
 }: ProductFieldsProps) {
+  const { t } = useI18n();
   const [attributes, setAttributes] = useState<ProductAttribute[]>([]);
   const [templates, setTemplates] = useState<CategoryTemplate[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -67,7 +69,7 @@ export default function ProductFields({
         value: r[3] as string, type: r[4] as string,
       })));
     } catch {
-      setErrorMsg("Failed to load attributes");
+      setErrorMsg(t("pfields.errLoadAttrs"));
     }
   }, [productId]);
 
@@ -82,7 +84,7 @@ export default function ProductFields({
         id: r.id as number, category_id: categoryId, key: (r.attr_key ?? r.key) as string, type: (r.attr_type ?? r.type) as string,
       })));
     } catch {
-      setErrorMsg("Failed to load category templates");
+      setErrorMsg(t("pfields.errLoadTemplates"));
     }
   }, [categoryId]);
 
@@ -117,7 +119,7 @@ export default function ProductFields({
 
   const saveEdit = async () => {
     if (!editForm.key.trim()) {
-      setErrorMsg("Key is required");
+      setErrorMsg(t("pfields.errKeyRequired"));
       return;
     }
     try {
@@ -128,10 +130,10 @@ export default function ProductFields({
         editForm.type
       );
       setEditingId(null);
-      setSuccessMsg("Attribute saved");
+      setSuccessMsg(t("pfields.okSaved"));
       fetchAttributes();
     } catch {
-      setErrorMsg("Failed to save attribute");
+      setErrorMsg(t("pfields.errSave"));
     }
   };
 
@@ -141,15 +143,15 @@ export default function ProductFields({
         `DELETE FROM product_attributes WHERE id = ${id}`
       );
       setAttributes((prev) => prev.filter((a) => a.id !== id));
-      setSuccessMsg("Attribute deleted");
+      setSuccessMsg(t("pfields.okDeleted"));
     } catch {
-      setErrorMsg("Failed to delete attribute");
+      setErrorMsg(t("pfields.errDelete"));
     }
   };
 
   const addNewField = async () => {
     if (!newField.key.trim()) {
-      setErrorMsg("Key is required");
+      setErrorMsg(t("pfields.errKeyRequired"));
       return;
     }
     try {
@@ -160,10 +162,10 @@ export default function ProductFields({
         newField.type
       );
       setNewField({ key: "", value: "", type: "text" });
-      setSuccessMsg("Attribute added");
+      setSuccessMsg(t("pfields.okAdded"));
       fetchAttributes();
     } catch {
-      setErrorMsg("Failed to add attribute");
+      setErrorMsg(t("pfields.errAdd"));
     }
   };
 
@@ -184,9 +186,9 @@ export default function ProductFields({
       }
       setAttributes([]);
       setShowDeleteAllConfirm(false);
-      setSuccessMsg("All attributes removed");
+      setSuccessMsg(t("pfields.okRemovedAll"));
     } catch {
-      setErrorMsg("Failed to remove attributes");
+      setErrorMsg(t("pfields.errRemoveAll"));
     }
   };
 
@@ -207,16 +209,16 @@ export default function ProductFields({
         <section className="space-y-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-text-secondary">
             <Tag size={14} />
-            Category Templates
+            {t("pfields.headingTemplates")}
           </h3>
           <div className="flex flex-wrap gap-2">
-            {templates.map((t) => {
-              const alreadyUsed = usedTemplateKeys.has(t.key.toLowerCase());
+            {templates.map((tmpl) => {
+              const alreadyUsed = usedTemplateKeys.has(tmpl.key.toLowerCase());
               return (
                 <button
-                  key={t.id}
+                  key={tmpl.id}
                   disabled={alreadyUsed}
-                  onClick={() => addFromTemplate(t)}
+                  onClick={() => addFromTemplate(tmpl)}
                   className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                     alreadyUsed
                       ? "cursor-not-allowed border-border text-text-secondary/40"
@@ -224,8 +226,8 @@ export default function ProductFields({
                   }`}
                 >
                   <Plus size={12} />
-                  {t.key}
-                  <span className="text-text-secondary/60">({t.type})</span>
+                  {tmpl.key}
+                  <span className="text-text-secondary/60">({tmpl.type})</span>
                 </button>
               );
             })}
@@ -235,11 +237,11 @@ export default function ProductFields({
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-text-secondary">
-          Current Fields
+          {t("pfields.headingCurrent")}
         </h3>
         {attributes.length === 0 && (
           <p className="text-sm text-text-secondary/60">
-            No attributes yet. Add one below or from a template.
+            {t("pfields.empty")}
           </p>
         )}
         <div className="space-y-2">
@@ -262,7 +264,7 @@ export default function ProductFields({
                       onChange={(e) =>
                         setEditForm((f) => ({ ...f, key: e.target.value }))
                       }
-                      placeholder="Key"
+                      placeholder={t("pfields.phKey")}
                     />
                     <input
                       className="flex-1 rounded border border-border bg-bg-primary px-2 py-1 text-sm text-text-primary outline-none focus:border-accent"
@@ -270,7 +272,7 @@ export default function ProductFields({
                       onChange={(e) =>
                         setEditForm((f) => ({ ...f, value: e.target.value }))
                       }
-                      placeholder="Value"
+                      placeholder={t("pfields.phValue")}
                     />
                     <select
                       className="rounded border border-border bg-bg-primary px-2 py-1 text-sm text-text-primary outline-none focus:border-accent"
@@ -279,23 +281,23 @@ export default function ProductFields({
                         setEditForm((f) => ({ ...f, type: e.target.value }))
                       }
                     >
-                      {ATTRIBUTE_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
+                      {ATTRIBUTE_TYPES.map((att) => (
+                        <option key={att} value={att}>
+                          {t(`common.attrType.${att}`)}
                         </option>
                       ))}
                     </select>
                     <button
                       onClick={() => saveEdit()}
                       className="rounded p-1.5 text-success transition-colors hover:bg-success/10"
-                      title="Save"
+                      title={t("common.save")}
                     >
                       <Save size={14} />
                     </button>
                     <button
                       onClick={cancelEdit}
                       className="rounded p-1.5 text-text-secondary transition-colors hover:bg-bg-hover"
-                      title="Cancel"
+                      title={t("common.cancel")}
                     >
                       <X size={14} />
                     </button>
@@ -314,14 +316,14 @@ export default function ProductFields({
                     <button
                       onClick={() => startEdit(attr)}
                       className="rounded p-1.5 text-accent transition-colors hover:bg-accent/10"
-                      title="Edit"
+                      title={t("common.edit")}
                     >
                       <Save size={14} />
                     </button>
                     <button
                       onClick={() => deleteAttribute(attr.id)}
                       className="rounded p-1.5 text-error transition-colors hover:bg-error/10"
-                      title="Delete"
+                      title={t("common.delete")}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -335,7 +337,7 @@ export default function ProductFields({
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-text-secondary">
-          Add New Field
+          {t("pfields.headingAdd")}
         </h3>
         <div className="flex items-center gap-2">
           <input
@@ -344,7 +346,7 @@ export default function ProductFields({
             onChange={(e) =>
               setNewField((f) => ({ ...f, key: e.target.value }))
             }
-            placeholder="Key"
+            placeholder={t("pfields.phKey")}
           />
           <input
             className="flex-1 rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
@@ -352,7 +354,7 @@ export default function ProductFields({
             onChange={(e) =>
               setNewField((f) => ({ ...f, value: e.target.value }))
             }
-            placeholder="Value"
+            placeholder={t("pfields.phValue")}
           />
           <select
             className="rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
@@ -361,9 +363,9 @@ export default function ProductFields({
               setNewField((f) => ({ ...f, type: e.target.value }))
             }
           >
-            {ATTRIBUTE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
+            {ATTRIBUTE_TYPES.map((att) => (
+              <option key={att} value={att}>
+                {t(`common.attrType.${att}`)}
               </option>
             ))}
           </select>
@@ -372,7 +374,7 @@ export default function ProductFields({
             className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-accent/80"
           >
             <Plus size={14} />
-            Add
+            {t("common.add")}
           </button>
         </div>
       </section>
@@ -381,24 +383,24 @@ export default function ProductFields({
         <section className="space-y-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-warning">
             <AlertTriangle size={14} />
-            Danger Zone
+            {t("pfields.headingDanger")}
           </h3>
           {showDeleteAllConfirm ? (
             <div className="flex items-center gap-3 rounded-lg border border-error/30 bg-error/5 px-4 py-3">
               <span className="text-sm text-text-primary">
-                Remove all {attributes.length} attributes?
+                {t("pfields.confirmRemoveAll", { count: attributes.length })}
               </span>
               <button
                 onClick={removeAllAttributes}
                 className="rounded-lg bg-error px-3 py-1.5 text-sm font-medium text-bg-primary transition-colors hover:bg-error/80"
               >
-                Confirm
+                {t("pfields.confirm")}
               </button>
               <button
                 onClick={() => setShowDeleteAllConfirm(false)}
                 className="rounded-lg border border-border px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-hover"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           ) : (
@@ -407,7 +409,7 @@ export default function ProductFields({
               className="flex items-center gap-1.5 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-sm font-medium text-error transition-colors hover:bg-error/20"
             >
               <Trash2 size={14} />
-              Remove all attributes
+              {t("pfields.removeAll")}
             </button>
           )}
         </section>

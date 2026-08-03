@@ -9,6 +9,7 @@ import ProductCalendar from './product-tabs/ProductCalendar';
 import ProductClients from './product-tabs/ProductClients';
 import ProductNotifications from './product-tabs/ProductNotifications';
 import ProductReport from './product-tabs/ProductReport';
+import { useI18n } from '../../lib/language';
 
 type TabId = 'history' | 'fields' | 'calendar' | 'notes' | 'clients' | 'alerts' | 'report';
 
@@ -33,6 +34,7 @@ interface ProductDetailProps {
 }
 
 export default function ProductDetail({ product, onBack }: ProductDetailProps) {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>('history');
   const [editingProduct, setEditingProduct] = useState(false);
   const [formName, setFormName] = useState(product.name);
@@ -42,7 +44,7 @@ export default function ProductDetail({ product, onBack }: ProductDetailProps) {
 
   const saveProduct = async () => {
     try {
-      await updateProduct(product.id, formName, formSku || null, product.category_id, product.name ? 'bottle' : 'unit', Number(formReorder) || 0);
+      await updateProduct(product.id, formName, formSku || null, product.category_id, product.base_unit_name || 'unit', Number(formReorder) || 0);
       setEditingProduct(false);
     } catch (err) {
       setError(String(err));
@@ -86,8 +88,8 @@ export default function ProductDetail({ product, onBack }: ProductDetailProps) {
             {editingProduct ? (
               <div className="flex items-center gap-2">
                 <input value={formName} onChange={(e) => setFormName(e.target.value)} className="px-2 py-1 bg-bg-primary border border-border rounded text-sm text-text-primary focus:outline-none focus:border-accent" />
-                <input value={formSku} onChange={(e) => setFormSku(e.target.value)} placeholder="SKU" className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-28" />
-                <input value={formReorder} onChange={(e) => setFormReorder(e.target.value)} type="number" placeholder="Reorder" className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent w-20" />
+                <input value={formSku} onChange={(e) => setFormSku(e.target.value)} placeholder={t('detail.sku')} className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-28" />
+                <input value={formReorder} onChange={(e) => setFormReorder(e.target.value)} type="number" placeholder={t('detail.reorder')} className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent w-20" />
                 <button onClick={saveProduct} className="p-1.5 bg-accent hover:bg-accent-hover rounded text-white"><Save size={12} /></button>
                 <button onClick={() => setEditingProduct(false)} className="p-1.5 bg-bg-tertiary hover:bg-bg-hover rounded text-text-secondary"><X size={12} /></button>
               </div>
@@ -100,7 +102,7 @@ export default function ProductDetail({ product, onBack }: ProductDetailProps) {
           </div>
           {!editingProduct && (
             <button onClick={() => setEditingProduct(true)} className="flex items-center gap-1 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">
-              <Pencil size={10} /> Edit
+              <Pencil size={10} /> {t('detail.edit')}
             </button>
           )}
         </div>
@@ -118,7 +120,7 @@ export default function ProductDetail({ product, onBack }: ProductDetailProps) {
                 : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border'
             }`}
           >
-            {tab.label}
+            {t(`detail.tab.${tab.id}`)}
           </button>
         ))}
       </div>

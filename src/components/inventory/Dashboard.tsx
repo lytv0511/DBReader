@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, AlertTriangle, TrendingUp, Package, Clock } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
+import { useI18n } from '../../lib/language';
 import PieChartWidget from './PieChartWidget';
 
 interface StockRow {
@@ -47,8 +48,10 @@ function SummaryCard({ icon, label, value, color }: SummaryCardProps) {
 }
 
 export default function Dashboard() {
+  const { t } = useI18n();
   const [stockLevels, setStockLevels] = useState<StockRow[]>([]);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
+  const [weekTxCount, setWeekTxCount] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<StockRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +60,7 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [stockResult, activityResult] = await Promise.all([
+      const [stockResult, activityResult, weekCountResult] = await Promise.all([
         executeQuery(`
           SELECT
             p.id AS product_id,
@@ -91,6 +94,11 @@ export default function Dashboard() {
           ORDER BY il.created_at DESC
           LIMIT 15
         `),
+        executeQuery(`
+          SELECT COUNT(*)
+          FROM inventory_logs
+          WHERE created_at >= datetime('now', '-7 days')
+        `),
       ]);
 
       const stockRows: StockRow[] = stockResult.rows.map((r) => ({
@@ -119,6 +127,7 @@ export default function Dashboard() {
       }));
 
       setRecentActivity(activityRows);
+      setWeekTxCount(Number(weekCountResult.rows[0]?.[0]) || 0);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -152,7 +161,7 @@ export default function Dashboard() {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <RefreshCw size={20} className="animate-spin mr-2" />
-        Loading dashboard...
+        {t('dash.loading')}
       </div>
     );
   }
@@ -168,39 +177,39 @@ export default function Dashboard() {
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-text-primary">Inventory Dashboard</h2>
+        <h2 className="text-lg font-bold text-text-primary">{t('dash.title')}</h2>
         <button
           onClick={fetchData}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
         >
           <RefreshCw size={12} />
-          Refresh
+          {t('dash.refresh')}
         </button>
       </div>
 
       <div className="grid grid-cols-4 gap-4">
         <SummaryCard
           icon={<Package size={18} className="text-accent" />}
-          label="Total Products"
+          label={t('dash.sum.totalProducts')}
           value={totalProducts}
           color="bg-accent/10"
         />
         <SummaryCard
           icon={<TrendingUp size={18} className="text-success" />}
-          label="Total Units in Stock"
+          label={t('dash.sum.totalUnits')}
           value={Math.round(totalStock)}
           color="bg-success/10"
         />
         <SummaryCard
           icon={<AlertTriangle size={18} className="text-warning" />}
-          label="Low Stock Alerts"
+          label={t('dash.sum.lowStock')}
           value={alertCount}
           color={alertCount > 0 ? 'bg-warning/10' : 'bg-bg-tertiary'}
         />
         <SummaryCard
           icon={<Clock size={18} className="text-text-secondary" />}
-          label="Recent Transactions"
-          value={recentActivity.length}
+          label={t('dash.sum.recentTx')}
+          value={weekTxCount}
           color="bg-bg-tertiary"
         />
       </div>
@@ -210,11 +219,11 @@ export default function Dashboard() {
         <div className="bg-bg-secondary border border-border rounded-lg">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2">
             <AlertTriangle size={14} className="text-warning" />
-            <h3 className="text-sm font-semibold text-text-primary">Low Stock Alerts</h3>
+            <h3 className="text-sm font-semibold text-text-primary">{t('dash.lowStock.title')}</h3>
           </div>
           <div className="divide-y divide-border max-h-[300px] overflow-y-auto">
             {lowStockItems.length === 0 ? (
-              <div className="p-4 text-xs text-text-secondary text-center">All items above reorder threshold</div>
+              <div className="p-4 text-xs text-text-secondary text-center">{t('dash.lowStock.allGood')}</div>
             ) : (
               lowStockItems.map((item) => (
                 <div key={item.product_id} className="px-4 py-3 flex items-center justify-between">
@@ -226,7 +235,7 @@ export default function Dashboard() {
                     <p className={`text-sm font-bold ${item.current_stock <= 0 ? 'text-error' : 'text-warning'}`}>
                       {Math.round(item.current_stock)}
                     </p>
-                    <p className="text-xs text-text-secondary">min {Math.round(item.reorder_threshold)}</p>
+                    <p className="text-xs text-text-secondary">{t('dash.lowStock.minReorder', { min: Math.round(item.reorder_threshold) })}</p>
                   </div>
                 </div>
               ))
@@ -238,11 +247,11 @@ export default function Dashboard() {
         <div className="bg-bg-secondary border border-border rounded-lg">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2">
             <Clock size={14} className="text-text-secondary" />
-            <h3 className="text-sm font-semibold text-text-primary">Recent Activity</h3>
+            <h3 className="text-sm font-semibold text-text-primary">{t('dash.recent.title')}</h3>
           </div>
           <div className="divide-y divide-border max-h-[300px] overflow-y-auto">
             {recentActivity.length === 0 ? (
-              <div className="p-4 text-xs text-text-secondary text-center">No recent transactions</div>
+              <div className="p-4 text-xs text-text-secondary text-center">{t('dash.recent.empty')}</div>
             ) : (
               recentActivity.map((item) => (
                 <div key={item.id} className="px-4 py-3 flex items-center justify-between">
@@ -277,20 +286,20 @@ export default function Dashboard() {
       {/* Full Stock Levels Table */}
       <div className="bg-bg-secondary border border-border rounded-lg">
         <div className="px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-semibold text-text-primary">Current Stock Levels</h3>
+          <h3 className="text-sm font-semibold text-text-primary">{t('dash.stock.title')}</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border">
-                <th className="text-left px-4 py-2 text-text-secondary font-semibold">Product</th>
-                <th className="text-left px-4 py-2 text-text-secondary font-semibold">Category</th>
-                <th className="text-right px-4 py-2 text-text-secondary font-semibold">Purchased</th>
-                <th className="text-right px-4 py-2 text-text-secondary font-semibold">Used</th>
-                <th className="text-right px-4 py-2 text-text-secondary font-semibold">Spoiled</th>
-                <th className="text-right px-4 py-2 text-text-secondary font-semibold">Current Stock</th>
-                <th className="text-right px-4 py-2 text-text-secondary font-semibold">Reorder At</th>
-                <th className="text-center px-4 py-2 text-text-secondary font-semibold">Status</th>
+                <th className="text-left px-4 py-2 text-text-secondary font-semibold">{t('dash.stock.product')}</th>
+                <th className="text-left px-4 py-2 text-text-secondary font-semibold">{t('dash.stock.category')}</th>
+                <th className="text-right px-4 py-2 text-text-secondary font-semibold">{t('dash.stock.purchased')}</th>
+                <th className="text-right px-4 py-2 text-text-secondary font-semibold">{t('dash.stock.used')}</th>
+                <th className="text-right px-4 py-2 text-text-secondary font-semibold">{t('dash.stock.spoiled')}</th>
+                <th className="text-right px-4 py-2 text-text-secondary font-semibold">{t('dash.stock.current')}</th>
+                <th className="text-right px-4 py-2 text-text-secondary font-semibold">{t('dash.stock.reorder')}</th>
+                <th className="text-center px-4 py-2 text-text-secondary font-semibold">{t('dash.stock.status')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -307,11 +316,11 @@ export default function Dashboard() {
                   <td className="px-4 py-2 text-text-secondary text-right">{item.reorder_threshold > 0 ? Math.round(item.reorder_threshold) : '-'}</td>
                   <td className="px-4 py-2 text-center">
                     {item.current_stock <= 0 ? (
-                      <span className="px-2 py-0.5 rounded bg-error/10 text-error text-[10px] font-semibold">OUT OF STOCK</span>
+                      <span className="px-2 py-0.5 rounded bg-error/10 text-error text-[10px] font-semibold">{t('dash.stock.status.out')}</span>
                     ) : item.current_stock <= item.reorder_threshold ? (
-                      <span className="px-2 py-0.5 rounded bg-warning/10 text-warning text-[10px] font-semibold">LOW</span>
+                      <span className="px-2 py-0.5 rounded bg-warning/10 text-warning text-[10px] font-semibold">{t('dash.stock.status.low')}</span>
                     ) : (
-                      <span className="px-2 py-0.5 rounded bg-success/10 text-success text-[10px] font-semibold">OK</span>
+                      <span className="px-2 py-0.5 rounded bg-success/10 text-success text-[10px] font-semibold">{t('dash.stock.status.ok')}</span>
                     )}
                   </td>
                 </tr>

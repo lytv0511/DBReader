@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, Pin, PinOff, Trash2, Save, X, MessageSquare } from "lucide-react";
 import { executeQuery, upsertProductNote, deleteProductNote } from "../../../lib/db";
+import { useI18n } from "../../../lib/language";
 
 interface Note {
   id: number;
@@ -17,6 +18,7 @@ interface ProductNotesProps {
 }
 
 export default function ProductNotes({ productId }: ProductNotesProps) {
+  const { t } = useI18n();
   const [notes, setNotes] = useState<Note[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -122,7 +124,7 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h3 className="text-text-primary font-semibold flex items-center gap-2">
           <MessageSquare size={18} />
-          Notes
+          {t("pnotes.title")}
           <span className="text-text-secondary text-sm font-normal">({notes.length})</span>
         </h3>
         <button
@@ -130,7 +132,7 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent/10 text-accent hover:bg-accent/20 text-sm transition-colors"
         >
           <Plus size={16} />
-          New Note
+          {t("pnotes.newNote")}
         </button>
       </div>
 
@@ -139,13 +141,13 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
           {error && <div className="mb-2 p-2 bg-error/10 border border-error/20 rounded text-xs text-error">{error}</div>}
           <input
             type="text"
-            placeholder="Title (optional)"
+            placeholder={t("pnotes.phTitle")}
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             className="w-full px-3 py-2 mb-2 rounded-md bg-bg-secondary border border-border text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent"
           />
           <textarea
-            placeholder="Write your note..."
+            placeholder={t("pnotes.phBody")}
             value={newBody}
             onChange={(e) => setNewBody(e.target.value)}
             rows={4}
@@ -161,7 +163,7 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
               }`}
             >
               {newPinned ? <Pin size={14} /> : <PinOff size={14} />}
-              {newPinned ? "Pinned" : "Pin"}
+              {newPinned ? t("pnotes.pinned") : t("pnotes.pin")}
             </button>
             <div className="flex items-center gap-2">
               <button
@@ -174,7 +176,7 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg-secondary text-text-secondary hover:text-text-primary border border-border text-sm transition-colors"
               >
                 <X size={14} />
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 onClick={handleCreate}
@@ -182,7 +184,7 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent/90 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Save size={14} />
-                Save
+                {t("common.save")}
               </button>
             </div>
           </div>
@@ -196,7 +198,7 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
         {notes.length === 0 && !error ? (
           <div className="flex flex-col items-center justify-center h-full text-text-secondary">
             <MessageSquare size={40} className="mb-3 opacity-40" />
-            <p>No notes yet</p>
+            <p>{t("pnotes.empty")}</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
@@ -206,13 +208,13 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
                   <div className="p-4">
                     <input
                       type="text"
-                      placeholder="Title (optional)"
+                      placeholder={t("pnotes.phTitle")}
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
                       className="w-full px-3 py-2 mb-2 rounded-md bg-bg-secondary border border-border text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent"
                     />
                     <textarea
-                      placeholder="Write your note..."
+                      placeholder={t("pnotes.phBody")}
                       value={editBody}
                       onChange={(e) => setEditBody(e.target.value)}
                       rows={6}
@@ -229,14 +231,14 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
                           }`}
                         >
                           {note.is_pinned === 1 ? <Pin size={14} /> : <PinOff size={14} />}
-                          {note.is_pinned === 1 ? "Pinned" : "Pin"}
+                          {note.is_pinned === 1 ? t("pnotes.pinned") : t("pnotes.pin")}
                         </button>
                         <button
                           onClick={() => handleDelete(note.id)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg-secondary text-red-400 hover:bg-red-500/10 border border-border text-sm transition-colors"
                         >
                           <Trash2 size={14} />
-                          Delete
+                          {t("common.delete")}
                         </button>
                       </div>
                       <div className="flex items-center gap-2">
@@ -245,7 +247,7 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg-secondary text-text-secondary hover:text-text-primary border border-border text-sm transition-colors"
                         >
                           <X size={14} />
-                          Cancel
+                          {t("common.cancel")}
                         </button>
                         <button
                           onClick={() => handleSaveEdit(note)}
@@ -253,7 +255,7 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent/90 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Save size={14} />
-                          Save
+                          {t("common.save")}
                         </button>
                       </div>
                     </div>
@@ -266,12 +268,12 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-text-primary font-medium truncate">
-                          {note.title || "Untitled"}
+                          {note.title || t("pnotes.untitled")}
                         </span>
                         {note.is_pinned === 1 && (
                           <span className="flex items-center gap-1 text-xs text-accent bg-accent/10 px-1.5 py-0.5 rounded">
                             <Pin size={10} />
-                            Pinned
+                            {t("pnotes.pinnedBadge")}
                           </span>
                         )}
                       </div>

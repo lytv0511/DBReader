@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { ArrowUpDown } from 'lucide-react';
+import { useI18n } from '../../lib/language';
 
 export interface OutputNodeData {
   columns: string[];
@@ -10,6 +11,7 @@ export interface OutputNodeData {
 }
 
 function OutputNode({ data }: NodeProps) {
+  const { t } = useI18n();
   const { columns, rows, loading, error } = data as OutputNodeData;
 
   function formatCell(val: string | number | null): string {
@@ -23,22 +25,22 @@ function OutputNode({ data }: NodeProps) {
     <div className="bg-bg-secondary border border-border rounded-lg shadow-lg min-w-[280px] max-w-[400px]">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-tertiary rounded-t-lg">
         <ArrowUpDown size={14} className="text-success" />
-        <span className="text-xs font-semibold text-text-primary">Output</span>
+        <span className="text-xs font-semibold text-text-primary">{t('node.output.title')}</span>
         {rows.length > 0 && (
           <span className="ml-auto text-[10px] text-text-secondary">
-            {rows.length} row{rows.length !== 1 ? 's' : ''}
+            {t('node.output.rowsSummary', { count: rows.length })}
           </span>
         )}
       </div>
 
       <div className="p-2 max-h-[250px] overflow-auto">
         {loading ? (
-          <div className="text-xs text-text-secondary p-3 text-center">Loading...</div>
+          <div className="text-xs text-text-secondary p-3 text-center">{t('node.output.loading')}</div>
         ) : error ? (
           <div className="text-xs text-error p-3">{error}</div>
         ) : columns.length === 0 ? (
           <div className="text-xs text-text-secondary p-3 text-center">
-            Connect a table and filter to see output
+            {t('node.output.empty')}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -74,7 +76,7 @@ function OutputNode({ data }: NodeProps) {
             </table>
             {rows.length > 50 && (
               <div className="text-[10px] text-text-secondary text-center py-1">
-                Showing 50 of {rows.length} rows
+                {t('node.output.showing', { count: rows.length })}
               </div>
             )}
           </div>

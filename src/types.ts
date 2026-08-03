@@ -24,4 +24,16 @@ export interface PresetData {
   timestamp: number;
 }
 
-export type ViewMode = 'canvas' | 'query' | 'quickuse' | 'dashboard' | 'gallery' | 'detail' | 'products' | 'batches' | 'logs' | 'adjust' | 'used' | 'categories';
+export type ViewMode = 'canvas' | 'query' | 'quickuse' | 'dashboard' | 'gallery' | 'detail' | 'products' | 'batches' | 'logs' | 'adjust' | 'used' | 'categories' | 'settings';
+
+export type ThemeMode = 'dark' | 'light' | 'system';
+export type LanguageCode = 'system' | 'en' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'es' | 'fr' | 'de';
+
+export interface AppPreferences {
+  lastDbPath: string | null;
+  theme: ThemeMode;
+  language: LanguageCode;
+  openOnStartup: boolean;
+  defaultQueryLimit: number;
+  inventoryTabOrder: string[] | null;
+}

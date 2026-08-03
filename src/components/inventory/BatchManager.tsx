@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Pencil, Trash2, X, Save, ArrowRight } from 'lucide-react';
 import { executeQuery, updateBatchStatus } from '../../lib/db';
+import { todayLocalISO } from '../../lib/dates';
+import { useI18n } from '../../lib/language';
 
 interface Batch {
   id: number;
@@ -38,6 +40,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> =
 };
 
 export default function BatchManager() {
+  const { t } = useI18n();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -54,7 +57,7 @@ export default function BatchManager() {
   const [formBatchNumber, setFormBatchNumber] = useState('');
   const [formSupplier, setFormSupplier] = useState('');
   const [formCostPrice, setFormCostPrice] = useState('');
-  const [formPurchaseDate, setFormPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [formPurchaseDate, setFormPurchaseDate] = useState(todayLocalISO());
   const [formNotes, setFormNotes] = useState('');
 
   // Log form
@@ -117,7 +120,7 @@ export default function BatchManager() {
     setFormBatchNumber('');
     setFormSupplier('');
     setFormCostPrice('');
-    setFormPurchaseDate(new Date().toISOString().slice(0, 10));
+    setFormPurchaseDate(todayLocalISO());
     setFormNotes('');
     setShowModal(true);
   };
@@ -128,7 +131,7 @@ export default function BatchManager() {
     setFormBatchNumber(b.batch_number || '');
     setFormSupplier(b.supplier_name || '');
     setFormCostPrice(String(b.unit_cost_price));
-    setFormPurchaseDate(b.purchase_date?.slice(0, 10) || new Date().toISOString().slice(0, 10));
+    setFormPurchaseDate(b.purchase_date?.slice(0, 10) || todayLocalISO());
     setFormNotes(b.notes || '');
     setShowModal(true);
   };
@@ -153,7 +156,7 @@ export default function BatchManager() {
   };
 
   const deleteBatch = async (id: number) => {
-    if (!confirm('Delete this batch? Associated inventory logs will also be deleted.')) return;
+    if (!confirm(t('batch.confirmDelete'))) return;
     try {
       await executeQuery(`DELETE FROM inventory_logs WHERE batch_id = ${id}`);
       await executeQuery(`DELETE FROM batches WHERE id = ${id}`);
@@ -209,7 +212,7 @@ export default function BatchManager() {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
         <RefreshCw size={20} className="animate-spin mr-2" />
-        Loading batches...
+        {t('batch.loading')}
       </div>
     );
   }
@@ -225,7 +228,7 @@ export default function BatchManager() {
               !filterStatus ? 'bg-accent text-white border-accent' : 'bg-bg-primary border-border text-text-secondary hover:border-accent/50'
             }`}
           >
-            All ({batches.length})
+            {t('batch.all', { count: batches.length })}
           </button>
           {STATUSES.map((s) => {
             const st = STATUS_STYLES[s];
@@ -238,7 +241,7 @@ export default function BatchManager() {
                 }`}
               >
                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${st.dot} mr-1.5`} />
-                {s.replace('_', ' ')} ({statusCounts[s] || 0})
+                {t(`common.status.${s}`)} ({statusCounts[s] || 0})
               </button>
             );
           })}
@@ -248,7 +251,7 @@ export default function BatchManager() {
           {STATUSES.map((s, i) => (
             <span key={s} className="flex items-center gap-1">
               <span className={`px-1.5 py-0.5 rounded ${STATUS_STYLES[s].bg} ${STATUS_STYLES[s].text} font-medium`}>
-                {s.replace('_', ' ')}
+                {t(`common.status.${s}`)}
               </span>
               {i < STATUSES.length - 1 && <ArrowRight size={8} className="text-text-secondary/30" />}
             </span>
@@ -258,9 +261,9 @@ export default function BatchManager() {
 
       {/* Header */}
       <div className="px-6 py-3 border-b border-border flex items-center justify-between shrink-0">
-        <h2 className="text-lg font-bold text-text-primary">Batch Manager</h2>
+        <h2 className="text-lg font-bold text-text-primary">{t('batch.title')}</h2>
         <button onClick={openNewBatch} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors">
-          <Plus size={12} /> New Batch
+          <Plus size={12} /> {t('batch.newBatch')}
         </button>
       </div>
 
@@ -269,13 +272,13 @@ export default function BatchManager() {
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-bg-secondary border-b border-border">
             <tr>
-              <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Batch #</th>
-              <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Product</th>
-              <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Supplier</th>
-              <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">Unit Cost</th>
-              <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">Date</th>
-              <th className="text-center px-4 py-2.5 text-text-secondary font-semibold">Status</th>
-              <th className="text-center px-4 py-2.5 text-text-secondary font-semibold">Actions</th>
+              <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.batch')}</th>
+              <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.product')}</th>
+              <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.supplier')}</th>
+              <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.unitCost')}</th>
+              <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.date')}</th>
+              <th className="text-center px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.status')}</th>
+              <th className="text-center px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -295,19 +298,19 @@ export default function BatchManager() {
                       className={`px-2 py-1 rounded-md border text-[10px] font-semibold ${st.bg} ${st.text} focus:outline-none cursor-pointer`}
                     >
                       {STATUSES.map((s) => (
-                        <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                        <option key={s} value={s}>{t(`common.status.${s}`)}</option>
                       ))}
                     </select>
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => openAddLog(b.id)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-accent transition-colors" title="Log transaction">
+                      <button onClick={() => openAddLog(b.id)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-accent transition-colors" title={t('batch.logTx')}>
                         <Plus size={10} />
                       </button>
-                      <button onClick={() => openEditBatch(b)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors" title="Edit">
+                      <button onClick={() => openEditBatch(b)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors" title={t('common.edit')}>
                         <Pencil size={10} />
                       </button>
-                      <button onClick={() => deleteBatch(b.id)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-error transition-colors" title="Delete">
+                      <button onClick={() => deleteBatch(b.id)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-error transition-colors" title={t('common.delete')}>
                         <Trash2 size={10} />
                       </button>
                     </div>
@@ -319,7 +322,7 @@ export default function BatchManager() {
         </table>
         {filtered.length === 0 && (
           <div className="p-6 text-center text-text-secondary text-xs">
-            {filterStatus ? `No batches with status "${filterStatus.replace('_', ' ')}"` : 'No batches recorded yet'}
+            {filterStatus ? t('batch.noBatchesStatus', { status: t(`common.status.${filterStatus}`) }) : t('batch.noBatches')}
           </div>
         )}
       </div>
@@ -329,26 +332,26 @@ export default function BatchManager() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowModal(false)}>
           <div className="bg-bg-secondary border border-border rounded-lg p-5 w-[420px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-text-primary">{editingBatch ? 'Edit Batch' : 'New Batch'}</h3>
+              <h3 className="text-sm font-bold text-text-primary">{editingBatch ? t('batch.editBatch') : t('batch.newBatch')}</h3>
               <button onClick={() => setShowModal(false)} className="text-text-secondary hover:text-text-primary"><X size={14} /></button>
             </div>
             <div className="space-y-3">
               <select value={formProductId} onChange={(e) => setFormProductId(e.target.value === '' ? '' : Number(e.target.value))} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
-                <option value="">Select product...</option>
+                <option value="">{t('batch.ph.selectProduct')}</option>
                 {products.map((p) => <option key={p.id} value={p.id}>{p.name}{p.sku ? ` (${p.sku})` : ''}</option>)}
               </select>
-              <input value={formBatchNumber} onChange={(e) => setFormBatchNumber(e.target.value)} placeholder="Batch number (optional)" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
-              <input value={formSupplier} onChange={(e) => setFormSupplier(e.target.value)} placeholder="Supplier name" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+              <input value={formBatchNumber} onChange={(e) => setFormBatchNumber(e.target.value)} placeholder={t('batch.ph.batchNumber')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+              <input value={formSupplier} onChange={(e) => setFormSupplier(e.target.value)} placeholder={t('batch.ph.supplier')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
               <div className="grid grid-cols-2 gap-3">
-                <input value={formCostPrice} onChange={(e) => setFormCostPrice(e.target.value)} type="number" step="0.01" placeholder="Unit cost price" className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <input value={formCostPrice} onChange={(e) => setFormCostPrice(e.target.value)} type="number" step="0.01" placeholder={t('batch.ph.unitCost')} className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
                 <input value={formPurchaseDate} onChange={(e) => setFormPurchaseDate(e.target.value)} type="date" className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent" />
               </div>
-              <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder="Notes (optional)" rows={2} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none" />
+              <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder={t('batch.ph.notes')} rows={2} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none" />
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowModal(false)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">Cancel</button>
+              <button onClick={() => setShowModal(false)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">{t('common.cancel')}</button>
               <button onClick={saveBatch} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors">
-                <Save size={10} /> Save
+                <Save size={10} /> {t('common.save')}
               </button>
             </div>
           </div>
@@ -360,27 +363,27 @@ export default function BatchManager() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowLogModal(false)}>
           <div className="bg-bg-secondary border border-border rounded-lg p-5 w-[380px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-text-primary">Record Transaction</h3>
+              <h3 className="text-sm font-bold text-text-primary">{t('batch.recordTx')}</h3>
               <button onClick={() => setShowLogModal(false)} className="text-text-secondary hover:text-text-primary"><X size={14} /></button>
             </div>
             <div className="space-y-3">
               <select value={logFormType} onChange={(e) => setLogFormType(e.target.value)} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
-                <option value="PURCHASE">PURCHASE (stock in)</option>
-                <option value="USAGE">USAGE (stock out)</option>
-                <option value="SPOILAGE">SPOILAGE (damaged/expired)</option>
-                <option value="ADJUSTMENT">ADJUSTMENT (correction)</option>
+                <option value="PURCHASE">{t('batch.txPURCHASE')}</option>
+                <option value="USAGE">{t('batch.txUSAGE')}</option>
+                <option value="SPOILAGE">{t('batch.txSPOILAGE')}</option>
+                <option value="ADJUSTMENT">{t('batch.txADJUSTMENT')}</option>
               </select>
-              <input value={logFormQty} onChange={(e) => setLogFormQty(e.target.value)} type="number" placeholder="Quantity" className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+              <input value={logFormQty} onChange={(e) => setLogFormQty(e.target.value)} type="number" placeholder={t('batch.ph.qty')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
               <select value={logFormLocationId} onChange={(e) => setLogFormLocationId(e.target.value === '' ? '' : Number(e.target.value))} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
-                <option value="">Select location (optional)...</option>
+                <option value="">{t('batch.ph.location')}</option>
                 {locations.map((l) => <option key={l.id} value={l.id}>{l.name}{l.sub_location ? ` - ${l.sub_location}` : ''}</option>)}
               </select>
-              <textarea value={logFormNotes} onChange={(e) => setLogFormNotes(e.target.value)} placeholder="Notes (optional)" rows={2} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none" />
+              <textarea value={logFormNotes} onChange={(e) => setLogFormNotes(e.target.value)} placeholder={t('batch.ph.notes')} rows={2} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none" />
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowLogModal(false)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">Cancel</button>
+              <button onClick={() => setShowLogModal(false)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">{t('common.cancel')}</button>
               <button onClick={saveLog} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors">
-                <Save size={10} /> Save
+                <Save size={10} /> {t('common.save')}
               </button>
             </div>
           </div>
@@ -390,7 +393,7 @@ export default function BatchManager() {
       {error && (
         <div className="fixed bottom-4 right-4 bg-error/10 border border-error/20 text-error px-4 py-2 rounded-lg text-xs shadow-lg z-50">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 hover:underline">dismiss</button>
+          <button onClick={() => setError(null)} className="ml-2 hover:underline">{t('common.dismiss')}</button>
         </div>
       )}
     </div>

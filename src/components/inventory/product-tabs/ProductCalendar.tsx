@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Check, X } from 'lucide-react';
 import { executeQuery, upsertCalendarEvent, toggleCalendarEvent, deleteCalendarEvent } from '../../../lib/db';
+import { todayLocalISO } from '../../../lib/dates';
+import { useI18n } from '../../../lib/language';
 
 interface CalEvent {
   id: number;
@@ -22,16 +24,16 @@ const EVENT_COLORS: Record<string, string> = {
   custom: 'bg-text-secondary',
 };
 
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
 export default function ProductCalendar({ productId }: { productId: number }) {
+  const { t } = useI18n();
+  const months = Array.from({ length: 12 }, (_, i) => t(`pcal.mon.${i}`));
+  const days = Array.from({ length: 7 }, (_, i) => t(`pcal.day.${i}`));
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
   const [formTitle, setFormTitle] = useState('');
   const [formType, setFormType] = useState('purchase');
-  const [formDate, setFormDate] = useState(new Date().toISOString().slice(0, 10));
+  const [formDate, setFormDate] = useState(todayLocalISO());
   const [formEndDate, setFormEndDate] = useState('');
   const [formQty, setFormQty] = useState('');
   const [formNotes, setFormNotes] = useState('');
@@ -55,7 +57,7 @@ export default function ProductCalendar({ productId }: { productId: number }) {
   const month = currentDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocalISO();
 
   const getEventsForDay = (day: number) => {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -80,7 +82,7 @@ export default function ProductCalendar({ productId }: { productId: number }) {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this event?')) return;
+    if (!confirm(t('pcal.confirmDelete'))) return;
     try { await deleteCalendarEvent(id); await fetchData(); } catch (e) { console.error('Failed to delete event:', e); }
   };
 
@@ -100,7 +102,7 @@ export default function ProductCalendar({ productId }: { productId: number }) {
               {e.title}
             </div>
           ))}
-          {dayEvents.length > 3 && <span className="text-[8px] text-text-secondary">+{dayEvents.length - 3} more</span>}
+          {dayEvents.length > 3 && <span className="text-[8px] text-text-secondary">{t('pcal.more', { count: dayEvents.length - 3 })}</span>}
         </div>
       </div>
     );
@@ -114,43 +116,43 @@ export default function ProductCalendar({ productId }: { productId: number }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button onClick={() => setCurrentDate(new Date(year, month - 1))} className="p-1.5 rounded hover:bg-bg-hover text-text-secondary"><ChevronLeft size={16} /></button>
-          <h3 className="text-sm font-bold text-text-primary w-40 text-center">{MONTHS[month]} {year}</h3>
+          <h3 className="text-sm font-bold text-text-primary w-40 text-center">{months[month]} {year}</h3>
           <button onClick={() => setCurrentDate(new Date(year, month + 1))} className="p-1.5 rounded hover:bg-bg-hover text-text-secondary"><ChevronRight size={16} /></button>
-          <button onClick={() => setCurrentDate(new Date())} className="px-2 py-1 text-[10px] bg-bg-tertiary hover:bg-bg-hover border border-border rounded text-text-secondary">Today</button>
+          <button onClick={() => setCurrentDate(new Date())} className="px-2 py-1 text-[10px] bg-bg-tertiary hover:bg-bg-hover border border-border rounded text-text-secondary">{t('pcal.today')}</button>
         </div>
         <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white">
-          <Plus size={12} /> Add Event
+          <Plus size={12} /> {t('pcal.addEvent')}
         </button>
       </div>
 
       {showForm && (
         <div className="bg-bg-secondary border border-border rounded-lg p-4 space-y-3">
           <div className="grid grid-cols-4 gap-3">
-            <input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} placeholder="Event title" className="col-span-2 px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+            <input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} placeholder={t('pcal.phTitle')} className="col-span-2 px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
             <select value={formType} onChange={(e) => setFormType(e.target.value)} className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
-              <option value="purchase">Purchase</option>
-              <option value="shipping">Shipping</option>
-              <option value="delivery">Delivery</option>
-              <option value="tasting">Tasting</option>
-              <option value="reservation">Reservation</option>
-              <option value="custom">Custom</option>
+              <option value="purchase">{t('pcal.type.purchase')}</option>
+              <option value="shipping">{t('pcal.type.shipping')}</option>
+              <option value="delivery">{t('pcal.type.delivery')}</option>
+              <option value="tasting">{t('pcal.type.tasting')}</option>
+              <option value="reservation">{t('pcal.type.reservation')}</option>
+              <option value="custom">{t('pcal.type.custom')}</option>
             </select>
             <input value={formDate} onChange={(e) => setFormDate(e.target.value)} type="date" className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent" />
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <input value={formEndDate} onChange={(e) => setFormEndDate(e.target.value)} type="date" placeholder="End date" className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent" />
-            <input value={formQty} onChange={(e) => setFormQty(e.target.value)} type="number" placeholder="Quantity" className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
-            <input value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+            <input value={formEndDate} onChange={(e) => setFormEndDate(e.target.value)} type="date" placeholder={t('pcal.phEnd')} className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent" />
+            <input value={formQty} onChange={(e) => setFormQty(e.target.value)} type="number" placeholder={t('pcal.phQty')} className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+            <input value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder={t('pcal.phNotes')} className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
           </div>
           <div className="flex gap-2">
-            <button onClick={handleSubmit} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white"><Check size={10} /> Save</button>
-            <button onClick={() => setShowForm(false)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary"><X size={10} /> Cancel</button>
+            <button onClick={handleSubmit} className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white"><Check size={10} /> {t('common.save')}</button>
+            <button onClick={() => setShowForm(false)} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary"><X size={10} /> {t('common.cancel')}</button>
           </div>
         </div>
       )}
 
       <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden">
-        {DAYS.map((d) => (
+        {days.map((d) => (
           <div key={d} className="bg-bg-secondary px-2 py-1.5 text-[10px] font-semibold text-text-secondary text-center">{d}</div>
         ))}
         {calendarCells}
@@ -158,7 +160,7 @@ export default function ProductCalendar({ productId }: { productId: number }) {
 
       <div className="bg-bg-secondary border border-border rounded-lg">
         <div className="px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-semibold text-text-primary">Upcoming Events</h3>
+          <h3 className="text-sm font-semibold text-text-primary">{t('pcal.upcoming')}</h3>
         </div>
         <div className="divide-y divide-border max-h-[300px] overflow-y-auto">
           {events.filter((e) => !e.is_completed).slice(0, 20).map((event) => (
@@ -176,7 +178,7 @@ export default function ProductCalendar({ productId }: { productId: number }) {
             </div>
           ))}
           {events.filter((e) => !e.is_completed).length === 0 && (
-            <div className="p-4 text-xs text-text-secondary text-center">No upcoming events</div>
+            <div className="p-4 text-xs text-text-secondary text-center">{t('pcal.empty')}</div>
           )}
         </div>
       </div>
