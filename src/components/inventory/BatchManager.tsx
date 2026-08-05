@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Pencil, Trash2, X, Save, ArrowRight } from 'lucide-react';
 import { executeQuery, updateBatchStatus } from '../../lib/db';
-import { todayLocalISO } from '../../lib/dates';
+import { todayLocalISO, stampForDate } from '../../lib/dates';
 import { useI18n } from '../../lib/language';
 
 interface Batch {
@@ -22,10 +22,10 @@ interface Product {
   sku: string | null;
 }
 
-interface Location {
+interface Provider {
   id: number;
   name: string;
-  sub_location: string | null;
+  sub_name: string | null;
 }
 
 const STATUSES = ['ordered', 'shipping', 'arrived', 'in_inventory', 'used', 'reserved'] as const;
@@ -43,7 +43,7 @@ export default function BatchManager() {
   const { t } = useI18n();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -61,7 +61,7 @@ export default function BatchManager() {
   const [formNotes, setFormNotes] = useState('');
 
   // Log form
-  const [logFormLocationId, setLogFormLocationId] = useState<number | ''>('');
+  const [logFormProviderId, setLogFormProviderId] = useState<number | ''>('');
   const [logFormQty, setLogFormQty] = useState('');
   const [logFormType, setLogFormType] = useState('PURCHASE');
   const [logFormNotes, setLogFormNotes] = useState('');
@@ -70,7 +70,7 @@ export default function BatchManager() {
     setLoading(true);
     setError(null);
     try {
-      const [batchesResult, productsResult, locationsResult] = await Promise.all([
+      const [batchesResult, productsResult, providersResult] = await Promise.all([
         executeQuery(`
           SELECT b.id, b.product_id, p.name AS product_name, b.batch_number, b.supplier_name,
                  b.unit_cost_price, b.purchase_date, COALESCE(b.status, 'in_inventory') AS status, b.notes
@@ -79,7 +79,7 @@ export default function BatchManager() {
           ORDER BY b.purchase_date DESC
         `),
         executeQuery('SELECT id, name, sku FROM products ORDER BY name'),
-        executeQuery('SELECT id, name, sub_location FROM locations ORDER BY name, sub_location'),
+        executeQuery('SELECT id, name, sub_name FROM providers ORDER BY name, sub_name'),
       ]);
 
       setBatches(batchesResult.rows.map((r) => ({
@@ -100,10 +100,10 @@ export default function BatchManager() {
         sku: r[2] as string | null,
       })));
 
-      setLocations(locationsResult.rows.map((r) => ({
+      setProviders(providersResult.rows.map((r) => ({
         id: r[0] as number,
         name: r[1] as string,
-        sub_location: r[2] as string | null,
+        sub_name: r[2] as string | null,
       })));
     } catch (err) {
       setError(String(err));
@@ -145,8 +145,22 @@ export default function BatchManager() {
 
       if (editingBatch) {
         await executeQuery(`UPDATE batches SET product_id = ${formProductId}, batch_number = ${batchNum}, supplier_name = ${supplier}, unit_cost_price = ${Number(formCostPrice)}, purchase_date = '${formPurchaseDate}', notes = ${notes} WHERE id = ${editingBatch.id}`);
+        await executeQuery(`
+          UPDATE inventory_logs
+          SET created_at = CASE
+            WHEN length(created_at) > 10 THEN '${formPurchaseDate}' || substr(created_at, 11)
+            ELSE '${formPurchaseDate}'
+          END
+          WHERE batch_id = ${editingBatch.id}
+        `);
       } else {
         await executeQuery(`INSERT INTO batches (product_id, batch_number, supplier_name, unit_cost_price, purchase_date, notes) VALUES (${formProductId}, ${batchNum}, ${supplier}, ${Number(formCostPrice)}, '${formPurchaseDate}', ${notes})`);
+        const newBatch = await executeQuery(`SELECT last_insert_rowid()`);
+        await executeQuery(`
+          UPDATE inventory_logs
+          SET created_at = '${formPurchaseDate}' || substr(created_at, 11)
+          WHERE batch_id = ${newBatch.rows[0][0] as number}
+        `);
       }
       setShowModal(false);
       await fetchData();
@@ -177,7 +191,7 @@ export default function BatchManager() {
 
   const openAddLog = (batchId: number) => {
     setLogBatchId(batchId);
-    setLogFormLocationId('');
+    setLogFormProviderId('');
     setLogFormQty('');
     setLogFormType('USAGE');
     setLogFormNotes('');
@@ -190,9 +204,11 @@ export default function BatchManager() {
       const qty = logFormType === 'USAGE' || logFormType === 'SPOILAGE'
         ? -Math.abs(Number(logFormQty))
         : Number(logFormQty);
-      const locVal = logFormLocationId === '' ? 'NULL' : String(logFormLocationId);
+      const provVal = logFormProviderId === '' ? 'NULL' : String(logFormProviderId);
       const notes = logFormNotes ? `'${logFormNotes.replace(/'/g, "''")}'` : 'NULL';
-      await executeQuery(`INSERT INTO inventory_logs (batch_id, location_id, quantity_change, transaction_type, notes) VALUES (${logBatchId}, ${locVal}, ${qty}, '${logFormType}', ${notes})`);
+      const batchInfo = await executeQuery(`SELECT purchase_date FROM batches WHERE id = ${logBatchId}`);
+      const stamp = stampForDate(batchInfo.rows[0][0] as string);
+      await executeQuery(`INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at) VALUES (${logBatchId}, ${provVal}, ${qty}, '${logFormType}', ${notes}, '${stamp}')`);
       setShowLogModal(false);
     } catch (err) {
       setError(String(err));
@@ -374,9 +390,9 @@ export default function BatchManager() {
                 <option value="ADJUSTMENT">{t('batch.txADJUSTMENT')}</option>
               </select>
               <input value={logFormQty} onChange={(e) => setLogFormQty(e.target.value)} type="number" placeholder={t('batch.ph.qty')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
-              <select value={logFormLocationId} onChange={(e) => setLogFormLocationId(e.target.value === '' ? '' : Number(e.target.value))} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
-                <option value="">{t('batch.ph.location')}</option>
-                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}{l.sub_location ? ` - ${l.sub_location}` : ''}</option>)}
+              <select value={logFormProviderId} onChange={(e) => setLogFormProviderId(e.target.value === '' ? '' : Number(e.target.value))} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
+                <option value="">{t('batch.ph.provider')}</option>
+                {providers.map((l) => <option key={l.id} value={l.id}>{l.name}{l.sub_name ? ` - ${l.sub_name}` : ''}</option>)}
               </select>
               <textarea value={logFormNotes} onChange={(e) => setLogFormNotes(e.target.value)} placeholder={t('batch.ph.notes')} rows={2} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none" />
             </div>

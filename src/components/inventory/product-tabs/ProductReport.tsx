@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Printer } from 'lucide-react';
 import { getProductReportData } from '../../../lib/db';
+import { printDom } from '../../../lib/print';
 import { todayLocalISO } from '../../../lib/dates';
 import { useI18n } from '../../../lib/language';
 
@@ -53,18 +54,9 @@ export default function ProductReport({ productId }: { productId: number }) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          .report-print, .report-print * { visibility: visible !important; }
-          .report-print { position: absolute; left: 0; top: 0; width: 100%; background: white !important; color: #111 !important; }
-          .no-print { display: none !important; }
-        }
-      `}</style>
-
       <div className="no-print px-6 py-4 border-b border-border bg-bg-secondary flex items-center justify-between sticky top-0 z-10">
         <h2 className="text-sm font-bold text-text-primary">{t('preport.title')}</h2>
-        <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white">
+        <button onClick={() => printDom('.report-print')} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white">
           <Printer size={12} /> {t('preport.print')}
         </button>
       </div>

@@ -88,10 +88,10 @@ CREATE TABLE IF NOT EXISTS unit_conversions (
     conversion_factor NUMERIC(10, 2) NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS locations (
+CREATE TABLE IF NOT EXISTS providers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name VARCHAR(100) NOT NULL,
-    sub_location VARCHAR(100)
+    sub_name VARCHAR(100)
 );
 
 CREATE TABLE IF NOT EXISTS batches (
@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS batches (
 CREATE TABLE IF NOT EXISTS inventory_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     batch_id INTEGER NOT NULL REFERENCES batches(id),
-    location_id INTEGER REFERENCES locations(id),
+    provider_id INTEGER REFERENCES providers(id),
     quantity_change NUMERIC(10, 2) NOT NULL,
     transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('PURCHASE', 'USAGE', 'SPOILAGE', 'ADJUSTMENT')),
     notes TEXT,
@@ -224,11 +224,11 @@ INSERT INTO category_attribute_templates (category_id, attr_key, attr_type, is_r
 (8, 'Material', 'string', 0, 1),
 (8, 'Capacity', 'string', 0, 2);
 
-INSERT INTO locations (name, sub_location) VALUES ('Main Cellar', 'Rack A, Shelf 1');
-INSERT INTO locations (name, sub_location) VALUES ('Main Cellar', 'Rack A, Shelf 2');
-INSERT INTO locations (name, sub_location) VALUES ('Main Cellar', 'Rack B, Shelf 1');
-INSERT INTO locations (name, sub_location) VALUES ('Cold Storage', 'Section 1');
-INSERT INTO locations (name, sub_location) VALUES ('Warehouse', 'Ground Level');
+INSERT INTO providers (name, sub_name) VALUES ('Main Cellar', 'Rack A, Shelf 1');
+INSERT INTO providers (name, sub_name) VALUES ('Main Cellar', 'Rack A, Shelf 2');
+INSERT INTO providers (name, sub_name) VALUES ('Main Cellar', 'Rack B, Shelf 1');
+INSERT INTO providers (name, sub_name) VALUES ('Cold Storage', 'Section 1');
+INSERT INTO providers (name, sub_name) VALUES ('Warehouse', 'Ground Level');
 
 INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES
 (1, 'Château Margaux 2015', 'WINE-R-001', 'bottle', 6),
@@ -314,7 +314,7 @@ INSERT INTO batches (product_id, batch_number, supplier_name, unit_cost_price, p
 (12, 'LOT-2024-013', 'Riedel Direct', 95.00, '2024-02-01', 'Glassware restock'),
 (12, 'LOT-2024-014', 'Riedel Direct', 95.00, '2024-08-01', 'Additional stock');
 
-INSERT INTO inventory_logs (batch_id, location_id, quantity_change, transaction_type, notes, created_at) VALUES
+INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at) VALUES
 (1, 1, 24.00, 'PURCHASE', 'Initial stock - 2 cases', '2024-01-15 10:00:00'),
 (1, 1, -2.00, 'USAGE', 'Served at private tasting event', '2024-02-10 19:30:00'),
 (1, 1, -1.00, 'USAGE', 'Opened for VIP dinner', '2024-03-15 20:00:00'),
@@ -603,6 +603,32 @@ fn close_database(state: State<DbState>) -> Result<(), String> {
 #[tauri::command]
 fn migrate_schema(state: State<DbState>) -> Result<(), String> {
     with_conn(&state, |conn| {
+        let locations_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='locations'",
+                [],
+                |r| r.get(0),
+            )
+            .map(|c: i64| c > 0)
+            .unwrap_or(false);
+        if locations_exists {
+            conn.execute_batch("ALTER TABLE locations RENAME TO providers;").ok();
+        }
+        let has_column = |table: &str, column: &str| -> bool {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name = ?1", table),
+                rusqlite::params![column],
+                |r| r.get(0),
+            )
+            .map(|c: i64| c > 0)
+            .unwrap_or(false)
+        };
+        if has_column("providers", "sub_location") {
+            conn.execute_batch("ALTER TABLE providers RENAME COLUMN sub_location TO sub_name;").ok();
+        }
+        if has_column("inventory_logs", "location_id") {
+            conn.execute_batch("ALTER TABLE inventory_logs RENAME COLUMN location_id TO provider_id;").ok();
+        }
         let steps: [&str; 19] = [
             "ALTER TABLE batches ADD COLUMN status VARCHAR(30) DEFAULT 'in_inventory';",
             "CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status);",
@@ -1148,7 +1174,7 @@ mod tests {
             .filter_map(|r| r.ok()).collect();
         let expected = [
             "batches", "calendar_events", "categories", "category_attribute_templates",
-            "client_reservations", "clients", "inventory_logs", "locations",
+            "client_reservations", "clients", "inventory_logs", "providers",
             "product_attributes", "product_notifications", "product_notes", "products",
             "unit_conversions",
         ];
@@ -1199,9 +1225,9 @@ mod tests {
     }
 
     #[test]
-    fn test_seed_locations() {
+    fn test_seed_providers() {
         let conn = setup_db();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM locations", [], |row| row.get(0)).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 5);
     }
 
@@ -1303,13 +1329,13 @@ mod tests {
     #[test]
     fn test_execute_query_insert_update_delete() {
         let conn = setup_db();
-        conn.execute("INSERT INTO locations (name, sub_location) VALUES ('Test', 'Shelf 1')", []).unwrap();
-        let id: i64 = conn.query_row("SELECT id FROM locations WHERE name = 'Test'", [], |row| row.get(0)).unwrap();
-        conn.execute("UPDATE locations SET sub_location = 'Shelf 2' WHERE id = ?", rusqlite::params![id]).unwrap();
-        let sub: String = conn.query_row("SELECT sub_location FROM locations WHERE id = ?", rusqlite::params![id], |row| row.get(0)).unwrap();
+        conn.execute("INSERT INTO providers (name, sub_name) VALUES ('Test', 'Shelf 1')", []).unwrap();
+        let id: i64 = conn.query_row("SELECT id FROM providers WHERE name = 'Test'", [], |row| row.get(0)).unwrap();
+        conn.execute("UPDATE providers SET sub_name = 'Shelf 2' WHERE id = ?", rusqlite::params![id]).unwrap();
+        let sub: String = conn.query_row("SELECT sub_name FROM providers WHERE id = ?", rusqlite::params![id], |row| row.get(0)).unwrap();
         assert_eq!(sub, "Shelf 2");
-        conn.execute("DELETE FROM locations WHERE id = ?", rusqlite::params![id]).unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM locations WHERE id = ?", rusqlite::params![id], |row| row.get(0)).unwrap();
+        conn.execute("DELETE FROM providers WHERE id = ?", rusqlite::params![id]).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM providers WHERE id = ?", rusqlite::params![id], |row| row.get(0)).unwrap();
         assert_eq!(count, 0);
     }
 
@@ -1687,6 +1713,11 @@ mod tests {
     }
 }
 
+#[tauri::command]
+fn print_webview(webview: tauri::Webview) -> Result<(), String> {
+    webview.print().map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1700,6 +1731,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_database,
+            print_webview,
             create_new_database,
             get_schema,
             get_tables,

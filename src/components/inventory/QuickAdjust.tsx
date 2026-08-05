@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Minus, ShoppingCart, Trash2, Wrench, AlertTriangle } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
-import { todayLocalISO } from '../../lib/dates';
+import { todayLocalISO, stampForDate } from '../../lib/dates';
 import { useI18n } from '../../lib/language';
 
 interface Product {
@@ -13,10 +13,10 @@ interface Product {
   reorder_threshold: number;
 }
 
-interface Location {
+interface Provider {
   id: number;
   name: string;
-  sub_location: string | null;
+  sub_name: string | null;
 }
 
 interface RecentAdjustment {
@@ -40,7 +40,7 @@ const QUICK_QTY = [1, 6, 12, 24];
 export default function QuickAdjust() {
   const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [recent, setRecent] = useState<RecentAdjustment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +48,10 @@ export default function QuickAdjust() {
   const [selectedProductId, setSelectedProductId] = useState<number | ''>('');
   const [txType, setTxType] = useState('PURCHASE');
   const [qty, setQty] = useState('1');
-  const [locationId, setLocationId] = useState<number | ''>('');
+  const [providerId, setProviderId] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
+  const [batchNumber, setBatchNumber] = useState('');
+  const [txDate, setTxDate] = useState(todayLocalISO());
   const [submitting, setSubmitting] = useState(false);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
@@ -58,7 +60,7 @@ export default function QuickAdjust() {
     setLoading(true);
     setError(null);
     try {
-      const [productsResult, locationsResult, recentResult] = await Promise.all([
+      const [productsResult, providersResult, recentResult] = await Promise.all([
         executeQuery(`
           SELECT
             p.id, p.name, p.sku,
@@ -72,7 +74,7 @@ export default function QuickAdjust() {
           GROUP BY p.id, p.name, p.sku, c.name, p.reorder_threshold
           ORDER BY c.name, p.name
         `),
-        executeQuery('SELECT id, name, sub_location FROM locations ORDER BY name, sub_location'),
+        executeQuery('SELECT id, name, sub_name FROM providers ORDER BY name, sub_name'),
         executeQuery(`
           SELECT il.id, p.name AS product_name, il.quantity_change, il.transaction_type, il.notes, il.created_at
           FROM inventory_logs il
@@ -92,10 +94,10 @@ export default function QuickAdjust() {
         reorder_threshold: r[5] as number,
       })));
 
-      setLocations(locationsResult.rows.map((r) => ({
+      setProviders(providersResult.rows.map((r) => ({
         id: r[0] as number,
         name: r[1] as string,
-        sub_location: r[2] as string | null,
+        sub_name: r[2] as string | null,
       })));
 
       setRecent(recentResult.rows.map((r) => ({
@@ -121,28 +123,39 @@ export default function QuickAdjust() {
     setError(null);
 
     try {
-      // Find or create an open batch for this product
-      const batchResult = await executeQuery(`
-        SELECT b.id FROM batches b
-        WHERE b.product_id = ${selectedProductId}
-        ORDER BY b.purchase_date DESC
-        LIMIT 1
-      `);
-
+      // PURCHASE with an explicit batch number creates a new batch
+      const newBatchNum = txType === 'PURCHASE' ? batchNumber.trim() : '';
       let batchId: number;
 
-      if (batchResult.rows.length > 0) {
-        batchId = batchResult.rows[0][0] as number;
-      } else {
-        // Auto-create a batch
-        const today = todayLocalISO();
-        const autoNote = t('adjust.autoNote').replace(/'/g, "''");
+      if (newBatchNum) {
+        const batchNumVal = newBatchNum.replace(/'/g, "''");
         await executeQuery(`
           INSERT INTO batches (product_id, batch_number, supplier_name, unit_cost_price, purchase_date, notes)
-          VALUES (${selectedProductId}, NULL, NULL, 0, '${today}', '${autoNote}')
+          VALUES (${selectedProductId}, '${batchNumVal}', NULL, 0, '${txDate}', NULL)
         `);
         const newBatch = await executeQuery(`SELECT last_insert_rowid()`);
         batchId = newBatch.rows[0][0] as number;
+      } else {
+        // Find or create an open batch for this product
+        const batchResult = await executeQuery(`
+          SELECT b.id FROM batches b
+          WHERE b.product_id = ${selectedProductId}
+          ORDER BY b.purchase_date DESC
+          LIMIT 1
+        `);
+
+        if (batchResult.rows.length > 0) {
+          batchId = batchResult.rows[0][0] as number;
+        } else {
+          // Auto-create a batch
+          const autoNote = t('adjust.autoNote').replace(/'/g, "''");
+          await executeQuery(`
+            INSERT INTO batches (product_id, batch_number, supplier_name, unit_cost_price, purchase_date, notes)
+            VALUES (${selectedProductId}, NULL, NULL, 0, '${txDate}', '${autoNote}')
+          `);
+          const newBatch = await executeQuery(`SELECT last_insert_rowid()`);
+          batchId = newBatch.rows[0][0] as number;
+        }
       }
 
       const qtyNum = Number(qty);
@@ -150,17 +163,19 @@ export default function QuickAdjust() {
         ? -Math.abs(qtyNum)
         : Math.abs(qtyNum);
 
-      const locVal = locationId === '' ? 'NULL' : String(locationId);
+      const provVal = providerId === '' ? 'NULL' : String(providerId);
       const notesVal = notes.trim() ? `'${notes.trim().replace(/'/g, "''")}'` : 'NULL';
 
       await executeQuery(`
-        INSERT INTO inventory_logs (batch_id, location_id, quantity_change, transaction_type, notes)
-        VALUES (${batchId}, ${locVal}, ${adjustedQty}, '${txType}', ${notesVal})
+        INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at)
+        VALUES (${batchId}, ${provVal}, ${adjustedQty}, '${txType}', ${notesVal}, '${stampForDate(txDate)}')
       `);
 
       // Reset form but keep product selected
       setQty('1');
       setNotes('');
+      setBatchNumber('');
+      setTxDate(todayLocalISO());
       await fetchData();
     } catch (err) {
       setError(String(err));
@@ -311,20 +326,48 @@ export default function QuickAdjust() {
             </div>
           </div>
 
-          {/* Location (optional) */}
+          {/* Batch number (only for PURCHASE) */}
+          {txType === 'PURCHASE' && (
+            <div>
+              <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+                {t('adjust.batchLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
+              </label>
+              <input
+                value={batchNumber}
+                onChange={(e) => setBatchNumber(e.target.value)}
+                placeholder={t('batch.ph.batchNumber')}
+                className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
+              />
+            </div>
+          )}
+
+          {/* Date */}
           <div>
             <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
-              Location <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
+              {t('adjust.dateLabel')}
+            </label>
+            <input
+              value={txDate}
+              onChange={(e) => setTxDate(e.target.value)}
+              type="date"
+              className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          {/* Provider (optional) */}
+          <div>
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+              {t('adjust.providerLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
             </label>
             <select
-              value={locationId}
-              onChange={(e) => setLocationId(e.target.value === '' ? '' : Number(e.target.value))}
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))}
               className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
             >
-              <option value="">{t('adjust.noLocation')}</option>
-              {locations.map((l) => (
+              <option value="">{t('adjust.noProvider')}</option>
+              {providers.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.name}{l.sub_location ? ` - ${l.sub_location}` : ''}
+                  {l.name}{l.sub_name ? ` - ${l.sub_name}` : ''}
                 </option>
               ))}
             </select>
@@ -333,7 +376,7 @@ export default function QuickAdjust() {
           {/* Notes (optional) */}
           <div>
             <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
-              Notes <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
+              {t('adjust.notesLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
             </label>
             <textarea
               value={notes}

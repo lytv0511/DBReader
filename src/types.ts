@@ -24,9 +24,9 @@ export interface PresetData {
   timestamp: number;
 }
 
-export type ViewMode = 'canvas' | 'query' | 'quickuse' | 'dashboard' | 'gallery' | 'detail' | 'products' | 'batches' | 'logs' | 'adjust' | 'used' | 'categories' | 'settings';
+export type ViewMode = 'canvas' | 'query' | 'dashboard' | 'gallery' | 'detail' | 'products' | 'batches' | 'logs' | 'adjust' | 'used' | 'categories' | 'reports' | 'txhistory' | 'settings';
 
-export type ThemeMode = 'dark' | 'light' | 'system';
+export type ThemeMode = 'dark' | 'light' | 'system' | 'aurora' | 'sunset' | 'ocean' | 'forest' | 'candy' | 'gold' | 'midnight' | 'lava';
 export type LanguageCode = 'system' | 'en' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'es' | 'fr' | 'de';
 
 export interface AppPreferences {

@@ -9,12 +9,12 @@ interface LogEntry {
   quantity_change: number;
   transaction_type: string;
   notes: string | null;
-  location_name: string | null;
-  location_sub: string | null;
+  provider_name: string | null;
+  provider_sub: string | null;
   created_at: string;
 }
 
-type SortField = 'created_at' | 'transaction_type' | 'batch_number' | 'quantity_change' | 'notes' | 'location_name';
+type SortField = 'created_at' | 'transaction_type' | 'batch_number' | 'quantity_change' | 'notes' | 'provider_name';
 type SortDir = 'asc' | 'desc';
 
 interface ProductHistoryProps {
@@ -53,12 +53,12 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
           il.quantity_change,
           il.transaction_type,
           il.notes,
-          l.name AS location_name,
-          l.sub_location,
+          pr.name AS provider_name,
+          pr.sub_name,
           il.created_at
         FROM inventory_logs il
         JOIN batches b ON il.batch_id = b.id
-        LEFT JOIN locations l ON il.location_id = l.id
+        LEFT JOIN providers pr ON il.provider_id = pr.id
         WHERE b.product_id = ${productId}
         ORDER BY il.created_at DESC
       `);
@@ -69,8 +69,8 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
         quantity_change: r[2] as number,
         transaction_type: r[3] as string,
         notes: r[4] as string | null,
-        location_name: r[5] as string | null,
-        location_sub: r[6] as string | null,
+        provider_name: r[5] as string | null,
+        provider_sub: r[6] as string | null,
         created_at: r[7] as string,
       })));
     } catch (err) {
@@ -138,9 +138,9 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
           aVal = a.notes || '';
           bVal = b.notes || '';
           break;
-        case 'location_name':
-          aVal = a.location_name || '';
-          bVal = b.location_name || '';
+        case 'provider_name':
+          aVal = a.provider_name || '';
+          bVal = b.provider_name || '';
           break;
         default:
           aVal = 0;
@@ -292,10 +292,10 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
                   <span className="inline-flex items-center gap-1">{t('phist.col.notes')} <SortIcon field="notes" /></span>
                 </th>
                 <th
-                  onClick={() => handleSort('location_name')}
+                  onClick={() => handleSort('provider_name')}
                   className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
                 >
-                  <span className="inline-flex items-center gap-1">{t('phist.col.location')} <SortIcon field="location_name" /></span>
+                  <span className="inline-flex items-center gap-1">{t('phist.col.provider')} <SortIcon field="provider_name" /></span>
                 </th>
               </tr>
             </thead>
@@ -318,7 +318,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
                     </td>
                     <td className="px-4 py-2.5 text-text-secondary truncate max-w-[200px]">{log.notes || '-'}</td>
                     <td className="px-4 py-2.5 text-text-secondary">
-                      {log.location_name ? `${log.location_name}${log.location_sub ? ` - ${log.location_sub}` : ''}` : '-'}
+                      {log.provider_name ? `${log.provider_name}${log.provider_sub ? ` - ${log.provider_sub}` : ''}` : '-'}
                     </td>
                   </tr>
                 );

@@ -9,8 +9,8 @@ interface LogEntry {
   batch_number: string | null;
   quantity_change: number;
   transaction_type: string;
-  location_name: string | null;
-  location_sub: string | null;
+  provider_name: string | null;
+  provider_sub: string | null;
   notes: string | null;
   created_at: string;
 }
@@ -39,14 +39,14 @@ export default function InventoryLog() {
           b.batch_number,
           il.quantity_change,
           il.transaction_type,
-          l.name AS location_name,
-          l.sub_location,
+          pr.name AS provider_name,
+          pr.sub_name,
           il.notes,
           il.created_at
         FROM inventory_logs il
         JOIN batches b ON il.batch_id = b.id
         JOIN products p ON b.product_id = p.id
-        LEFT JOIN locations l ON il.location_id = l.id
+        LEFT JOIN providers pr ON il.provider_id = pr.id
         ${where}
         ORDER BY il.created_at DESC
         LIMIT 200
@@ -58,8 +58,8 @@ export default function InventoryLog() {
         batch_number: r[2] as string | null,
         quantity_change: r[3] as number,
         transaction_type: r[4] as string,
-        location_name: r[5] as string | null,
-        location_sub: r[6] as string | null,
+        provider_name: r[5] as string | null,
+        provider_sub: r[6] as string | null,
         notes: r[7] as string | null,
         created_at: r[8] as string,
       })));
@@ -174,7 +174,7 @@ export default function InventoryLog() {
                 <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.product')}</th>
                 <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.batch')}</th>
                 <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.qtyChange')}</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.location')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.provider')}</th>
                 <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.notes')}</th>
               </tr>
             </thead>
@@ -193,7 +193,7 @@ export default function InventoryLog() {
                     {log.quantity_change >= 0 ? '+' : ''}{log.quantity_change}
                   </td>
                   <td className="px-4 py-2.5 text-text-secondary">
-                    {log.location_name ? `${log.location_name}${log.location_sub ? ` - ${log.location_sub}` : ''}` : '-'}
+                    {log.provider_name ? `${log.provider_name}${log.provider_sub ? ` - ${log.provider_sub}` : ''}` : '-'}
                   </td>
                   <td className="px-4 py-2.5 text-text-secondary truncate max-w-[200px]">{log.notes || '-'}</td>
                 </tr>

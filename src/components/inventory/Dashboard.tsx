@@ -3,6 +3,7 @@ import { RefreshCw, AlertTriangle, TrendingUp, Package, Clock } from 'lucide-rea
 import { executeQuery } from '../../lib/db';
 import { useI18n } from '../../lib/language';
 import PieChartWidget from './PieChartWidget';
+import type { StockFilter } from './ProductGallery';
 
 interface StockRow {
   product_id: number;
@@ -20,6 +21,7 @@ interface StockRow {
 interface RecentActivity {
   id: number;
   product_name: string;
+  provider_name: string | null;
   quantity_change: number;
   transaction_type: string;
   notes: string | null;
@@ -31,11 +33,12 @@ interface SummaryCardProps {
   label: string;
   value: number | string;
   color: string;
+  onClick?: () => void;
 }
 
-function SummaryCard({ icon, label, value, color }: SummaryCardProps) {
-  return (
-    <div className="bg-bg-secondary border border-border rounded-lg p-4 flex items-start gap-3">
+function SummaryCard({ icon, label, value, color, onClick }: SummaryCardProps) {
+  const content = (
+    <>
       <div className={`p-2 rounded-md ${color}`}>
         {icon}
       </div>
@@ -43,11 +46,32 @@ function SummaryCard({ icon, label, value, color }: SummaryCardProps) {
         <p className="text-xs text-text-secondary">{label}</p>
         <p className="text-xl font-bold text-text-primary">{value}</p>
       </div>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        onClick={onClick}
+        className="bg-bg-secondary border border-border rounded-lg p-4 flex items-start gap-3 text-left hover:border-accent/50 hover:shadow-lg hover:shadow-accent/5 transition-all"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="bg-bg-secondary border border-border rounded-lg p-4 flex items-start gap-3">
+      {content}
     </div>
   );
 }
 
-export default function Dashboard() {
+interface DashboardProps {
+  onNavigate: (stockFilter: StockFilter) => void;
+}
+
+export default function Dashboard({ onNavigate }: DashboardProps) {
   const { t } = useI18n();
   const [stockLevels, setStockLevels] = useState<StockRow[]>([]);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
@@ -84,6 +108,7 @@ export default function Dashboard() {
           SELECT
             il.id,
             p.name AS product_name,
+            pr.name AS provider_name,
             il.quantity_change,
             il.transaction_type,
             il.notes,
@@ -91,6 +116,7 @@ export default function Dashboard() {
           FROM inventory_logs il
           JOIN batches b ON il.batch_id = b.id
           JOIN products p ON b.product_id = p.id
+          LEFT JOIN providers pr ON il.provider_id = pr.id
           ORDER BY il.created_at DESC
           LIMIT 15
         `),
@@ -120,10 +146,11 @@ export default function Dashboard() {
       const activityRows: RecentActivity[] = activityResult.rows.map((r) => ({
         id: r[0] as number,
         product_name: r[1] as string,
-        quantity_change: r[2] as number,
-        transaction_type: r[3] as string,
-        notes: r[4] as string | null,
-        created_at: r[5] as string,
+        provider_name: r[2] as string | null,
+        quantity_change: r[3] as number,
+        transaction_type: r[4] as string,
+        notes: r[5] as string | null,
+        created_at: r[6] as string,
       }));
 
       setRecentActivity(activityRows);
@@ -193,18 +220,21 @@ export default function Dashboard() {
           label={t('dash.sum.totalProducts')}
           value={totalProducts}
           color="bg-accent/10"
+          onClick={() => onNavigate('all')}
         />
         <SummaryCard
           icon={<TrendingUp size={18} className="text-success" />}
           label={t('dash.sum.totalUnits')}
           value={Math.round(totalStock)}
           color="bg-success/10"
+          onClick={() => onNavigate('total')}
         />
         <SummaryCard
           icon={<AlertTriangle size={18} className="text-warning" />}
           label={t('dash.sum.lowStock')}
           value={alertCount}
           color={alertCount > 0 ? 'bg-warning/10' : 'bg-bg-tertiary'}
+          onClick={() => onNavigate('low')}
         />
         <SummaryCard
           icon={<Clock size={18} className="text-text-secondary" />}
@@ -261,6 +291,7 @@ export default function Dashboard() {
                     </span>
                     <div>
                       <p className="text-sm text-text-primary">{item.product_name}</p>
+                      {item.provider_name && <p className="text-[10px] text-text-secondary/70 uppercase tracking-wide">{item.provider_name}</p>}
                       {item.notes && <p className="text-xs text-text-secondary truncate max-w-[200px]">{item.notes}</p>}
                     </div>
                   </div>

@@ -8,6 +8,14 @@ import {
   Sun,
   ListRestart,
   Info,
+  Palette,
+  Flame,
+  Waves,
+  TreePine,
+  Candy,
+  Crown,
+  MoonStar,
+  Mountain,
 } from 'lucide-react';
 import type { AppPreferences, ThemeMode, LanguageCode } from '../types';
 import { LANGS } from '../lib/i18n';
@@ -26,6 +34,14 @@ export default function SettingsView({ prefs, onChange, onReset, t }: SettingsVi
     { mode: 'dark', icon: <Moon size={14} />, label: t('settings.theme.dark') },
     { mode: 'light', icon: <Sun size={14} />, label: t('settings.theme.light') },
     { mode: 'system', icon: <Monitor size={14} />, label: t('settings.theme.system') },
+    { mode: 'aurora', icon: <Palette size={14} />, label: t('settings.theme.aurora') },
+    { mode: 'sunset', icon: <Flame size={14} />, label: t('settings.theme.sunset') },
+    { mode: 'ocean', icon: <Waves size={14} />, label: t('settings.theme.ocean') },
+    { mode: 'forest', icon: <TreePine size={14} />, label: t('settings.theme.forest') },
+    { mode: 'candy', icon: <Candy size={14} />, label: t('settings.theme.candy') },
+    { mode: 'gold', icon: <Crown size={14} />, label: t('settings.theme.gold') },
+    { mode: 'midnight', icon: <MoonStar size={14} />, label: t('settings.theme.midnight') },
+    { mode: 'lava', icon: <Mountain size={14} />, label: t('settings.theme.lava') },
   ];
 
   const sectionCls = 'flex flex-col gap-3';
@@ -66,12 +82,12 @@ export default function SettingsView({ prefs, onChange, onReset, t }: SettingsVi
             <Sun size={14} className="text-accent" />
             <span className={rowLabel}>{t('settings.theme')}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {themes.map((th) => (
               <button
                 key={th.mode}
                 onClick={() => onChange({ theme: th.mode })}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm border transition-colors ${
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm border transition-colors whitespace-nowrap ${
                   prefs.theme === th.mode
                     ? 'bg-accent text-white border-accent'
                     : 'bg-bg-tertiary text-text-secondary hover:text-text-primary border-border'
@@ -87,7 +103,7 @@ export default function SettingsView({ prefs, onChange, onReset, t }: SettingsVi
         {/* Open on startup */}
         <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
               <Power size={14} className="text-accent" />
               <span className={rowLabel}>{t('settings.openOnStartup')}</span>
             </div>

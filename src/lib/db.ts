@@ -181,3 +181,7 @@ export async function savePreferences(prefs: AppPreferences): Promise<void> {
 export async function loadPreferences(): Promise<AppPreferences> {
   return invoke<AppPreferences>('load_preferences');
 }
+
+export async function printWebview(): Promise<void> {
+  return invoke<void>('print_webview');
+}

@@ -14,10 +14,11 @@ import {
   ScrollText,
   Plus,
   RefreshCw,
-  Search,
   Grid3X3,
   Undo2,
   Tag,
+  Printer,
+  History,
   Settings as SettingsIcon,
   HelpCircle,
 } from 'lucide-react';
@@ -33,11 +34,12 @@ import ProductManager from './components/inventory/ProductManager';
 import BatchManager from './components/inventory/BatchManager';
 import InventoryLog from './components/inventory/InventoryLog';
 import QuickAdjust from './components/inventory/QuickAdjust';
-import QuickUse from './components/inventory/QuickUse';
-import ProductGallery from './components/inventory/ProductGallery';
+import ProductGallery, { type StockFilter } from './components/inventory/ProductGallery';
 import ProductDetail from './components/inventory/ProductDetail';
 import UseHistory from './components/inventory/UseHistory';
 import CategoryManager from './components/inventory/CategoryManager';
+import Reports from './components/inventory/Reports';
+import TransactionHistory from './components/inventory/TransactionHistory';
 import { openDatabase, closeDatabase, createNewDatabase, migrateSchema, savePreferences, loadPreferences } from './lib/db';
 import { savePreset, loadPreset } from './lib/presets';
 import { t as translate, resolveLang } from './lib/i18n';
@@ -55,7 +57,6 @@ const DEFAULT_PREFS: AppPreferences = {
 };
 
 const INVENTORY_TABS: { mode: ViewMode; labelKey: string; icon: React.ReactNode }[] = [
-  { mode: 'quickuse', labelKey: 'tab.quickuse', icon: <Search size={12} /> },
   { mode: 'gallery', labelKey: 'tab.gallery', icon: <Grid3X3 size={12} /> },
   { mode: 'categories', labelKey: 'tab.categories', icon: <Tag size={12} /> },
   { mode: 'adjust', labelKey: 'tab.adjust', icon: <RefreshCw size={12} /> },
@@ -64,6 +65,8 @@ const INVENTORY_TABS: { mode: ViewMode; labelKey: string; icon: React.ReactNode 
   { mode: 'products', labelKey: 'tab.products', icon: <Package size={12} /> },
   { mode: 'batches', labelKey: 'tab.batches', icon: <Boxes size={12} /> },
   { mode: 'logs', labelKey: 'tab.logs', icon: <ScrollText size={12} /> },
+  { mode: 'txhistory', labelKey: 'tab.txhistory', icon: <History size={12} /> },
+  { mode: 'reports', labelKey: 'tab.reports', icon: <Printer size={12} /> },
 ];
 
 export default function App() {
@@ -74,6 +77,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentSql, setCurrentSql] = useState('SELECT * FROM ');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [galleryStockFilter, setGalleryStockFilter] = useState<StockFilter>('all');
   const [initializing, setInitializing] = useState(true);
   const [prefs, setPrefs] = useState<AppPreferences>(DEFAULT_PREFS);
   const prefsLoadedRef = useRef(false);
@@ -152,10 +156,15 @@ export default function App() {
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const gradientThemes = ['aurora', 'sunset', 'ocean', 'forest', 'candy', 'gold', 'midnight', 'lava'];
     const apply = () => {
+      const el = document.documentElement;
+      const isGradient = gradientThemes.includes(prefs.theme);
       const dark =
-        prefs.theme === 'dark' || (prefs.theme === 'system' && mq.matches);
-      document.documentElement.classList.toggle('light', !dark);
+        prefs.theme === 'dark' || (prefs.theme === 'system' && mq.matches) || isGradient;
+      el.classList.toggle('light', !dark);
+      gradientThemes.forEach((th) => el.classList.remove(`theme-${th}`));
+      if (isGradient) el.classList.add(`theme-${prefs.theme}`);
     };
     apply();
     mq.addEventListener('change', apply);
@@ -192,6 +201,7 @@ export default function App() {
             await migrateSchema().catch(() => {});
             setIsConnected(true);
             setDbPath(merged.lastDbPath);
+            setViewMode('dashboard');
           } catch {
             setPrefs((p) => ({ ...p, lastDbPath: null }));
           }
@@ -469,11 +479,16 @@ export default function App() {
               </div>
             </>
           )}
-          {viewMode === 'dashboard' && <Dashboard />}
-          {viewMode === 'quickuse' && <QuickUse />}
+          {viewMode === 'dashboard' && (
+            <Dashboard onNavigate={(stockFilter) => {
+              setGalleryStockFilter(stockFilter);
+              setViewMode('gallery');
+            }} />
+          )}
           {viewMode === 'adjust' && <QuickAdjust />}
           {viewMode === 'gallery' && (
             <ProductGallery
+              initialStockFilter={galleryStockFilter}
               onSelectProduct={(product) => {
                 setSelectedProduct(product);
                 setViewMode('detail');
@@ -491,6 +506,8 @@ export default function App() {
           {viewMode === 'products' && <ProductManager />}
           {viewMode === 'batches' && <BatchManager />}
           {viewMode === 'logs' && <InventoryLog />}
+          {viewMode === 'txhistory' && <TransactionHistory />}
+          {viewMode === 'reports' && <Reports />}
           {viewMode === 'settings' && (
             <SettingsView
               prefs={prefs}

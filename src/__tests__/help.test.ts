@@ -13,8 +13,25 @@ describe('help matcher', () => {
   })
 
   it('matches quick use queries', () => {
-    expect(matchHelp('how do I record quick use of a product')?.id).toBe('quickuse');
-    expect(matchHelp('record usage fast')?.id).toBe('quickuse');
+    expect(matchHelp('record a purchase right now')?.id).toBe('quickadjust');
+  })
+
+  it('matches reports and print queries', () => {
+    expect(matchHelp('how do i generate the overall report')?.id).toBe('reports');
+    expect(matchHelp('how do i export pdf')?.id).toBe('print');
+  })
+
+  it('matches transaction history queries', () => {
+    expect(matchHelp('history of transactions this month')?.id).toBe('txhistory');
+    expect(matchHelp('filter movements by provider')?.id).toBe('providers');
+  })
+
+  it('matches theme queries', () => {
+    expect(matchHelp('make the app aurora colored')?.id).toBe('themes');
+  })
+
+  it('matches glossary queries', () => {
+    expect(matchHelp('what is a batch')?.id).toBe('glossary');
   })
 
   it('matches cost queries', () => {
@@ -42,7 +59,7 @@ describe('help matcher', () => {
   })
 
   it('exposes all topics and lookup', () => {
-    expect(allTopics().length).toBe(18)
+    expect(allTopics().length).toBe(23)
     expect(getTopic('batches')?.id).toBe('batches')
     expect(getTopic('nope')).toBeNull()
   })

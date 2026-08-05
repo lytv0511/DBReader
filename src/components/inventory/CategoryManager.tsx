@@ -26,6 +26,11 @@ const COLOR_OPTIONS = [
   '#dc2626', '#ea580c', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
   '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6',
   '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#78716c', '#5b6abf',
+  '#b91c1c', '#c2410c', '#b45309', '#a16207', '#4d7c0f', '#15803d',
+  '#0f766e', '#0e7490', '#0369a1', '#1d4ed8', '#4f46e5', '#7c3aed',
+  '#9333ea', '#c026d3', '#db2777', '#be185c', '#44403c', '#3730a3',
+  '#f472b6', '#2dd4bf', '#facc15', '#fb923c', '#4ade80', '#93c5fd',
+  '#ffffff',
 ];
 
 export default function CategoryManager() {

@@ -20,12 +20,37 @@ interface ProductGalleryProps {
   onSelectProduct: (product: Product) => void;
 }
 
-export default function ProductGallery({ onSelectProduct }: ProductGalleryProps) {
+export type StockFilter = 'all' | 'total' | 'out' | 'low' | 'ok';
+
+const stockStatus = (p: Product): Exclude<StockFilter, 'all' | 'total'> => {
+  const stock = Math.round(p.current_stock);
+  if (stock <= 0) return 'out';
+  if (p.reorder_threshold > 0 && stock <= p.reorder_threshold) return 'low';
+  return 'ok';
+};
+
+const matchesStock = (p: Product, filter: StockFilter): boolean => {
+  if (filter === 'all') return true;
+  if (filter === 'total') return Math.round(p.current_stock) >= 1;
+  if (filter === 'low') {
+    const stock = Math.round(p.current_stock);
+    return p.reorder_threshold > 0 && stock <= p.reorder_threshold;
+  }
+  return stockStatus(p) === filter;
+};
+
+interface ProductGalleryProps {
+  onSelectProduct: (product: Product) => void;
+  initialStockFilter?: StockFilter;
+}
+
+export default function ProductGallery({ onSelectProduct, initialStockFilter = 'all' }: ProductGalleryProps) {
   const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterCategoryId, setFilterCategoryId] = useState<number | null>(null);
+  const [filterStock, setFilterStock] = useState<StockFilter>(initialStockFilter);
   const [categories, setCategories] = useState<{ id: number; name: string; icon: string; color: string; count: number }[]>([]);
 
   const fetchData = useCallback(async () => {
@@ -96,9 +121,18 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const filtered = filterCategoryId !== null
-    ? products.filter((p) => filterCategoryId === -1 ? p.category_id === null : p.category_id === filterCategoryId)
-    : products;
+  const filtered = products.filter((p) => {
+    const inCategory = filterCategoryId === null
+      || (filterCategoryId === -1 ? p.category_id === null : p.category_id === filterCategoryId);
+    return inCategory && matchesStock(p, filterStock);
+  });
+
+  const stockCounts = {
+    total: products.filter((p) => matchesStock(p, 'total')).length,
+    low: products.filter((p) => matchesStock(p, 'low')).length,
+    out: products.filter((p) => matchesStock(p, 'out')).length,
+    ok: products.filter((p) => matchesStock(p, 'ok')).length,
+  };
 
   if (loading) {
     return (
@@ -141,6 +175,57 @@ export default function ProductGallery({ onSelectProduct }: ProductGalleryProps)
               {cat.name} ({cat.count})
             </button>
           ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap mt-3">
+          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">{t('gallery.stockLabel')}</span>
+          <button
+            onClick={() => setFilterStock('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filterStock === 'all' ? 'bg-accent text-white border-accent' : 'bg-bg-primary border-border text-text-secondary hover:border-accent/50'
+            }`}
+          >
+            {t('gallery.all', { count: products.length })}
+          </button>
+          <button
+            onClick={() => setFilterStock(filterStock === 'total' ? 'all' : 'total')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filterStock === 'total'
+                ? 'bg-accent text-white border-accent'
+                : 'bg-bg-primary border-border text-text-secondary hover:border-accent/50'
+            }`}
+          >
+            {t('gallery.stockTotal')} ({stockCounts.total})
+          </button>
+          <button
+            onClick={() => setFilterStock(filterStock === 'out' ? 'all' : 'out')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filterStock === 'out'
+                ? 'bg-error text-white border-error'
+                : 'bg-bg-primary border-border text-text-secondary hover:border-error/50'
+            }`}
+          >
+            {t('gallery.stockOut')} ({stockCounts.out})
+          </button>
+          <button
+            onClick={() => setFilterStock(filterStock === 'low' ? 'all' : 'low')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filterStock === 'low'
+                ? 'bg-warning text-white border-warning'
+                : 'bg-bg-primary border-border text-text-secondary hover:border-warning/50'
+            }`}
+          >
+            {t('gallery.stockLow')} ({stockCounts.low})
+          </button>
+          <button
+            onClick={() => setFilterStock(filterStock === 'ok' ? 'all' : 'ok')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filterStock === 'ok'
+                ? 'bg-success text-white border-success'
+                : 'bg-bg-primary border-border text-text-secondary hover:border-success/50'
+            }`}
+          >
+            {t('gallery.stockOk')} ({stockCounts.ok})
+          </button>
         </div>
       </div>
 
