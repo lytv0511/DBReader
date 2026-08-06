@@ -1485,8 +1485,6 @@ fn get_email_last_error(app: tauri::AppHandle) -> Result<String, String> {
 
 /* ==================== Desktop notifications ==================== */
 
-const NOTIFICATION_INTERVAL_SECS: u64 = 3 * 60 * 60;
-
 struct NotificationState(Mutex<Option<std::time::SystemTime>>);
 
 fn send_notification(app: &tauri::AppHandle, body: &str) {
@@ -1534,11 +1532,15 @@ fn notification_check(app: &tauri::AppHandle) {
         Err(_) => return,
     };
     let now = std::time::SystemTime::now();
+    let now_hour = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() / 3600)
+        .unwrap_or(0);
     let fire = match *guard {
         None => true,
-        Some(last) => now
-            .duration_since(last)
-            .map(|d| d.as_secs() >= NOTIFICATION_INTERVAL_SECS)
+        Some(last) => last
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() / 3600 != now_hour)
             .unwrap_or(true),
     };
     if fire {

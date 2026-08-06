@@ -509,7 +509,7 @@ export default {
   'settings.email.checkNow': '지금 재고 확인',
   'settings.email.testOk': '테스트 이메일 전송됨',
   'settings.email.checkQueued': '재고 확인 시작됨…',
-  'settings.email.confirmDesktopNotifications': '데스크톱 알림 (3시간마다)',
+  'settings.email.confirmDesktopNotifications': '데스크톱 알림 (매시간 정각)',
   'settings.email.launchAtLogin': '로그인 시 백그라운드에서 시작',
   'settings.email.testNotif': '테스트 알림 보내기',
   'settings.email.testNotifQueued': '테스트 알림을 보냈습니다',
