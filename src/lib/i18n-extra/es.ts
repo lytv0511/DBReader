@@ -509,6 +509,10 @@ export default {
   'settings.email.checkNow': 'Comprobar stock ahora',
   'settings.email.testOk': 'Correo de prueba enviado',
   'settings.email.checkQueued': 'Comprobación de stock iniciada…',
+  'settings.email.confirmDesktopNotifications': 'Notificaciones de escritorio (cada 3 horas)',
+  'settings.email.launchAtLogin': 'Iniciar en segundo plano al iniciar sesión',
+  'settings.email.testNotif': 'Enviar notificación de prueba',
+  'settings.email.testNotifQueued': 'Notificación de prueba enviada',
 
   /* ===== help assistant ===== */
 

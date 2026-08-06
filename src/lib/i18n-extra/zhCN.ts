@@ -509,6 +509,10 @@ export default {
   'settings.email.checkNow': '立即检查库存',
   'settings.email.testOk': '测试邮件已发送',
   'settings.email.checkQueued': '库存检查已开始…',
+  'settings.email.confirmDesktopNotifications': '桌面通知（每 3 小时）',
+  'settings.email.launchAtLogin': '登录时在后台启动',
+  'settings.email.testNotif': '发送测试通知',
+  'settings.email.testNotifQueued': '测试通知已发送',
 
   /* ===== help assistant ===== */
 

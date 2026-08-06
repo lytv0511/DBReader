@@ -72,6 +72,8 @@ const DEFAULT_PREFS: AppPreferences = {
     { enabled: true, time: '13:00', lastFired: null },
     { enabled: true, time: '18:00', lastFired: null },
   ],
+  desktopNotifications: true,
+  launchAtLogin: false,
 };
 
 const INVENTORY_TABS: { mode: ViewMode; labelKey: string; icon: React.ReactNode }[] = [
@@ -271,6 +273,8 @@ export default function App() {
                 lastFired: s?.lastFired ?? null,
               }))
             : DEFAULT_PREFS.emailSlots,
+          desktopNotifications: loaded.desktopNotifications ?? DEFAULT_PREFS.desktopNotifications,
+          launchAtLogin: loaded.launchAtLogin ?? DEFAULT_PREFS.launchAtLogin,
         };
         prefsLoadedRef.current = true;
         setPrefs(merged);

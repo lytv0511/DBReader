@@ -381,6 +381,8 @@ describe('savePreferences', () => {
         { enabled: true, time: '13:00', lastFired: null },
         { enabled: true, time: '18:00', lastFired: null },
       ],
+      desktopNotifications: true,
+      launchAtLogin: false,
     }
     await savePreferences(prefs)
     expect(mockInvoke).toHaveBeenCalledWith('save_preferences', { prefs })
@@ -411,6 +413,8 @@ describe('savePreferences', () => {
         { enabled: true, time: '13:00', lastFired: null },
         { enabled: true, time: '18:00', lastFired: null },
       ],
+      desktopNotifications: true,
+      launchAtLogin: false,
     })
     expect(mockInvoke).toHaveBeenCalledWith('save_preferences', {
       prefs: {
@@ -436,6 +440,8 @@ describe('savePreferences', () => {
         { enabled: true, time: '13:00', lastFired: null },
         { enabled: true, time: '18:00', lastFired: null },
       ],
+        desktopNotifications: true,
+        launchAtLogin: false,
       },
     })
   })

@@ -509,6 +509,10 @@ export default {
   'settings.email.checkNow': 'Vérifier le stock maintenant',
   'settings.email.testOk': 'E-mail de test envoyé',
   'settings.email.checkQueued': 'Vérification du stock lancée…',
+  'settings.email.confirmDesktopNotifications': 'Notifications de bureau (toutes les 3 heures)',
+  'settings.email.launchAtLogin': 'Démarrer en arrière-plan à la connexion',
+  'settings.email.testNotif': 'Envoyer une notification de test',
+  'settings.email.testNotifQueued': 'Notification de test envoyée',
 
   /* ===== help assistant ===== */
 

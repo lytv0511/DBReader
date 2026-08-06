@@ -528,6 +528,10 @@ export default {
   'settings.email.checkNow': 'Check stock now',
   'settings.email.testOk': 'Test email sent',
   'settings.email.checkQueued': 'Stock check started…',
+  'settings.email.confirmDesktopNotifications': 'Desktop notifications (every 3 hours)',
+  'settings.email.launchAtLogin': 'Start in background at login',
+  'settings.email.testNotif': 'Send test notification',
+  'settings.email.testNotifQueued': 'Test notification sent',
   'reports.moneySpent': 'Total spent',
   'view.workspace': 'Workspace',
 

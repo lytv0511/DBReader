@@ -509,6 +509,10 @@ export default {
   'settings.email.checkNow': '立即檢查庫存',
   'settings.email.testOk': '測試郵件已傳送',
   'settings.email.checkQueued': '庫存檢查已開始…',
+  'settings.email.confirmDesktopNotifications': '桌面通知（每 3 小時）',
+  'settings.email.launchAtLogin': '登入時於背景啟動',
+  'settings.email.testNotif': '傳送測試通知',
+  'settings.email.testNotifQueued': '測試通知已傳送',
 
   /* ===== help assistant ===== */
 

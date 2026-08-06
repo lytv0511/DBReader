@@ -509,6 +509,10 @@ export default {
   'settings.email.checkNow': '今すぐ在庫を確認',
   'settings.email.testOk': 'テストメールを送信しました',
   'settings.email.checkQueued': '在庫チェックを開始しました…',
+  'settings.email.confirmDesktopNotifications': 'デスクトップ通知（3時間ごと）',
+  'settings.email.launchAtLogin': 'ログイン時にバックグラウンドで起動',
+  'settings.email.testNotif': 'テスト通知を送信',
+  'settings.email.testNotifQueued': 'テスト通知を送信しました',
  
   /* ===== help assistant ===== */
 

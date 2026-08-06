@@ -74,6 +74,10 @@ const en: Dict = {
   'settings.email.checkNow': 'Check stock now',
   'settings.email.testOk': 'Test email sent',
   'settings.email.checkQueued': 'Stock check started…',
+  'settings.email.confirmDesktopNotifications': 'Desktop notifications (every 3 hours)',
+  'settings.email.launchAtLogin': 'Start in background at login',
+  'settings.email.testNotif': 'Send test notification',
+  'settings.email.testNotifQueued': 'Test notification sent',
 };
 
 const zhCN: Dict = {
@@ -135,6 +139,10 @@ const zhCN: Dict = {
   'settings.email.checkNow': '立即检查库存',
   'settings.email.testOk': '测试邮件已发送',
   'settings.email.checkQueued': '库存检查已开始…',
+  'settings.email.confirmDesktopNotifications': '桌面通知（每 3 小时）',
+  'settings.email.launchAtLogin': '登录时在后台启动',
+  'settings.email.testNotif': '发送测试通知',
+  'settings.email.testNotifQueued': '测试通知已发送',
 };
 
 const zhTW: Dict = {
@@ -196,6 +204,10 @@ const zhTW: Dict = {
   'settings.email.checkNow': '立即檢查庫存',
   'settings.email.testOk': '測試郵件已傳送',
   'settings.email.checkQueued': '庫存檢查已開始…',
+  'settings.email.confirmDesktopNotifications': '桌面通知（每 3 小時）',
+  'settings.email.launchAtLogin': '登入時於背景啟動',
+  'settings.email.testNotif': '傳送測試通知',
+  'settings.email.testNotifQueued': '測試通知已傳送',
 };
 
 const ja: Dict = {
@@ -257,6 +269,10 @@ const ja: Dict = {
   'settings.email.checkNow': '今すぐ在庫を確認',
   'settings.email.testOk': 'テストメールを送信しました',
   'settings.email.checkQueued': '在庫チェックを開始しました…',
+  'settings.email.confirmDesktopNotifications': 'デスクトップ通知（3時間ごと）',
+  'settings.email.launchAtLogin': 'ログイン時にバックグラウンドで起動',
+  'settings.email.testNotif': 'テスト通知を送信',
+  'settings.email.testNotifQueued': 'テスト通知を送信しました',
 };
 
 const ko: Dict = {
@@ -318,6 +334,10 @@ const ko: Dict = {
   'settings.email.checkNow': '지금 재고 확인',
   'settings.email.testOk': '테스트 이메일 전송됨',
   'settings.email.checkQueued': '재고 확인 시작됨…',
+  'settings.email.confirmDesktopNotifications': '데스크톱 알림 (3시간마다)',
+  'settings.email.launchAtLogin': '로그인 시 백그라운드에서 시작',
+  'settings.email.testNotif': '테스트 알림 보내기',
+  'settings.email.testNotifQueued': '테스트 알림을 보냈습니다',
 };
 
 const es: Dict = {
@@ -379,6 +399,10 @@ const es: Dict = {
   'settings.email.checkNow': 'Comprobar stock ahora',
   'settings.email.testOk': 'Correo de prueba enviado',
   'settings.email.checkQueued': 'Comprobación de stock iniciada…',
+  'settings.email.confirmDesktopNotifications': 'Notificaciones de escritorio (cada 3 horas)',
+  'settings.email.launchAtLogin': 'Iniciar en segundo plano al iniciar sesión',
+  'settings.email.testNotif': 'Enviar notificación de prueba',
+  'settings.email.testNotifQueued': 'Notificación de prueba enviada',
 };
 
 const fr: Dict = {
@@ -440,6 +464,10 @@ const fr: Dict = {
   'settings.email.checkNow': 'Vérifier le stock maintenant',
   'settings.email.testOk': 'E-mail de test envoyé',
   'settings.email.checkQueued': 'Vérification du stock lancée…',
+  'settings.email.confirmDesktopNotifications': 'Notifications de bureau (toutes les 3 heures)',
+  'settings.email.launchAtLogin': 'Démarrer en arrière-plan à la connexion',
+  'settings.email.testNotif': 'Envoyer une notification de test',
+  'settings.email.testNotifQueued': 'Notification de test envoyée',
 };
 
 const de: Dict = {
@@ -501,6 +529,10 @@ const de: Dict = {
   'settings.email.checkNow': 'Bestand jetzt prüfen',
   'settings.email.testOk': 'Test-E-Mail gesendet',
   'settings.email.checkQueued': 'Bestandsprüfung gestartet…',
+  'settings.email.confirmDesktopNotifications': 'Desktop-Benachrichtigungen (alle 3 Stunden)',
+  'settings.email.launchAtLogin': 'Bei Anmeldung im Hintergrund starten',
+  'settings.email.testNotif': 'Test-Benachrichtigung senden',
+  'settings.email.testNotifQueued': 'Test-Benachrichtigung gesendet',
 };
 
 const DICTS: Record<string, Dict> = { en, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, es, fr, de };

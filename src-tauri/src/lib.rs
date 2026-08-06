@@ -1146,6 +1146,8 @@ struct AppPreferences {
     email_password: Option<String>,
     email_recipients: Option<String>,
     email_slots: Option<Vec<EmailSlot>>,
+    desktop_notifications: Option<bool>,
+    launch_at_login: Option<bool>,
 }
 
 impl Default for AppPreferences {
@@ -1173,12 +1175,16 @@ impl Default for AppPreferences {
                 EmailSlot { enabled: true, time: "13:00".into(), last_fired: None },
                 EmailSlot { enabled: true, time: "18:00".into(), last_fired: None },
             ]),
+            desktop_notifications: Some(true),
+            launch_at_login: Some(false),
         }
     }
 }
 
 fn prefs_path() -> Result<std::path::PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|e| format!("Cannot find HOME: {}", e))?;
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Cannot find HOME/USERPROFILE".to_string())?;
     Ok(std::path::PathBuf::from(home).join(".dbreader-state.json"))
 }
 
@@ -1424,7 +1430,31 @@ fn do_email_check(app: &tauri::AppHandle, force: bool) -> String {
 #[tauri::command]
 fn check_stock_alerts(app: tauri::AppHandle) -> Result<(), String> {
     let handle = app.clone();
-    std::thread::spawn(move || email_check(&handle, true));
+    std::thread::spawn(move || {
+        email_check(&handle, true);
+        let prefs = match load_prefs_internal() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        if prefs.desktop_notifications.unwrap_or(false) {
+            let db = handle.state::<DbState>();
+            let inner = match db.inner.lock() {
+                Ok(i) => i,
+                Err(_) => return,
+            };
+            let conn = match &inner.conn {
+                Some(c) => c,
+                None => return,
+            };
+            let items = match low_stock_items(conn) {
+                Ok(i) => i,
+                Err(_) => return,
+            };
+            if !items.is_empty() {
+                notify_now(&handle, items.len());
+            }
+        }
+    });
     Ok(())
 }
 
@@ -1441,10 +1471,88 @@ fn test_email_connection() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn test_notification(app: tauri::AppHandle) -> Result<(), String> {
+    send_notification(&app, "Test notification — low stock alerts are working.");
+    Ok(())
+}
+
+#[tauri::command]
 fn get_email_last_error(app: tauri::AppHandle) -> Result<String, String> {
     let state = app.state::<EmailState>();
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     Ok(guard.clone())
+}
+
+/* ==================== Desktop notifications ==================== */
+
+const NOTIFICATION_INTERVAL_SECS: u64 = 3 * 60 * 60;
+
+struct NotificationState(Mutex<Option<std::time::SystemTime>>);
+
+fn send_notification(app: &tauri::AppHandle, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let result = app
+        .notification()
+        .builder()
+        .title("🚨 INVENTORY ALERT".to_string())
+        .body(body.to_string())
+        .show();
+    if let Err(e) = result {
+        eprintln!("Notification failed: {}", e);
+    }
+}
+
+fn notification_check(app: &tauri::AppHandle) {
+    let prefs = match load_prefs_internal() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    if !prefs.desktop_notifications.unwrap_or(false) {
+        return;
+    }
+    let items = {
+        let db = app.state::<DbState>();
+        let inner = match db.inner.lock() {
+            Ok(i) => i,
+            Err(_) => return,
+        };
+        let conn = match &inner.conn {
+            Some(c) => c,
+            None => return,
+        };
+        match low_stock_items(conn) {
+            Ok(i) => i,
+            Err(_) => return,
+        }
+    };
+    if items.is_empty() {
+        return;
+    }
+    let state = app.state::<NotificationState>();
+    let mut guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    let now = std::time::SystemTime::now();
+    let fire = match *guard {
+        None => true,
+        Some(last) => now
+            .duration_since(last)
+            .map(|d| d.as_secs() >= NOTIFICATION_INTERVAL_SECS)
+            .unwrap_or(true),
+    };
+    if fire {
+        send_notification(app, &format!("{} item(s) low or out of stock", items.len()));
+        *guard = Some(now);
+    }
+}
+
+fn notify_now(app: &tauri::AppHandle, count: usize) {
+    let state = app.state::<NotificationState>();
+    if let Ok(mut guard) = state.0.lock() {
+        *guard = Some(std::time::SystemTime::now());
+    }
+    send_notification(app, &format!("{} item(s) low or out of stock", count));
 }
 
 #[cfg(test)]
@@ -2074,11 +2182,106 @@ fn close_print_window(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn set_launch_at_login(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+        let dir = std::path::PathBuf::from(&home).join("Library/LaunchAgents");
+        let path = dir.join("com.vincentleong.dbreader.plist");
+        if enabled {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let plist = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+                 <plist version=\"1.0\">\n\
+                 <dict>\n\
+                 \t<key>Label</key>\n\
+                 \t<string>com.vincentleong.dbreader</string>\n\
+                 \t<key>ProgramArguments</key>\n\
+                 \t<array>\n\
+                 \t\t<string>{}</string>\n\
+                 \t\t<string>--background</string>\n\
+                 \t</array>\n\
+                 \t<key>RunAtLoad</key>\n\
+                 \t<true/>\n\
+                 \t<key>ProcessType</key>\n\
+                 \t<string>Interactive</string>\n\
+                 </dict>\n\
+                 </plist>\n",
+                exe.display()
+            );
+            std::fs::write(&path, plist).map_err(|e| e.to_string())?;
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let mut cmd = std::process::Command::new("schtasks");
+        if enabled {
+            cmd.args(["/Create", "/TN", "DBReader", "/TR"])
+                .arg(format!("\"{}\" --background", exe.display()))
+                .args(["/SC", "ONLOGON", "/F"]);
+        } else {
+            cmd.args(["/Delete", "/TN", "DBReader", "/F"]);
+        }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).into_owned())
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Ok(())
+    }
+}
+
+fn tray_icon_image() -> tauri::image::Image<'static> {
+    const SIZE: u32 = 32;
+    let mut rgba = vec![0u8; (SIZE * SIZE * 4) as usize];
+    let cx = 15.5f64;
+    let cy = 15.5f64;
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let d = ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt();
+            let idx = ((y * SIZE + x) * 4) as usize;
+            if d <= 13.0 {
+                rgba[idx] = 232;
+                rgba[idx + 1] = 62;
+                rgba[idx + 2] = 48;
+                rgba[idx + 3] = 255;
+            } else if d <= 16.0 {
+                rgba[idx] = 232;
+                rgba[idx + 1] = 62;
+                rgba[idx + 2] = 48;
+                rgba[idx + 3] = 120;
+            } else {
+                rgba[idx + 3] = 0;
+            }
+        }
+    }
+    tauri::image::Image::new_owned(rgba, SIZE, SIZE)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let start_hidden = std::env::args().any(|a| a == "--background");
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
         .manage(DbState {
             inner: Mutex::new(InnerState {
                 conn: None,
@@ -2087,6 +2290,7 @@ pub fn run() {
         })
         .manage(PrintState(Mutex::new(None)))
         .manage(EmailState(Mutex::new("No check performed yet".into())))
+        .manage(NotificationState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             open_database,
             print_report,
@@ -2130,14 +2334,62 @@ pub fn run() {
             load_preferences,
             check_stock_alerts,
             test_email_connection,
+            test_notification,
             get_email_last_error,
+            set_launch_at_login,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(move |app| {
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(60));
                 email_check(&handle, false);
             });
+
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(60));
+                notification_check(&handle);
+            });
+
+            use tauri::menu::{Menu, MenuItem};
+            use tauri::tray::TrayIconBuilder;
+            let show_i = MenuItem::with_id(app, "show", "Open DBReader", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit DBReader", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+            let menu = Menu::with_items(app, &[&show_i, &quit_i]).map_err(|e| e.to_string())?;
+            let _tray = TrayIconBuilder::new()
+                .icon(tray_icon_image())
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .build(app)
+                .map_err(|e| e.to_string())?;
+
+            if start_hidden {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.hide();
+                }
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

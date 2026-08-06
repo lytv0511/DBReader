@@ -509,6 +509,10 @@ export default {
   'settings.email.checkNow': 'Bestand jetzt prüfen',
   'settings.email.testOk': 'Test-E-Mail gesendet',
   'settings.email.checkQueued': 'Bestandsprüfung gestartet…',
+  'settings.email.confirmDesktopNotifications': 'Desktop-Benachrichtigungen (alle 3 Stunden)',
+  'settings.email.launchAtLogin': 'Bei Anmeldung im Hintergrund starten',
+  'settings.email.testNotif': 'Test-Benachrichtigung senden',
+  'settings.email.testNotifQueued': 'Test-Benachrichtigung gesendet',
 
   /* ===== help assistant ===== */
 

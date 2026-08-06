@@ -56,4 +56,6 @@ export interface AppPreferences {
   emailPassword: string;
   emailRecipients: string;
   emailSlots: EmailSlot[];
+  desktopNotifications: boolean;
+  launchAtLogin: boolean;
 }
