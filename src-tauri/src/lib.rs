@@ -2215,7 +2215,6 @@ fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
         let (tx, rx) = mpsc::channel::<Result<(), String>>();
         let app_for_thread = app.clone();
         app.run_on_main_thread(move || {
-            let pcwstr = PCWSTR::from_raw(path_wide.as_ptr());
             let Some(win) = app_for_thread.get_webview_window("print-window") else {
                 let _ = tx.send(Err("print window not found".into()));
                 return;
@@ -2224,6 +2223,7 @@ fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
             let inner_tx = tx.clone();
             let res = win.with_webview(move |webview| {
                 use windows_core::Interface;
+                let pcwstr = PCWSTR::from_raw(path_wide.as_ptr());
                 unsafe {
                     let controller = webview.controller();
                     let core = match controller.CoreWebView2() {
