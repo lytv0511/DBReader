@@ -2160,19 +2160,69 @@ fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result
 
 #[tauri::command]
 fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    let app_for_thread = app.clone();
-    app.run_on_main_thread(move || {
-        let result = if let Some(win) = app_for_thread.get_webview_window("print-window") {
+    #[cfg(target_os = "windows")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        let app_for_thread = app.clone();
+        app.run_on_main_thread(move || {
+            let Some(win) = app_for_thread.get_webview_window("print-window") else {
+                let _ = tx.send(Err("print window not found".into()));
+                return;
+            };
             let _ = win.set_focus();
-            win.print().map_err(|e| e.to_string())
-        } else {
-            Err("print window not found".into())
-        };
-        let _ = tx.send(result);
-    })
-    .map_err(|e| e.to_string())?;
-    rx.recv().map_err(|e| e.to_string())?
+            let inner_tx = tx.clone();
+            let res = win.with_webview(move |webview| {
+                use windows_core::Interface;
+                unsafe {
+                    let controller = webview.controller();
+                    let core = match controller.CoreWebView2() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = inner_tx.send(Err(format!("WebView2 core: {}", e)));
+                            return;
+                        }
+                    };
+                    let v16: webview2_com_sys::Microsoft::Web::WebView2::Win32::ICoreWebView2_16 =
+                        match core.cast() {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let _ = inner_tx
+                                    .send(Err(format!("WebView2 print interface: {}", e)));
+                                return;
+                            }
+                        };
+                    let kind = webview2_com_sys::Microsoft::Web::WebView2::Win32::
+                        COREWEBVIEW2_PRINT_DIALOG_KIND_BROWSER;
+                    if let Err(e) = v16.ShowPrintUI(kind) {
+                        let _ = inner_tx.send(Err(format!("ShowPrintUI: {}", e)));
+                        return;
+                    }
+                }
+                let _ = inner_tx.send(Ok(()));
+            });
+            if let Err(e) = res {
+                let _ = tx.send(Err(format!("print webview access: {}", e)));
+            }
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv().map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        let app_for_thread = app.clone();
+        app.run_on_main_thread(move || {
+            let result = if let Some(win) = app_for_thread.get_webview_window("print-window") {
+                let _ = win.set_focus();
+                win.print().map_err(|e| e.to_string())
+            } else {
+                Err("print window not found".into())
+            };
+            let _ = tx.send(result);
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv().map_err(|e| e.to_string())?
+    }
 }
 
 #[tauri::command]

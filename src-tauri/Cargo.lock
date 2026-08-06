@@ -685,6 +685,8 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
+ "webview2-com-sys",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
