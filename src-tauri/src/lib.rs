@@ -2189,7 +2189,6 @@ fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let pcwstr = PCWSTR::from_raw(path_wide.as_ptr());
 
         #[implement(ICoreWebView2PrintToPdfCompletedHandler)]
         struct PrintPdfHandler {
@@ -2216,6 +2215,7 @@ fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
         let (tx, rx) = mpsc::channel::<Result<(), String>>();
         let app_for_thread = app.clone();
         app.run_on_main_thread(move || {
+            let pcwstr = PCWSTR::from_raw(path_wide.as_ptr());
             let Some(win) = app_for_thread.get_webview_window("print-window") else {
                 let _ = tx.send(Err("print window not found".into()));
                 return;
