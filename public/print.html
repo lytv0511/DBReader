@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>DBReader Print</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #ffffff !important; color: #111111 !important; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .report-page { height: auto !important; min-height: 0 !important; overflow: visible !important; margin: 0 auto 14mm !important; }
+    .report-scroll, .no-print, .report-measure { display: none !important; }
+    thead { display: table-header-group; }
+    tr { break-inside: avoid; }
+  </style>
+</head>
+<body>
+  <script>
+    const showError = (msg) => {
+      const div = document.createElement('div');
+      div.style.cssText = 'position:fixed;inset:0;background:#fff;color:#c00;font:14px/1.5 -apple-system,sans-serif;padding:40px;white-space:pre-wrap;z-index:99999';
+      div.textContent = 'Print error: ' + msg;
+      document.body.appendChild(div);
+    };
+    const sleep = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 180)));
+    let closed = false;
+    const closeOnce = () => {
+      if (closed) return;
+      closed = true;
+      try {
+        window.__TAURI__.core.invoke('close_print_window');
+      } catch (e) { /* ignore */ }
+    };
+    window.addEventListener('afterprint', closeOnce);
+    (async () => {
+      let html = null;
+      try {
+        html = await window.__TAURI__.core.invoke('get_print_html');
+      } catch (e) {
+        showError(e);
+      }
+      if (html !== null) {
+        try {
+          document.open();
+          document.write(html);
+          document.close();
+          document.title = 'DBReader Report';
+          const width = 794;
+          await window.__TAURI__.core.invoke('resize_print_window', { width, height: 1000 });
+          await sleep();
+          const n = document.querySelectorAll('.report-page').length;
+          const h = Math.max(400, n * 1122);
+          await window.__TAURI__.core.invoke('resize_print_window', { width, height: h });
+          await sleep();
+        } catch (e) {
+          showError(e);
+        }
+      }
+      if (html !== null) {
+        try {
+          await window.__TAURI__.core.invoke('print_ready');
+        } catch (e) {
+          showError(e);
+        }
+      }
+    })();
+  </script>
+</body>
+</html>

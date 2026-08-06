@@ -39,7 +39,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> =
   reserved: { bg: 'bg-accent/10 border-accent/20', text: 'text-accent', dot: 'bg-accent' },
 };
 
-export default function BatchManager() {
+export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?: string }) {
   const { t } = useI18n();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -305,7 +305,7 @@ export default function BatchManager() {
                   <td className="px-4 py-2.5 text-text-primary font-mono">{b.batch_number || '-'}</td>
                   <td className="px-4 py-2.5 text-text-primary">{b.product_name}</td>
                   <td className="px-4 py-2.5 text-text-secondary">{b.supplier_name || '-'}</td>
-                  <td className="px-4 py-2.5 text-text-primary text-right font-mono">${Number(b.unit_cost_price).toFixed(2)}</td>
+                  <td className="px-4 py-2.5 text-text-primary text-right font-mono">{currencySymbol}{Number(b.unit_cost_price).toFixed(2)}</td>
                   <td className="px-4 py-2.5 text-text-secondary">{b.purchase_date?.slice(0, 10)}</td>
                   <td className="px-4 py-2.5 text-center">
                     <select

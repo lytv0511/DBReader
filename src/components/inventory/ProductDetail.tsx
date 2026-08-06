@@ -31,9 +31,10 @@ const TABS: Tab[] = [
 interface ProductDetailProps {
   product: Product;
   onBack: () => void;
+  currencySymbol: string;
 }
 
-export default function ProductDetail({ product, onBack }: ProductDetailProps) {
+export default function ProductDetail({ product, onBack, currencySymbol }: ProductDetailProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>('history');
   const [editingProduct, setEditingProduct] = useState(false);
@@ -66,7 +67,7 @@ export default function ProductDetail({ product, onBack }: ProductDetailProps) {
       case 'alerts':
         return <ProductNotifications productId={product.id} />;
       case 'report':
-        return <ProductReport productId={product.id} />;
+        return <ProductReport productId={product.id} currencySymbol={currencySymbol} />;
     }
   };
 

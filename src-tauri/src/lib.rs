@@ -1,7 +1,8 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::State;
+use std::time::Duration;
+use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 struct DbState {
     inner: Mutex<InnerState>,
@@ -11,6 +12,10 @@ struct InnerState {
     conn: Option<Connection>,
     path: Option<String>,
 }
+
+struct PrintState(Mutex<Option<String>>);
+
+struct EmailState(Mutex<String>);
 
 #[derive(Serialize, Deserialize)]
 pub struct ColumnInfo {
@@ -393,7 +398,7 @@ fn get_columns_internal(conn: &Connection, table: &str) -> Result<Vec<ColumnInfo
 }
 
 #[tauri::command]
-fn open_database(path: String, state: State<DbState>) -> Result<TableInfo, String> {
+fn open_database(path: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
@@ -407,6 +412,8 @@ fn open_database(path: String, state: State<DbState>) -> Result<TableInfo, Strin
         conn: Some(conn),
         path: Some(path),
     };
+    let handle = app.clone();
+    std::thread::spawn(move || email_check(&handle, false));
     Ok(TableInfo {
         name: tables.first().cloned().unwrap_or_default(),
         columns,
@@ -414,7 +421,7 @@ fn open_database(path: String, state: State<DbState>) -> Result<TableInfo, Strin
 }
 
 #[tauri::command]
-fn create_new_database(path: String, state: State<DbState>) -> Result<TableInfo, String> {
+fn create_new_database(path: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
     if std::path::Path::new(&path).exists() {
         std::fs::remove_file(&path)
             .map_err(|e| format!("Failed to replace existing database: {}", e))?;
@@ -440,6 +447,8 @@ fn create_new_database(path: String, state: State<DbState>) -> Result<TableInfo,
         conn: Some(conn),
         path: Some(path),
     };
+    let handle = app.clone();
+    std::thread::spawn(move || email_check(&handle, false));
     Ok(TableInfo {
         name: tables.first().cloned().unwrap_or_default(),
         columns,
@@ -1109,6 +1118,15 @@ fn get_product_report_data(product_id: i64, state: State<DbState>) -> Result<ser
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+struct EmailSlot {
+    enabled: bool,
+    time: String,
+    #[serde(default)]
+    last_fired: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct AppPreferences {
     last_db_path: Option<String>,
     theme: Option<String>,
@@ -1116,6 +1134,18 @@ struct AppPreferences {
     open_on_startup: Option<bool>,
     default_query_limit: Option<i64>,
     inventory_tab_order: Option<Vec<String>>,
+    enabled_tabs: Option<Vec<String>>,
+    use_default_taskbar: Option<bool>,
+    currency_symbol: Option<String>,
+    email_alerts_enabled: Option<bool>,
+    email_smtp_host: Option<String>,
+    email_smtp_port: Option<i64>,
+    email_smtp_security: Option<String>,
+    email_sender: Option<String>,
+    email_username: Option<String>,
+    email_password: Option<String>,
+    email_recipients: Option<String>,
+    email_slots: Option<Vec<EmailSlot>>,
 }
 
 impl Default for AppPreferences {
@@ -1127,6 +1157,22 @@ impl Default for AppPreferences {
             open_on_startup: Some(true),
             default_query_limit: Some(100),
             inventory_tab_order: None,
+            enabled_tabs: None,
+            use_default_taskbar: Some(true),
+            currency_symbol: None,
+            email_alerts_enabled: Some(false),
+            email_smtp_host: Some("smtp.gmail.com".into()),
+            email_smtp_port: Some(587),
+            email_smtp_security: Some("starttls".into()),
+            email_sender: Some("dbreaderauto@gmail.com".into()),
+            email_username: Some("dbreaderauto@gmail.com".into()),
+            email_password: Some("kimlkjrdxfawgmdm".into()),
+            email_recipients: None,
+            email_slots: Some(vec![
+                EmailSlot { enabled: true, time: "08:00".into(), last_fired: None },
+                EmailSlot { enabled: true, time: "13:00".into(), last_fired: None },
+                EmailSlot { enabled: true, time: "18:00".into(), last_fired: None },
+            ]),
         }
     }
 }
@@ -1144,12 +1190,261 @@ fn save_preferences(prefs: AppPreferences) -> Result<(), String> {
 
 #[tauri::command]
 fn load_preferences() -> Result<AppPreferences, String> {
+    load_prefs_internal()
+}
+
+fn load_prefs_internal() -> Result<AppPreferences, String> {
     let path = prefs_path()?;
     if !path.exists() {
         return Ok(AppPreferences::default());
     }
     let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     serde_json::from_str(&data).map_err(|e| e.to_string())
+}
+
+/* ==================== Email stock alerts ==================== */
+
+struct LowStockItem {
+    name: String,
+    sku: Option<String>,
+    stock: f64,
+    threshold: f64,
+}
+
+fn low_stock_items(conn: &Connection) -> Result<Vec<LowStockItem>, String> {
+    let sql = "
+        SELECT p.name, p.sku,
+               COALESCE(SUM(il.quantity_change), 0) AS stock,
+               p.reorder_threshold
+        FROM products p
+        LEFT JOIN batches b ON b.product_id = p.id
+        LEFT JOIN inventory_logs il ON il.batch_id = b.id
+        GROUP BY p.id, p.name, p.sku, p.reorder_threshold
+        HAVING (stock <= p.reorder_threshold AND p.reorder_threshold > 0) OR stock <= 0
+        ORDER BY stock ASC, p.name ASC
+    ";
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(LowStockItem {
+                name: row.get(0)?,
+                sku: row.get(1)?,
+                stock: row.get(2)?,
+                threshold: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut items = Vec::new();
+    for r in rows {
+        items.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(items)
+}
+
+fn fmt_escape_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+fn build_digest_html(items: &[LowStockItem]) -> String {
+    let rows: String = items
+        .iter()
+        .map(|it| {
+            let name = fmt_escape_html(&it.name);
+            let sku = it.sku.as_deref().unwrap_or("-");
+            format!(
+                "<tr><td style=\"padding:6px 10px;border-bottom:1px solid #ddd;\"><b>{}</b></td><td style=\"padding:6px 10px;border-bottom:1px solid #ddd;\">{}</td><td style=\"padding:6px 10px;border-bottom:1px solid #ddd;text-align:center;\">{}</td><td style=\"padding:6px 10px;border-bottom:1px solid #ddd;text-align:center;\">{}</td></tr>",
+                name,
+                fmt_escape_html(sku),
+                it.stock,
+                it.threshold
+            )
+        })
+        .collect();
+    format!(
+        "<html><body style=\"font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a1a;\">\
+         <h2 style=\"margin-bottom:4px;\">Low stock alert</h2>\
+         <p style=\"color:#555;\">{} item(s) are low on stock or out of stock.</p>\
+         <table style=\"border-collapse:collapse;width:100%;max-width:600px;\">\
+         <tr style=\"background:#f3f4f6;\"><th style=\"padding:6px 10px;text-align:left;\">Product</th><th style=\"padding:6px 10px;text-align:left;\">SKU</th><th style=\"padding:6px 10px;\">Stock</th><th style=\"padding:6px 10px;\">Reorder at</th></tr>\
+         {}</table>\
+         <p style=\"color:#999;font-size:12px;margin-top:16px;\">Sent automatically by DBReader.</p></body></html>",
+        items.len(),
+        rows
+    )
+}
+
+fn slot_time_secs(time: &str) -> i64 {
+    let parts: Vec<&str> = time.split(':').collect();
+    let h: i64 = parts.first().and_then(|x| x.parse().ok()).unwrap_or(0);
+    let m: i64 = parts.get(1).and_then(|x| x.parse().ok()).unwrap_or(0);
+    h.clamp(0, 23) * 3600 + m.clamp(0, 59) * 60
+}
+
+fn slot_due_index(prefs: &AppPreferences) -> Option<usize> {
+    use chrono::Timelike;
+    let now = chrono::Local::now();
+    let now_secs = now.hour() as i64 * 3600 + now.minute() as i64 * 60;
+    let today = now.format("%Y-%m-%d").to_string();
+    let slots = prefs.email_slots.clone().unwrap_or_default();
+    for (i, slot) in slots.iter().enumerate() {
+        if !slot.enabled {
+            continue;
+        }
+        let s = slot_time_secs(&slot.time);
+        if now_secs >= s && now_secs - s <= 15 * 60 && slot.last_fired.as_deref() != Some(today.as_str()) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn mark_slot_fired(idx: usize) {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let Ok(mut prefs) = load_prefs_internal() else { return };
+    if let Some(slots) = prefs.email_slots.as_mut() {
+        if let Some(slot) = slots.get_mut(idx) {
+            slot.last_fired = Some(today);
+        }
+    }
+    let _ = save_preferences(prefs);
+}
+
+fn send_alert_email(prefs: &AppPreferences, subject: String, html: String) -> Result<(), String> {
+    use lettre::message::{header::ContentType, Mailbox, Message};
+    use lettre::transport::smtp::authentication::Credentials;
+    use lettre::transport::smtp::client::{Tls, TlsParameters};
+    use lettre::{SmtpTransport, Transport};
+
+    let host = "smtp.gmail.com";
+    let port = 587u16;
+    let security = "starttls";
+    let username = "dbreaderauto@gmail.com";
+    let password = "kimlkjrdxfawgmdm";
+    let sender = "dbreaderauto@gmail.com";
+    let recipients: String = prefs
+        .email_recipients
+        .clone()
+        .ok_or_else(|| "Recipients are not set".to_string())?;
+
+    let sender: Mailbox = sender
+        .parse()
+        .map_err(|e| format!("Invalid sender address: {}", e))?;
+
+    let mut msg_builder = Message::builder()
+        .from(sender)
+        .subject(subject)
+        .header(ContentType::TEXT_HTML);
+
+    let mut has_recipient = false;
+    for r in recipients.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let mb: Mailbox = r.parse().map_err(|e| format!("Invalid recipient address '{}': {}", r, e))?;
+        msg_builder = msg_builder.to(mb);
+        has_recipient = true;
+    }
+    if !has_recipient {
+        return Err("No recipients configured".into());
+    }
+
+    let email = msg_builder.body(html).map_err(|e| e.to_string())?;
+
+    let tls = match security {
+        "ssl" => Tls::Wrapper(
+            TlsParameters::new(host.to_string()).map_err(|e| format!("TLS error: {}", e))?,
+        ),
+        "none" => Tls::None,
+        _ => Tls::Required(
+            TlsParameters::new(host.to_string()).map_err(|e| format!("TLS error: {}", e))?,
+        ),
+    };
+
+    let mailer = SmtpTransport::builder_dangerous(host)
+        .port(port)
+        .credentials(Credentials::new(username.to_string(), password.to_string()))
+        .tls(tls)
+        .build();
+
+    mailer
+        .send(&email)
+        .map_err(|e| format!("SMTP send failed: {}", e))?;
+    Ok(())
+}
+
+fn email_check(app: &tauri::AppHandle, force: bool) {
+    let result = do_email_check(app, force);
+    let state = app.state::<EmailState>();
+    *state.0.lock().unwrap() = result;
+}
+
+fn do_email_check(app: &tauri::AppHandle, force: bool) -> String {
+    let prefs = match load_prefs_internal() {
+        Ok(p) => p,
+        Err(e) => return format!("Failed to load preferences: {}", e),
+    };
+    if !prefs.email_alerts_enabled.unwrap_or(false) {
+        return "skipped (email alerts disabled)".into();
+    }
+
+    let items = {
+        let db = app.state::<DbState>();
+        let inner = match db.inner.lock() {
+            Ok(i) => i,
+            Err(_) => return "skipped (database locked)".into(),
+        };
+        let conn = match &inner.conn {
+            Some(c) => c,
+            None => return "skipped (no database open)".into(),
+        };
+        match low_stock_items(conn) {
+            Ok(i) => i,
+            Err(e) => return format!("Failed to query stock: {}", e),
+        }
+    };
+    if items.is_empty() {
+        return "ok (no low stock items)".into();
+    }
+
+    let fired_index = if force { None } else { slot_due_index(&prefs) };
+    if !force && fired_index.is_none() {
+        return "skipped (not a scheduled time yet)".into();
+    }
+
+    let subject = "🚨 INVENTORY ALERT".to_string();
+    let html = build_digest_html(&items);
+    match send_alert_email(&prefs, subject, html) {
+        Ok(()) => {
+            if let Some(idx) = fired_index {
+                mark_slot_fired(idx);
+            }
+            format!("sent ({})", items.len())
+        }
+        Err(e) => e,
+    }
+}
+
+#[tauri::command]
+fn check_stock_alerts(app: tauri::AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    std::thread::spawn(move || email_check(&handle, true));
+    Ok(())
+}
+
+#[tauri::command]
+fn test_email_connection() -> Result<String, String> {
+    let prefs = load_prefs_internal()?;
+    if !prefs.email_alerts_enabled.unwrap_or(false) {
+        return Err("Email alerts are disabled in settings".into());
+    }
+    let subject = "[DBReader] Test email".into();
+    let html = "<html><body style=\"font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;\"><h2>DBReader test email</h2><p>If you received this, email alerts are configured correctly.</p></body></html>".into();
+    send_alert_email(&prefs, subject, html)?;
+    Ok("sent".into())
+}
+
+#[tauri::command]
+fn get_email_last_error(app: tauri::AppHandle) -> Result<String, String> {
+    let state = app.state::<EmailState>();
+    let guard = state.0.lock().map_err(|e| e.to_string())?;
+    Ok(guard.clone())
 }
 
 #[cfg(test)]
@@ -1714,8 +2009,69 @@ mod tests {
 }
 
 #[tauri::command]
-fn print_webview(webview: tauri::Webview) -> Result<(), String> {
-    webview.print().map_err(|e| e.to_string())
+fn print_report(app: tauri::AppHandle, html: String) -> Result<(), String> {
+    let state = app.state::<PrintState>();
+    *state.0.lock().unwrap() = Some(html);
+    if let Some(win) = app.get_webview_window("print-window") {
+        let _ = win.set_focus();
+        let _ = win.eval("window.location.reload()");
+    } else {
+        let win = WebviewWindowBuilder::new(
+            &app,
+            "print-window",
+            WebviewUrl::App("print.html".into()),
+        )
+        .title("DBReader Print")
+        .inner_size(800.0, 1000.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+        let _ = win.set_focus();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_print_html(app: tauri::AppHandle) -> Result<String, String> {
+    let state = app.state::<PrintState>();
+    let html = state.0.lock().unwrap().clone();
+    html.ok_or_else(|| "no print html pending".into())
+}
+
+#[tauri::command]
+fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("print-window") {
+        let h = height.clamp(400.0, 20000.0);
+        win.set_size(tauri::LogicalSize::new(width, h))
+            .map_err(|e| e.to_string())
+    } else {
+        Err("print window not found".into())
+    }
+}
+
+#[tauri::command]
+fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let app_for_thread = app.clone();
+    app.run_on_main_thread(move || {
+        let result = if let Some(win) = app_for_thread.get_webview_window("print-window") {
+            let _ = win.set_focus();
+            win.print().map_err(|e| e.to_string())
+        } else {
+            Err("print window not found".into())
+        };
+        let _ = tx.send(result);
+    })
+    .map_err(|e| e.to_string())?;
+    rx.recv().map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn close_print_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("print-window") {
+        win.close().map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1729,9 +2085,15 @@ pub fn run() {
                 path: None,
             }),
         })
+        .manage(PrintState(Mutex::new(None)))
+        .manage(EmailState(Mutex::new("No check performed yet".into())))
         .invoke_handler(tauri::generate_handler![
             open_database,
-            print_webview,
+            print_report,
+            get_print_html,
+            resize_print_window,
+            print_ready,
+            close_print_window,
             create_new_database,
             get_schema,
             get_tables,
@@ -1766,7 +2128,18 @@ pub fn run() {
             get_product_report_data,
             save_preferences,
             load_preferences,
+            check_stock_alerts,
+            test_email_connection,
+            get_email_last_error,
         ])
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(60));
+                email_check(&handle, false);
+            });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

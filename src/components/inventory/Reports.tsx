@@ -6,8 +6,8 @@ import { todayLocalISO } from '../../lib/dates';
 import { useI18n, I18nProvider } from '../../lib/language';
 import { LANGS } from '../../lib/i18n';
 import type { LanguageCode } from '../../types';
-import { buildTxWhere, buildLogDateFilters, summarizeTx, EMPTY_TX_FILTERS, type ReportType, type TxRow, type TxFilters, type ProductInfo } from '../../lib/reports';
-import ProductSelect from './ProductSelect';
+import { buildTxWhere, buildLogDateFilters, buildBatchDateFilters, buildProductWhere, buildBatchWhere, summarizeTx, sumByType, EMPTY_TX_FILTERS, TYPE_REPORT_SQL, type ReportType, type TxRow, type TxFilters } from '../../lib/reports';
+import TagSelect, { type TagItem } from './TagSelect';
 
 interface ProductRow {
   id: number;
@@ -21,7 +21,10 @@ interface ProductRow {
   total_spoiled: number;
   current_stock: number;
   stock_value: number;
+  money_spent: number;
   batch_count: number;
+  batches_in_period: number;
+  suppliers_in_period: number;
 }
 
 interface BatchRow {
@@ -35,7 +38,7 @@ interface BatchRow {
   batch_stock: number;
 }
 
-const REPORT_TYPES: ReportType[] = ['transactions', 'overall'];
+const REPORT_TYPES: ReportType[] = ['activities', ...Object.keys(TYPE_REPORT_SQL) as ReportType[], 'overall'];
 
 type UnitKind = 'header' | 'h2count' | 'h2summary' | 'h2batch' | 'nodata' | 'gridTx' | 'gridOverall' | 'footer' | 'txrow' | 'prodrow' | 'batchrow';
 
@@ -62,7 +65,9 @@ const TX_QUERY = `
     b.batch_number,
     il.quantity_change,
     COALESCE(c.name, 'Uncategorized') AS category_name,
-    pr.name AS provider_name
+    pr.name AS provider_name,
+    b.unit_cost_price,
+    il.transaction_type
   FROM inventory_logs il
   JOIN batches b ON il.batch_id = b.id
   JOIN products p ON b.product_id = p.id
@@ -70,7 +75,7 @@ const TX_QUERY = `
   LEFT JOIN providers pr ON il.provider_id = pr.id
 `;
 
-const buildOverallSql = (productWhere: string, logJoin: string, logSub: string) => `
+const buildOverallSql = (productWhere: string, logJoin: string, logSub: string, batchSub: string) => `
   SELECT
     p.id,
     p.name,
@@ -83,12 +88,20 @@ const buildOverallSql = (productWhere: string, logJoin: string, logSub: string) 
     COALESCE(SUM(CASE WHEN il.transaction_type = 'SPOILAGE' THEN ABS(il.quantity_change) ELSE 0 END), 0) AS total_spoiled,
     COALESCE(SUM(il.quantity_change), 0) AS current_stock,
     COALESCE((
-      SELECT SUM(il3.quantity_change * b3.unit_cost)
+      SELECT SUM(il3.quantity_change * b3.unit_cost_price)
       FROM inventory_logs il3
       JOIN batches b3 ON il3.batch_id = b3.id
       WHERE b3.product_id = p.id${logSub}
     ), 0) AS stock_value,
-    COUNT(DISTINCT b.id) AS batch_count
+    COALESCE((
+      SELECT SUM(il3.quantity_change * b3.unit_cost_price)
+      FROM inventory_logs il3
+      JOIN batches b3 ON il3.batch_id = b3.id
+      WHERE b3.product_id = p.id AND il3.transaction_type IN ('PURCHASE', 'ADJUSTMENT')${logSub}
+    ), 0) AS money_spent,
+    COUNT(DISTINCT b.id) AS batch_count,
+    COALESCE((SELECT COUNT(*) FROM batches b2 WHERE b2.product_id = p.id${batchSub}), 0) AS batches_in_period,
+    COALESCE((SELECT COUNT(DISTINCT b2.supplier_name) FROM batches b2 WHERE b2.product_id = p.id${batchSub}), 0) AS suppliers_in_period
   FROM products p
   LEFT JOIN categories c ON p.category_id = c.id
   LEFT JOIN batches b ON b.product_id = p.id
@@ -103,9 +116,9 @@ const buildBatchDetailSql = (where: string) => `
     b.batch_number,
     p.name AS product_name,
     COALESCE(c.name, 'Uncategorized') AS category_name,
-    b.supplier,
+    b.supplier_name,
     b.purchase_date,
-    b.unit_cost,
+    b.unit_cost_price,
     b.status,
     COALESCE(SUM(il.quantity_change), 0) AS batch_stock
   FROM batches b
@@ -122,48 +135,79 @@ const fmtDate = (s: string | null | undefined) => (s ? String(s).replace('T', ' 
 const DateTimeCell = ({ value }: { value: string | null | undefined }) => {
   const s = fmtDate(value);
   if (s === '-') return <td className="py-1.5 text-gray-600">{s}</td>;
-  const [d, tm] = s.split(' ');
-  return (
-    <td className="py-1.5 text-gray-600 whitespace-nowrap">
-      {d}
-      {tm && <span className="block text-[10px] text-gray-400">{tm}</span>}
-    </td>
-  );
+  return <td className="py-1.5 text-gray-600 whitespace-nowrap">{s.slice(0, 10)}</td>;
 };
 
-export default function Reports() {
+export default function Reports({ currencySymbol }: { currencySymbol: string }) {
   const appCtx = useI18n();
   const [reportLang, setReportLang] = useState('');
   const active = (reportLang || appCtx.lang) as LanguageCode;
   return (
     <I18nProvider language={active}>
-      <ReportsInner reportLang={reportLang} setReportLang={setReportLang} />
+      <ReportsInner reportLang={reportLang} setReportLang={setReportLang} currencySymbol={currencySymbol} />
     </I18nProvider>
   );
 }
 
-function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setReportLang: (l: string) => void }) {
+function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLang: string; setReportLang: (l: string) => void; currencySymbol: string }) {
   const { t } = useI18n();
-  const [reportType, setReportType] = useState<ReportType>('transactions');
+  const [reportType, setReportType] = useState<ReportType>('activities');
   const [filters, setFilters] = useState<TxFilters>({ ...EMPTY_TX_FILTERS });
-  const [selectedProduct, setSelectedProduct] = useState<ProductInfo | null>(null);
+  const [allProducts, setAllProducts] = useState<TagItem[]>([]);
+  const [allCategories, setAllCategories] = useState<TagItem[]>([]);
+  const [selProducts, setSelProducts] = useState<TagItem[]>([]);
+  const [selCategories, setSelCategories] = useState<TagItem[]>([]);
   const [productQuery, setProductQuery] = useState('');
+  const [categoryQuery, setCategoryQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<TxRow[]>([]);
   const [productRows, setProductRows] = useState<ProductRow[]>([]);
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
 
+  useEffect(() => {
+    executeQuery('SELECT id, name, sku, category_id FROM products ORDER BY name')
+      .then((r) => setAllProducts(r.rows.map((row) => ({ id: row[0] as number, name: row[1] as string, sku: row[2] as string | null, category_id: row[3] as number | null }))))
+      .catch(() => {});
+    executeQuery('SELECT id, name FROM categories ORDER BY name')
+      .then((r) => setAllCategories(r.rows.map((row) => ({ id: row[0] as number, name: row[1] as string }))))
+      .catch(() => {});
+  }, []);
+
+  const filteredProducts = useMemo(() => {
+    if (!selCategories.length) return allProducts;
+    const catIds = new Set(selCategories.map((c) => c.id));
+    return allProducts.filter((p) => p.category_id != null && catIds.has(p.category_id));
+  }, [allProducts, selCategories]);
+
+  const toggleProduct = (item: TagItem) => {
+    setSelProducts((prev) => {
+      const next = prev.some((p) => p.id === item.id) ? prev.filter((p) => p.id !== item.id) : [...prev, item];
+      set({ productIds: next.map((p) => p.id) });
+      return next;
+    });
+  };
+
+  const toggleCategory = (item: TagItem) => {
+    setSelCategories((prev) => {
+      const next = prev.some((c) => c.id === item.id) ? prev.filter((c) => c.id !== item.id) : [...prev, item];
+      set({ categoryIds: next.map((c) => c.id) });
+      return next;
+    });
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       if (reportType === 'overall') {
-        const productWhere = filters.productId != null ? `WHERE p.id = ${filters.productId}` : '';
+        const productWhere = buildProductWhere(filters);
         const logDate = buildLogDateFilters(filters);
         const logJoin = logDate.length ? ` AND ${logDate.join(' AND ')}` : '';
         const logSub = logDate.length ? ` AND ${logDate.join(' AND ').replaceAll('il.', 'il3.')}` : '';
-        const batchWhere = filters.productId != null ? `WHERE b.product_id = ${filters.productId}` : '';
+        const batchWhere = buildBatchWhere(filters);
+        const batchDate = buildBatchDateFilters(filters, 'b2');
+        const batchSub = batchDate.length ? ` AND ${batchDate.join(' AND ')}` : '';
         const [products, batches] = await Promise.all([
-          executeQuery(buildOverallSql(productWhere, logJoin, logSub)),
+          executeQuery(buildOverallSql(productWhere, logJoin, logSub, batchSub)),
           executeQuery(buildBatchDetailSql(batchWhere)),
         ]);
         setProductRows(products.rows.map((r) => ({
@@ -178,7 +222,10 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
           total_spoiled: r[8] as number,
           current_stock: r[9] as number,
           stock_value: r[10] as number,
-          batch_count: r[11] as number,
+          money_spent: r[11] as number,
+          batch_count: r[12] as number,
+          batches_in_period: r[13] as number,
+          suppliers_in_period: r[14] as number,
         })));
         setBatchRows(batches.rows.map((r) => ({
           batch_number: r[0] as string | null,
@@ -191,7 +238,8 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
           batch_stock: r[7] as number,
         })));
       } else {
-        const where = buildTxWhere(filters);
+        const typeFilter = TYPE_REPORT_SQL[reportType] ?? null;
+        const where = buildTxWhere(filters, typeFilter);
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
         const txResult = await executeQuery(`${TX_QUERY} ${whereSql} ORDER BY il.created_at ASC LIMIT 2000`);
         setRows(txResult.rows.map((r) => ({
@@ -203,6 +251,8 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
           quantity_change: r[5] as number,
           category_name: r[6] as string,
           provider_name: r[7] as string | null,
+          unit_cost: r[8] as number,
+          transaction_type: r[9] as string,
         })));
       }
     } catch { /* ignore */ }
@@ -216,11 +266,24 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
   const now = todayLocalISO();
   const totalUnits = productRows.reduce((s, p) => s + p.current_stock, 0);
   const totalValue = productRows.reduce((s, p) => s + p.stock_value, 0);
+  const moneySpent = productRows.reduce((s, p) => s + p.money_spent, 0);
+  const moneySpentTx = rows.reduce((s, r) => ((r.transaction_type === 'PURCHASE' || r.transaction_type === 'ADJUSTMENT') ? s + r.quantity_change * (r.unit_cost || 0) : s), 0);
   const lowStockCount = productRows.filter((p) => p.current_stock <= p.reorder_threshold && p.reorder_threshold > 0).length;
+  const purchasedUnits = sumByType(rows, 'PURCHASE');
+  const usedUnits = sumByType(rows, 'USAGE');
+  const spoiledUnits = sumByType(rows, 'SPOILAGE');
+  const adjustedUnits = sumByType(rows, 'ADJUSTMENT');
+  const hasAdjustment = rows.some((r) => r.transaction_type === 'ADJUSTMENT');
+  const totalPurchasedAll = productRows.reduce((s, p) => s + p.total_purchased, 0);
+  const totalUsedAll = productRows.reduce((s, p) => s + p.total_used, 0);
+  const totalSpoiledAll = productRows.reduce((s, p) => s + p.total_spoiled, 0);
+  const batchesInPeriod = productRows.reduce((s, p) => s + p.batches_in_period, 0);
+  const suppliersInPeriod = productRows.reduce((s, p) => s + p.suppliers_in_period, 0);
 
   const activeFilterParts: string[] = [];
-  if (selectedProduct) activeFilterParts.push(`${t('reports.product')}: ${selectedProduct.name}`);
+  if (selProducts.length) activeFilterParts.push(`${t('reports.selectProducts')}: ${selProducts.map((p) => p.name).join(', ')}`);
   else if (filters.productFilter.trim()) activeFilterParts.push(`${t('reports.product')}: ${filters.productFilter.trim()}`);
+  if (selCategories.length) activeFilterParts.push(`${t('reports.selectCategories')}: ${selCategories.map((c) => c.name).join(', ')}`);
   if (filters.fromDate) activeFilterParts.push(`${t('reports.from')}: ${filters.fromDate}${filters.fromTime ? ' ' + filters.fromTime : ''}`);
   if (filters.toDate) activeFilterParts.push(`${t('reports.to')}: ${filters.toDate}${filters.toTime ? ' ' + filters.toTime : ''}`);
 
@@ -282,11 +345,12 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
   const renderTxRow = (row: TxRow) => (
     <tr key={row.id} data-unit className="border-b border-gray-100">
       <DateTimeCell value={row.created_at} />
-      <td className="py-1.5 text-gray-600">{row.category_name}</td>
-      <td className="py-1.5 text-gray-900">{row.product_name}</td>
-      <td className="py-1.5 text-gray-600 font-mono">{row.batch_number || '-'}</td>
-      <td className="py-1.5 text-right font-mono text-gray-900">{row.quantity_change >= 0 ? '+' : ''}{row.quantity_change}</td>
+      <td className="py-1.5 col-indent text-gray-600">{row.category_name}</td>
+      <td className="py-1.5 col-indent-sm text-gray-900">{row.product_name}</td>
+      <td className="py-1.5 col-indent text-gray-600 capitalize">{t(`common.tx.${row.transaction_type}`)}</td>
+      <td className={`py-1.5 text-right font-mono text-gray-900 ${reportType === 'activities' && row.transaction_type === 'ADJUSTMENT' ? 'underline underline-offset-2 decoration-gray-400' : ''}`}>{row.quantity_change >= 0 ? '+' : ''}{row.quantity_change}</td>
       <td className="py-1.5 notes-cell text-gray-600">{row.provider_name || '-'}</td>
+      <td className="py-1.5 text-right font-mono text-gray-700">{currencySymbol}{Number(row.unit_cost).toFixed(2)}</td>
     </tr>
   );
 
@@ -302,7 +366,7 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
         {row.current_stock}
         {row.current_stock <= row.reorder_threshold && row.reorder_threshold > 0 && ` (${t('dash.stock.status.low')})`}
       </td>
-      <td className="py-1.5 text-right font-mono text-gray-900">${row.stock_value.toFixed(2)}</td>
+      <td className="py-1.5 text-right font-mono text-gray-900">{currencySymbol}{row.stock_value.toFixed(2)}</td>
     </tr>
   );
 
@@ -312,7 +376,7 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
       <td className="py-1.5 text-gray-600 font-mono">{row.batch_number || '-'}</td>
       <td className="py-1.5 text-gray-600">{row.supplier || '-'}</td>
       <td className="py-1.5 text-gray-600">{fmtDate(row.purchase_date).slice(0, 10)}</td>
-      <td className="py-1.5 text-right font-mono text-gray-700">${Number(row.unit_cost).toFixed(2)}</td>
+      <td className="py-1.5 text-right font-mono text-gray-700">{currencySymbol}{Number(row.unit_cost).toFixed(2)}</td>
       <td className="py-1.5 text-right font-mono text-gray-900">{row.batch_stock}</td>
       <td className="py-1.5 text-gray-600 capitalize">{t(`common.status.${row.status}`)}</td>
     </tr>
@@ -351,36 +415,80 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
     }
     if (u.kind === 'gridTx') {
       return (
-        <div data-unit className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-6">
-          <div className="flex justify-between py-1 border-b border-gray-100">
+        <div data-unit className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-2 mb-6">
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
             <span className="text-sm text-gray-600">{t('reports.totalEntries')}</span>
             <span className="text-sm font-mono text-gray-900">{rows.length}</span>
           </div>
-          <div className="flex justify-between py-1 border-b border-gray-100">
-            <span className="text-sm text-gray-600">{t('reports.purchased')}</span>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.netChange')}</span>
             <span className="text-sm font-mono text-gray-900">{summary}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.moneySpent')}</span>
+            <span className="text-sm font-mono text-gray-900">{currencySymbol}{moneySpentTx.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.purchased')}</span>
+            <span className="text-sm font-mono text-gray-900">{purchasedUnits}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.used')}</span>
+            <span className="text-sm font-mono text-gray-900">{usedUnits}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.spoiled')}</span>
+            <span className="text-sm font-mono text-gray-900">{spoiledUnits}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.adjusted')}</span>
+            <span className="text-sm font-mono text-gray-900">{adjustedUnits}</span>
           </div>
         </div>
       );
     }
     if (u.kind === 'gridOverall') {
       return (
-        <div data-unit className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
-          <div className="flex justify-between py-1 border-b border-gray-100">
+        <div data-unit className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-2 mb-6">
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
             <span className="text-sm text-gray-600">{t('dash.sum.totalProducts')}</span>
             <span className="text-sm font-mono text-gray-900">{productRows.length}</span>
           </div>
-          <div className="flex justify-between py-1 border-b border-gray-100">
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
             <span className="text-sm text-gray-600">{t('dash.sum.totalUnits')}</span>
             <span className="text-sm font-mono text-gray-900">{totalUnits}</span>
           </div>
-          <div className="flex justify-between py-1 border-b border-gray-100">
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
             <span className="text-sm text-gray-600">{t('pie.header.invValue')}</span>
-            <span className="text-sm font-mono text-gray-900">${totalValue.toFixed(2)}</span>
+            <span className="text-sm font-mono text-gray-900">{currencySymbol}{totalValue.toFixed(2)}</span>
           </div>
-          <div className="flex justify-between py-1 border-b border-gray-100">
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.moneySpent')}</span>
+            <span className="text-sm font-mono text-gray-900">{currencySymbol}{moneySpent.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
             <span className="text-sm text-gray-600">{t('reports.lowStockCount', { count: lowStockCount })}</span>
             <span className="text-sm font-mono text-gray-900">{lowStockCount}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.purchased')}</span>
+            <span className="text-sm font-mono text-gray-900">{totalPurchasedAll}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.used')}</span>
+            <span className="text-sm font-mono text-gray-900">{totalUsedAll}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.spoiled')}</span>
+            <span className="text-sm font-mono text-gray-900">{totalSpoiledAll}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.batchesInPeriod')}</span>
+            <span className="text-sm font-mono text-gray-900">{batchesInPeriod}</span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-200">
+            <span className="text-sm text-gray-600">{t('reports.suppliersInPeriod')}</span>
+            <span className="text-sm font-mono text-gray-900">{suppliersInPeriod}</span>
           </div>
         </div>
       );
@@ -403,53 +511,81 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
       const head =
         kind === 'tx' ? (
           <>
+            {reportType === 'activities' && hasAdjustment && (
+              <caption className="text-left text-[10px] text-gray-400 pb-1">{t('reports.adjustNote')}</caption>
+            )}
             <colgroup>
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '16%' }} />
-              <col style={{ width: '20%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '26%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
             </colgroup>
             <thead>
               <tr className="border-b border-gray-200">
                 <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.date')}</th>
-                <th className="text-left py-1.5 text-gray-500 font-medium">{t('dash.stock.category')}</th>
-                <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.product')}</th>
-                <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.batch')}</th>
+                <th className="text-left py-1.5 col-indent text-gray-500 font-medium">{t('dash.stock.category')}</th>
+                <th className="text-left py-1.5 col-indent-sm text-gray-500 font-medium">{t('logs.col.product')}</th>
+                <th className="text-left py-1.5 col-indent text-gray-500 font-medium">{t('logs.col.type')}</th>
                 <th className="text-right py-1.5 text-gray-500 font-medium">{t('logs.col.qtyChange')}</th>
                 <th className="text-left py-1.5 notes-cell text-gray-500 font-medium">{t('logs.col.provider')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('batch.col.unitCost')}</th>
               </tr>
             </thead>
           </>
         ) : kind === 'products' ? (
-          <thead>
-            <tr className="border-b border-gray-200">
-              <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.product')}</th>
-              <th className="text-left py-1.5 text-gray-500 font-medium">{t('dash.stock.category')}</th>
-              <th className="text-left py-1.5 text-gray-500 font-medium">{t('detail.sku')}</th>
-              <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.purchased')}</th>
-              <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.used')}</th>
-              <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.spoiled')}</th>
-              <th className="text-right py-1.5 text-gray-500 font-medium">{t('dash.stock.current')}</th>
-              <th className="text-right py-1.5 text-gray-500 font-medium">{t('pie.header.invValue')}</th>
-            </tr>
-          </thead>
+          <>
+            <colgroup>
+              <col style={{ width: '12.5%' }} />
+              <col style={{ width: '12.5%' }} />
+              <col style={{ width: '12.5%' }} />
+              <col style={{ width: '12.5%' }} />
+              <col style={{ width: '12.5%' }} />
+              <col style={{ width: '12.5%' }} />
+              <col style={{ width: '12.5%' }} />
+              <col style={{ width: '12.5%' }} />
+            </colgroup>
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.product')}</th>
+                <th className="text-left py-1.5 text-gray-500 font-medium">{t('dash.stock.category')}</th>
+                <th className="text-left py-1.5 text-gray-500 font-medium">{t('detail.sku')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.purchased')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.used')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.spoiled')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('dash.stock.current')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('pie.header.invValue')}</th>
+              </tr>
+            </thead>
+          </>
         ) : (
-          <thead>
-            <tr className="border-b border-gray-200">
-              <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.product')}</th>
-              <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.batch')}</th>
-              <th className="text-left py-1.5 text-gray-500 font-medium">{t('batch.col.supplier')}</th>
-              <th className="text-left py-1.5 text-gray-500 font-medium">{t('preport.date')}</th>
-              <th className="text-right py-1.5 text-gray-500 font-medium">{t('batch.col.unitCost')}</th>
-              <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.batchStock')}</th>
-              <th className="text-left py-1.5 text-gray-500 font-medium">{t('preport.status')}</th>
-            </tr>
-          </thead>
+          <>
+            <colgroup>
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+              <col style={{ width: '14.28%' }} />
+            </colgroup>
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.product')}</th>
+                <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.batch')}</th>
+                <th className="text-left py-1.5 text-gray-500 font-medium">{t('batch.col.supplier')}</th>
+                <th className="text-left py-1.5 text-gray-500 font-medium">{t('preport.date')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('batch.col.unitCost')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.batchStock')}</th>
+                <th className="text-left py-1.5 text-gray-500 font-medium">{t('preport.status')}</th>
+              </tr>
+            </thead>
+          </>
         );
       out.push(
-        <table key={key} className="w-full text-xs mb-6" style={kind === 'tx' ? { tableLayout: 'fixed' } : undefined}>
+        <table key={key} className="w-full text-xs mb-6" style={{ tableLayout: 'fixed' }}>
           {head}
           <tbody>{rows}</tbody>
         </table>
@@ -492,11 +628,13 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
           visibility: hidden;
         }
         .report-print td, .report-print th, .report-measure td, .report-measure th {
-          padding: 8px 10px !important;
-          line-height: 1.55;
+          padding: 7px 15px !important;
+          line-height: 1.5;
         }
-        .report-print .notes-cell, .report-measure .notes-cell { padding-left: 44px !important; }
-        .report-print table, .report-measure table { font-size: 12px; border-collapse: collapse; }
+          .report-print .notes-cell, .report-measure .notes-cell { padding-left: 40px !important; }
+          .report-print .col-indent, .report-measure .col-indent { padding-left: 30px !important; }
+          .report-print .col-indent-sm, .report-measure .col-indent-sm { padding-left: 20px !important; }
+        .report-print table, .report-measure table { font-size: 11px; border-collapse: collapse; }
         @media print {
           @page { size: A4 portrait; margin: 0; }
           html, body, #root { height: auto !important; overflow: visible !important; margin: 0 !important; }
@@ -506,10 +644,12 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
           .report-measure { display: none !important; }
           .report-print h1 { font-size: 24px !important; }
           .report-print h2 { font-size: 15px !important; margin: 22px 0 10px !important; }
-          .report-print th, .report-measure th { padding: 6px 10px !important; }
-          .report-print td, .report-measure td { padding: 7px 10px !important; vertical-align: top; word-break: normal; overflow-wrap: break-word; }
-          .report-print .notes-cell, .report-measure .notes-cell { padding-left: 44px !important; }
-          .report-print .grid { gap: 2px 28px !important; }
+          .report-print th, .report-measure th { padding: 5px 15px !important; }
+          .report-print td, .report-measure td { padding: 6px 15px !important; vertical-align: top; word-break: normal; overflow-wrap: break-word; }
+        .report-print .notes-cell, .report-measure .notes-cell { padding-left: 40px !important; }
+        .report-print .col-indent, .report-measure .col-indent { padding-left: 30px !important; }
+        .report-print .col-indent-sm, .report-measure .col-indent-sm { padding-left: 20px !important; }
+          .report-print .grid { gap: 4px 28px !important; }
           .no-print { display: none !important; }
         }
       `}</style>
@@ -560,60 +700,60 @@ function ReportsInner({ reportLang, setReportLang }: { reportLang: string; setRe
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-text-secondary">{t('reports.product')}:</label>
-            <ProductSelect
-              query={productQuery}
-              selected={selectedProduct}
-              onQueryChange={(q) => {
+            <label className="text-xs text-text-secondary">{t('reports.selectProducts')}</label>
+            <TagSelect
+              items={filteredProducts}
+              selected={selProducts}
+              search={productQuery}
+              onSearchChange={(q) => {
                 setProductQuery(q);
-                if (q.trim()) {
-                  set({ productId: null, productFilter: q });
-                } else {
-                  set({ productFilter: '' });
-                }
+                set({ productFilter: q });
               }}
-              onSelect={(p) => {
-                setSelectedProduct(p);
-                set({ productId: p ? p.id : null, productFilter: '' });
-              }}
+              onToggle={toggleProduct}
+              placeholder={t('reports.selectProducts')}
             />
           </div>
-          {reportType === 'transactions' && (
-            <>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-text-secondary">{t('reports.from')}</label>
-                <input
-                  type="date"
-                  value={filters.fromDate}
-                  onChange={(e) => set({ fromDate: e.target.value })}
-                  className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
-                />
-                <input
-                  type="time"
-                  value={filters.fromTime}
-                  onChange={(e) => set({ fromTime: e.target.value })}
-                  title={t('reports.time')}
-                  className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-text-secondary">{t('reports.to')}</label>
-                <input
-                  type="date"
-                  value={filters.toDate}
-                  onChange={(e) => set({ toDate: e.target.value })}
-                  className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
-                />
-                <input
-                  type="time"
-                  value={filters.toTime}
-                  onChange={(e) => set({ toTime: e.target.value })}
-                  title={t('reports.time')}
-                  className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
-                />
-              </div>
-            </>
-          )}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-text-secondary">{t('reports.selectCategories')}</label>
+            <TagSelect
+              items={allCategories}
+              selected={selCategories}
+              search={categoryQuery}
+              onSearchChange={setCategoryQuery}
+              onToggle={toggleCategory}
+              placeholder={t('reports.selectCategories')}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-text-secondary">{t('reports.from')}</label>
+            <input
+              type="date"
+              value={filters.fromDate}
+              onChange={(e) => set({ fromDate: e.target.value })}
+              className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-text-secondary">{t('reports.to')}</label>
+            <input
+              type="date"
+              value={filters.toDate}
+              onChange={(e) => set({ toDate: e.target.value })}
+              className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
+            />
+          </div>
+          <button
+            onClick={() => {
+              const to = todayLocalISO();
+              const d = new Date();
+              d.setDate(d.getDate() - 6);
+              const from = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              set({ fromDate: from, toDate: to, fromTime: '', toTime: '' });
+            }}
+            className="px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded text-xs text-text-secondary hover:text-text-primary transition-colors"
+          >
+            {t('reports.last7Days')}
+          </button>
         </div>
       </div>
 

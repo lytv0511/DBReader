@@ -24,10 +24,18 @@ export interface PresetData {
   timestamp: number;
 }
 
-export type ViewMode = 'canvas' | 'query' | 'dashboard' | 'gallery' | 'detail' | 'products' | 'batches' | 'logs' | 'adjust' | 'used' | 'categories' | 'reports' | 'txhistory' | 'settings';
+export type ViewMode = 'canvas' | 'query' | 'dashboard' | 'gallery' | 'detail' | 'products' | 'batches' | 'logs' | 'adjust' | 'used' | 'categories' | 'reports' | 'txhistory' | 'settings' | 'workspace';
+
+export const DEFAULT_TABS = ['gallery', 'categories', 'adjust', 'dashboard', 'products', 'txhistory'];
 
 export type ThemeMode = 'dark' | 'light' | 'system' | 'aurora' | 'sunset' | 'ocean' | 'forest' | 'candy' | 'gold' | 'midnight' | 'lava';
 export type LanguageCode = 'system' | 'en' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'es' | 'fr' | 'de';
+
+export interface EmailSlot {
+  enabled: boolean;
+  time: string;
+  lastFired: string | null;
+}
 
 export interface AppPreferences {
   lastDbPath: string | null;
@@ -36,4 +44,16 @@ export interface AppPreferences {
   openOnStartup: boolean;
   defaultQueryLimit: number;
   inventoryTabOrder: string[] | null;
+  enabledTabs: string[] | null;
+  useDefaultTaskbar: boolean;
+  currencySymbol: string;
+  emailAlertsEnabled: boolean;
+  emailSmtpHost: string;
+  emailSmtpPort: number;
+  emailSmtpSecurity: 'ssl' | 'starttls' | 'none';
+  emailSender: string;
+  emailUsername: string;
+  emailPassword: string;
+  emailRecipients: string;
+  emailSlots: EmailSlot[];
 }

@@ -47,6 +47,7 @@ export default function QuickAdjust() {
 
   const [selectedProductId, setSelectedProductId] = useState<number | ''>('');
   const [txType, setTxType] = useState('PURCHASE');
+  const [adjustDir, setAdjustDir] = useState<'add' | 'remove'>('add');
   const [qty, setQty] = useState('1');
   const [providerId, setProviderId] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
@@ -159,9 +160,11 @@ export default function QuickAdjust() {
       }
 
       const qtyNum = Number(qty);
-      const adjustedQty = txType === 'USAGE' || txType === 'SPOILAGE'
-        ? -Math.abs(qtyNum)
-        : Math.abs(qtyNum);
+      const adjustedQty = txType === 'ADJUSTMENT'
+        ? (adjustDir === 'remove' ? -Math.abs(qtyNum) : Math.abs(qtyNum))
+        : txType === 'USAGE' || txType === 'SPOILAGE'
+          ? -Math.abs(qtyNum)
+          : Math.abs(qtyNum);
 
       const provVal = providerId === '' ? 'NULL' : String(providerId);
       const notesVal = notes.trim() ? `'${notes.trim().replace(/'/g, "''")}'` : 'NULL';
@@ -325,6 +328,37 @@ export default function QuickAdjust() {
               ))}
             </div>
           </div>
+
+          {/* Direction (only for ADJUSTMENT) */}
+          {txType === 'ADJUSTMENT' && (
+            <div>
+              <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.direction')}</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setAdjustDir('add')}
+                  className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
+                    adjustDir === 'add'
+                      ? 'bg-success/20 border-success text-success'
+                      : 'bg-bg-primary border-border text-text-secondary hover:border-success/50 hover:text-success'
+                  }`}
+                >
+                  <Plus size={14} />
+                  {t('adjust.add')}
+                </button>
+                <button
+                  onClick={() => setAdjustDir('remove')}
+                  className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
+                    adjustDir === 'remove'
+                      ? 'bg-error/20 border-error text-error'
+                      : 'bg-bg-primary border-border text-text-secondary hover:border-error/50 hover:text-error'
+                  }`}
+                >
+                  <Minus size={14} />
+                  {t('adjust.remove')}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Batch number (only for PURCHASE) */}
           {txType === 'PURCHASE' && (

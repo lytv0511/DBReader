@@ -40,11 +40,13 @@ import UseHistory from './components/inventory/UseHistory';
 import CategoryManager from './components/inventory/CategoryManager';
 import Reports from './components/inventory/Reports';
 import TransactionHistory from './components/inventory/TransactionHistory';
+import Workspace from './components/Workspace';
 import { openDatabase, closeDatabase, createNewDatabase, migrateSchema, savePreferences, loadPreferences } from './lib/db';
 import { savePreset, loadPreset } from './lib/presets';
 import { t as translate, resolveLang } from './lib/i18n';
 import { I18nProvider } from './lib/language';
 import type { QueryResult, PresetData, ViewMode, AppPreferences } from './types';
+import { DEFAULT_TABS } from './types';
 import type { Product } from './components/inventory/ProductGallery';
 
 const DEFAULT_PREFS: AppPreferences = {
@@ -54,6 +56,22 @@ const DEFAULT_PREFS: AppPreferences = {
   openOnStartup: true,
   defaultQueryLimit: 100,
   inventoryTabOrder: null,
+  enabledTabs: null,
+  useDefaultTaskbar: true,
+  currencySymbol: '$',
+  emailAlertsEnabled: false,
+  emailSmtpHost: 'smtp.gmail.com',
+  emailSmtpPort: 587,
+  emailSmtpSecurity: 'starttls',
+  emailSender: 'dbreaderauto@gmail.com',
+  emailUsername: 'dbreaderauto@gmail.com',
+  emailPassword: 'kimlkjrdxfawgmdm',
+  emailRecipients: '',
+  emailSlots: [
+    { enabled: true, time: '08:00', lastFired: null },
+    { enabled: true, time: '13:00', lastFired: null },
+    { enabled: true, time: '18:00', lastFired: null },
+  ],
 };
 
 const INVENTORY_TABS: { mode: ViewMode; labelKey: string; icon: React.ReactNode }[] = [
@@ -67,6 +85,12 @@ const INVENTORY_TABS: { mode: ViewMode; labelKey: string; icon: React.ReactNode 
   { mode: 'logs', labelKey: 'tab.logs', icon: <ScrollText size={12} /> },
   { mode: 'txhistory', labelKey: 'tab.txhistory', icon: <History size={12} /> },
   { mode: 'reports', labelKey: 'tab.reports', icon: <Printer size={12} /> },
+];
+
+const ALL_TABS: { mode: ViewMode; labelKey: string }[] = [
+  { mode: 'canvas', labelKey: 'view.canvas' },
+  { mode: 'query', labelKey: 'view.query' },
+  ...INVENTORY_TABS.map((t) => ({ mode: t.mode, labelKey: t.labelKey })),
 ];
 
 export default function App() {
@@ -87,23 +111,46 @@ export default function App() {
   const suppressClickRef = useRef(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
+  const isTabEnabled = (mode: string) => {
+    if (mode === 'settings') return true;
+    if (prefs.useDefaultTaskbar) {
+      return mode === 'canvas' || mode === 'query' || DEFAULT_TABS.includes(mode);
+    }
+    return (prefs.enabledTabs ?? ALL_TABS.map((t) => t.mode)).includes(mode);
+  };
+
+  const fallbackView = () => {
+    const first = ALL_TABS.find((t) => isTabEnabled(t.mode));
+    return first ? first.mode : 'settings';
+  };
+
   const orderedTabs = useMemo(() => {
+    if (prefs.useDefaultTaskbar) {
+      const byMode = new Map<string, (typeof INVENTORY_TABS)[number]>(INVENTORY_TABS.map((t) => [t.mode, t]));
+      return DEFAULT_TABS.map((m) => byMode.get(m)).filter((t): t is (typeof INVENTORY_TABS)[number] => !!t);
+    }
     const order = prefs.inventoryTabOrder ?? INVENTORY_TABS.map((t) => t.mode);
     const byMode = new Map<string, (typeof INVENTORY_TABS)[number]>(INVENTORY_TABS.map((t) => [t.mode, t]));
     const seen = new Set<string>();
     const result: typeof INVENTORY_TABS = [];
     for (const m of order) {
       const tab = byMode.get(m);
-      if (tab && !seen.has(m)) {
+      if (tab && !seen.has(m) && isTabEnabled(m)) {
         result.push(tab);
         seen.add(m);
       }
     }
     for (const tab of INVENTORY_TABS) {
-      if (!seen.has(tab.mode)) result.push(tab);
+      if (!seen.has(tab.mode) && isTabEnabled(tab.mode)) result.push(tab);
     }
     return result;
-  }, [prefs.inventoryTabOrder]);
+  }, [prefs.inventoryTabOrder, prefs.enabledTabs, prefs.useDefaultTaskbar]);
+
+  useEffect(() => {
+    if (ALL_TABS.some((t) => t.mode === viewMode) && !isTabEnabled(viewMode)) {
+      setViewMode(fallbackView());
+    }
+  }, [prefs.enabledTabs, viewMode]);
 
   const getDropIndex = (clientX: number) => {
     let idx = orderedTabs.length;
@@ -154,6 +201,20 @@ export default function App() {
   const lang = resolveLang(prefs.language);
   const t = (key: string) => translate(lang, key);
 
+  const launcherTabs = useMemo(() => {
+    const all: { mode: string; label: string; icon: React.ReactNode; enabled: boolean }[] = [
+      { mode: 'canvas', label: t('view.canvas'), icon: <Workflow size={22} />, enabled: isTabEnabled('canvas') },
+      { mode: 'query', label: t('view.query'), icon: <Terminal size={22} />, enabled: isTabEnabled('query') },
+      ...INVENTORY_TABS.map((tb) => ({
+        mode: tb.mode,
+        label: t(tb.labelKey),
+        icon: tb.icon,
+        enabled: isTabEnabled(tb.mode),
+      })),
+    ];
+    return all;
+  }, [prefs.enabledTabs, lang]);
+
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const gradientThemes = ['aurora', 'sunset', 'ocean', 'forest', 'candy', 'gold', 'midnight', 'lava'];
@@ -192,6 +253,24 @@ export default function App() {
           openOnStartup: loaded.openOnStartup ?? DEFAULT_PREFS.openOnStartup,
           defaultQueryLimit: loaded.defaultQueryLimit ?? DEFAULT_PREFS.defaultQueryLimit,
           inventoryTabOrder: loaded.inventoryTabOrder ?? null,
+          enabledTabs: loaded.enabledTabs ?? null,
+          useDefaultTaskbar: loaded.useDefaultTaskbar ?? DEFAULT_PREFS.useDefaultTaskbar,
+          currencySymbol: loaded.currencySymbol ?? DEFAULT_PREFS.currencySymbol,
+          emailAlertsEnabled: loaded.emailAlertsEnabled ?? DEFAULT_PREFS.emailAlertsEnabled,
+          emailSmtpHost: loaded.emailSmtpHost ?? DEFAULT_PREFS.emailSmtpHost,
+          emailSmtpPort: loaded.emailSmtpPort ?? DEFAULT_PREFS.emailSmtpPort,
+          emailSmtpSecurity: loaded.emailSmtpSecurity ?? DEFAULT_PREFS.emailSmtpSecurity,
+          emailSender: loaded.emailSender ?? DEFAULT_PREFS.emailSender,
+          emailUsername: loaded.emailUsername ?? DEFAULT_PREFS.emailUsername,
+          emailPassword: loaded.emailPassword ?? DEFAULT_PREFS.emailPassword,
+          emailRecipients: loaded.emailRecipients ?? '',
+          emailSlots: Array.isArray(loaded.emailSlots) && loaded.emailSlots.length === 3
+            ? loaded.emailSlots.map((s, i) => ({
+                enabled: s?.enabled ?? DEFAULT_PREFS.emailSlots[i].enabled,
+                time: s?.time ?? DEFAULT_PREFS.emailSlots[i].time,
+                lastFired: s?.lastFired ?? null,
+              }))
+            : DEFAULT_PREFS.emailSlots,
         };
         prefsLoadedRef.current = true;
         setPrefs(merged);
@@ -201,7 +280,7 @@ export default function App() {
             await migrateSchema().catch(() => {});
             setIsConnected(true);
             setDbPath(merged.lastDbPath);
-            setViewMode('dashboard');
+            setViewMode(isTabEnabled('dashboard') ? 'dashboard' : fallbackView());
           } catch {
             setPrefs((p) => ({ ...p, lastDbPath: null }));
           }
@@ -317,7 +396,7 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => setViewMode(viewMode === 'settings' ? 'canvas' : 'settings')}
+          onClick={() => setViewMode(viewMode === 'settings' ? 'workspace' : 'settings')}
           className={`flex items-center justify-center w-7 h-7 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md transition-colors shrink-0 ${
             viewMode === 'settings' ? 'text-accent border-accent/50' : 'text-text-secondary hover:text-text-primary'
           }`}
@@ -344,26 +423,21 @@ export default function App() {
               </button>
             </div>
 
-            <div className="flex items-center bg-bg-tertiary border border-border rounded-md overflow-hidden shrink-0">
-              <button
-                onClick={() => setViewMode('canvas')}
-                className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors ${
-                  viewMode === 'canvas' ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                <Workflow size={12} />
-                {t('view.canvas')}
-              </button>
-              <button
-                onClick={() => setViewMode('query')}
-                className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors ${
-                  viewMode === 'query' ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                <Terminal size={12} />
-                {t('view.query')}
-              </button>
-            </div>
+            <div className="h-4 w-px bg-border mx-1 shrink-0" />
+
+            <button
+              onClick={() => setViewMode('workspace')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors shrink-0 ${
+                viewMode === 'workspace'
+                  ? 'bg-accent text-white'
+                  : 'bg-bg-tertiary border border-border text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              <Database size={12} />
+              {t('view.workspace')}
+            </button>
+
+            <div className="h-4 w-px bg-border mx-1 shrink-0" />
 
             <div
               className="flex items-center bg-bg-tertiary border border-border rounded-md overflow-x-auto"
@@ -499,18 +573,40 @@ export default function App() {
             <ProductDetail
               product={selectedProduct}
               onBack={() => setViewMode('gallery')}
+              currencySymbol={prefs.currencySymbol}
             />
           )}
           {viewMode === 'categories' && <CategoryManager />}
           {viewMode === 'used' && <UseHistory />}
           {viewMode === 'products' && <ProductManager />}
-          {viewMode === 'batches' && <BatchManager />}
+          {viewMode === 'batches' && <BatchManager currencySymbol={prefs.currencySymbol} />}
           {viewMode === 'logs' && <InventoryLog />}
           {viewMode === 'txhistory' && <TransactionHistory />}
-          {viewMode === 'reports' && <Reports />}
+          {viewMode === 'reports' && <Reports currencySymbol={prefs.currencySymbol} />}
+          {viewMode === 'workspace' && (
+            <Workspace
+              tabs={launcherTabs}
+              theme={prefs.theme}
+              onNavigate={(mode) => {
+                if (prefs.useDefaultTaskbar) {
+                  if (!DEFAULT_TABS.includes(mode)) {
+                    setPrefs((p) => ({ ...p, useDefaultTaskbar: false, enabledTabs: [...DEFAULT_TABS, mode] }));
+                  }
+                } else if (!isTabEnabled(mode)) {
+                  const all = ALL_TABS.map((x) => x.mode);
+                  const enabledSet = new Set(prefs.enabledTabs ?? all);
+                  enabledSet.add(mode);
+                  const next = all.filter((m) => enabledSet.has(m));
+                  setPrefs((p) => ({ ...p, enabledTabs: next.length === all.length ? null : next }));
+                }
+                setViewMode(mode as ViewMode);
+              }}
+            />
+          )}
           {viewMode === 'settings' && (
             <SettingsView
               prefs={prefs}
+              tabs={ALL_TABS}
               onChange={(patch) => setPrefs((p) => ({ ...p, ...patch }))}
               onReset={() => setPrefs((p) => ({ ...DEFAULT_PREFS, lastDbPath: p.lastDbPath }))}
               t={t}

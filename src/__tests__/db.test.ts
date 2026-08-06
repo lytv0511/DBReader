@@ -365,6 +365,22 @@ describe('savePreferences', () => {
       openOnStartup: true,
       defaultQueryLimit: 100,
       inventoryTabOrder: null,
+      enabledTabs: null,
+      useDefaultTaskbar: true,
+      currencySymbol: '$',
+      emailAlertsEnabled: false,
+      emailSmtpHost: 'smtp.gmail.com',
+      emailSmtpPort: 587,
+      emailSmtpSecurity: 'starttls' as const,
+      emailSender: 'dbreaderauto@gmail.com',
+      emailUsername: 'dbreaderauto@gmail.com',
+      emailPassword: 'kimlkjrdxfawgmdm',
+      emailRecipients: '',
+      emailSlots: [
+        { enabled: true, time: '08:00', lastFired: null },
+        { enabled: true, time: '13:00', lastFired: null },
+        { enabled: true, time: '18:00', lastFired: null },
+      ],
     }
     await savePreferences(prefs)
     expect(mockInvoke).toHaveBeenCalledWith('save_preferences', { prefs })
@@ -379,6 +395,22 @@ describe('savePreferences', () => {
       openOnStartup: true,
       defaultQueryLimit: 50,
       inventoryTabOrder: null,
+      enabledTabs: null,
+      useDefaultTaskbar: true,
+      currencySymbol: '$',
+      emailAlertsEnabled: false,
+      emailSmtpHost: 'smtp.gmail.com',
+      emailSmtpPort: 587,
+      emailSmtpSecurity: 'starttls' as const,
+      emailSender: 'dbreaderauto@gmail.com',
+      emailUsername: 'dbreaderauto@gmail.com',
+      emailPassword: 'kimlkjrdxfawgmdm',
+      emailRecipients: '',
+      emailSlots: [
+        { enabled: true, time: '08:00', lastFired: null },
+        { enabled: true, time: '13:00', lastFired: null },
+        { enabled: true, time: '18:00', lastFired: null },
+      ],
     })
     expect(mockInvoke).toHaveBeenCalledWith('save_preferences', {
       prefs: {
@@ -388,6 +420,22 @@ describe('savePreferences', () => {
         openOnStartup: true,
         defaultQueryLimit: 50,
         inventoryTabOrder: null,
+        enabledTabs: null,
+        useDefaultTaskbar: true,
+        currencySymbol: '$',
+        emailAlertsEnabled: false,
+        emailSmtpHost: 'smtp.gmail.com',
+        emailSmtpPort: 587,
+        emailSmtpSecurity: 'starttls',
+        emailSender: 'dbreaderauto@gmail.com',
+        emailUsername: 'dbreaderauto@gmail.com',
+        emailPassword: 'kimlkjrdxfawgmdm',
+        emailRecipients: '',
+        emailSlots: [
+        { enabled: true, time: '08:00', lastFired: null },
+        { enabled: true, time: '13:00', lastFired: null },
+        { enabled: true, time: '18:00', lastFired: null },
+      ],
       },
     })
   })

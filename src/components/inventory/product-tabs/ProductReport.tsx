@@ -18,7 +18,7 @@ const TYPE_COLORS: Record<string, string> = {
   PURCHASE: '#22c55e', USAGE: '#eab308', SPOILAGE: '#ef4444', ADJUSTMENT: '#8b5cf6',
 };
 
-export default function ProductReport({ productId }: { productId: number }) {
+export default function ProductReport({ productId, currencySymbol }: { productId: number; currencySymbol: string }) {
   const { t } = useI18n();
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -131,7 +131,7 @@ export default function ProductReport({ productId }: { productId: number }) {
                 {data.cost_data.map((c, i) => (
                   <tr key={i} className="border-b border-gray-100">
                     <td className="py-1 text-gray-700">{c.date?.slice(0, 10)}</td>
-                    <td className="py-1 text-right font-mono text-gray-900">${Number(c.cost).toFixed(2)}</td>
+                    <td className="py-1 text-right font-mono text-gray-900">{currencySymbol}{Number(c.cost).toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -1,4 +1,13 @@
-export type ReportType = 'transactions' | 'overall';
+export type ReportType = 'activities' | 'purchased' | 'used' | 'spoiled' | 'adjusted' | 'overall';
+
+export const TYPE_REPORT_SQL: Record<string, string> = {
+  purchased: 'PURCHASE',
+  used: 'USAGE',
+  spoiled: 'SPOILAGE',
+  adjusted: 'ADJUSTMENT',
+};
+
+export const TYPE_REPORTS: ReportType[] = Object.keys(TYPE_REPORT_SQL) as ReportType[];
 
 export interface TxRow {
   id: number;
@@ -9,6 +18,8 @@ export interface TxRow {
   quantity_change: number;
   category_name: string;
   provider_name: string | null;
+  unit_cost: number;
+  transaction_type: string;
 }
 
 export interface ProductInfo {
@@ -18,8 +29,9 @@ export interface ProductInfo {
 }
 
 export interface TxFilters {
-  productId: number | null;
+  productIds: number[];
   productFilter: string;
+  categoryIds: number[];
   fromDate: string;
   fromTime: string;
   toDate: string;
@@ -27,8 +39,9 @@ export interface TxFilters {
 }
 
 export const EMPTY_TX_FILTERS: TxFilters = {
-  productId: null,
+  productIds: [],
   productFilter: '',
+  categoryIds: [],
   fromDate: '',
   fromTime: '',
   toDate: '',
@@ -50,17 +63,76 @@ export function buildLogDateFilters(f: TxFilters): string[] {
   return parts;
 }
 
-export function buildTxWhere(f: TxFilters): string[] {
-  const parts: string[] = ["il.transaction_type = 'PURCHASE'"];
-  if (f.productId != null) {
-    parts.push(`b.product_id = ${f.productId}`);
+export function buildTxWhere(f: TxFilters, type: string | null = null): string[] {
+  const parts: string[] = [];
+  if (type) {
+    parts.push(`il.transaction_type = '${type}'`);
+  }
+  if (f.productIds.length) {
+    parts.push(`b.product_id IN (${f.productIds.join(', ')})`);
   } else {
     const product = f.productFilter.trim();
     if (product) {
       parts.push(`p.name LIKE '%${product.replace(/'/g, "''")}%'`);
     }
   }
+  if (f.categoryIds.length) {
+    parts.push(`p.category_id IN (${f.categoryIds.join(', ')})`);
+  }
   return parts.concat(buildLogDateFilters(f));
+}
+
+export function buildProductWhere(f: TxFilters): string {
+  const parts: string[] = [];
+  if (f.productIds.length) {
+    parts.push(`p.id IN (${f.productIds.join(', ')})`);
+  } else {
+    const product = f.productFilter.trim();
+    if (product) {
+      parts.push(`p.name LIKE '%${product.replace(/'/g, "''")}%'`);
+    }
+  }
+  if (f.categoryIds.length) {
+    parts.push(`p.category_id IN (${f.categoryIds.join(', ')})`);
+  }
+  const batchDates = buildBatchDateFilters(f, 'b2');
+  if (batchDates.length) {
+    parts.push(`p.id IN (SELECT b2.product_id FROM batches b2 WHERE ${batchDates.join(' AND ')})`);
+  }
+  return parts.length ? `WHERE ${parts.join(' AND ')}` : '';
+}
+
+export function buildBatchWhere(f: TxFilters): string {
+  const parts: string[] = [];
+  if (f.productIds.length) {
+    parts.push(`b.product_id IN (${f.productIds.join(', ')})`);
+  } else {
+    const product = f.productFilter.trim();
+    if (product) {
+      parts.push(`b.product_id IN (SELECT id FROM products WHERE name LIKE '%${product.replace(/'/g, "''")}%')`);
+    }
+  }
+  if (f.categoryIds.length) {
+    parts.push(`b.product_id IN (SELECT id FROM products WHERE category_id IN (${f.categoryIds.join(', ')}))`);
+  }
+  return parts.length ? `WHERE ${parts.join(' AND ')}` : '';
+}
+
+export function buildBatchDateFilters(f: TxFilters, alias: string): string[] {
+  const parts: string[] = [];
+  if (f.fromDate) {
+    parts.push(`${alias}.purchase_date >= '${f.fromDate}'`);
+  }
+  if (f.toDate) {
+    parts.push(`${alias}.purchase_date < date('${f.toDate}', '+1 day')`);
+  }
+  return parts;
+}
+
+export function sumByType(rows: TxRow[], type: string): number {
+  return rows
+    .filter((r) => r.transaction_type === type)
+    .reduce((s, r) => s + Math.abs(r.quantity_change), 0);
 }
 
 export function rankProducts(products: ProductInfo[], query: string): ProductInfo[] {

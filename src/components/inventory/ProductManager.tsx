@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag } from 'lucide-react';
 import { executeQuery, upsertProductAttribute, deleteCategory } from '../../lib/db';
 import { useI18n } from '../../lib/language';
+import { UNIT_RECS } from '../../lib/units';
 
 interface Product {
   id: number;
@@ -34,6 +35,46 @@ interface UnitConversion {
 }
 
 type ModalMode = 'product' | 'category' | 'attribute' | 'unit' | null;
+
+function UnitInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const { lang } = useI18n();
+  const [open, setOpen] = useState(false);
+  const base = UNIT_RECS[lang] ?? UNIT_RECS.en;
+  const trimmed = value.trim().toLowerCase();
+  const filtered = base.filter((r) => r.toLowerCase().includes(trimmed));
+  const shown = trimmed && filtered.length > 0 ? filtered : base;
+  return (
+    <div className="relative">
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent"
+      />
+      {open && (
+        <div className="absolute z-10 top-full mt-1 w-full bg-bg-tertiary border border-border rounded-md shadow-xl max-h-40 overflow-y-auto">
+          {shown.map((r) => (
+            <button
+              key={r}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(r);
+                setOpen(false);
+              }}
+              className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover ${
+                r === value ? 'text-accent font-semibold' : 'text-text-primary'
+              }`}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ProductManager() {
   const { t } = useI18n();
@@ -420,7 +461,7 @@ export default function ProductManager() {
                   <option value="">{t('common.uncategorized')}</option>
                   {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
-                <input value={formUnitName} onChange={(e) => setFormUnitName(e.target.value)} placeholder={t('prods.ph.baseUnit')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
+                <UnitInput value={formUnitName} onChange={setFormUnitName} placeholder={t('prods.ph.baseUnit')} />
                 <input value={formReorderThreshold} onChange={(e) => setFormReorderThreshold(e.target.value)} type="number" placeholder={t('prods.ph.reorder')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
               </div>
             )}

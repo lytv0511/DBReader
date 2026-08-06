@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capabilities for the DBReader main window",
-  "windows": ["main"],
+  "windows": ["main", "print-window"],
   "permissions": [
     "core:default",
     "core:window:allow-close",
