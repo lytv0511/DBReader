@@ -2162,7 +2162,57 @@ fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result
 fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        use std::sync::mpsc;
+        use tauri_plugin_dialog::DialogExt;
+        use webview2_com_sys::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2PrintToPdfCompletedHandler, ICoreWebView2PrintToPdfCompletedHandler_Impl,
+            ICoreWebView2_7,
+        };
+        use windows_core::{implement, BOOL, HRESULT, PCWSTR};
+
+        let save_path = app
+            .dialog()
+            .file()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name("dbreader-report.pdf")
+            .blocking_save_file();
+        let Some(save_path) = save_path else {
+            if let Some(win) = app.get_webview_window("print-window") {
+                let _ = win.close();
+            }
+            return Ok(());
+        };
+        let save_path = save_path.into_path().map_err(|e| e.to_string())?;
+        let path_wide: Vec<u16> = save_path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let pcwstr = PCWSTR::from_raw(path_wide.as_ptr());
+
+        #[implement(ICoreWebView2PrintToPdfCompletedHandler)]
+        struct PrintPdfHandler {
+            tx: mpsc::Sender<Result<(), String>>,
+        }
+
+        impl ICoreWebView2PrintToPdfCompletedHandler_Impl for PrintPdfHandler_Impl {
+            fn Invoke(
+                &self,
+                error_code: HRESULT,
+                is_successful: BOOL,
+            ) -> windows_core::Result<()> {
+                if error_code.is_ok() && is_successful.as_bool() {
+                    let _ = self.tx.send(Ok(()));
+                } else {
+                    let _ = self
+                        .tx
+                        .send(Err(format!("PrintToPdf failed: error {error_code:?}")));
+                }
+                Ok(())
+            }
+        }
+
+        let (tx, rx) = mpsc::channel::<Result<(), String>>();
         let app_for_thread = app.clone();
         app.run_on_main_thread(move || {
             let Some(win) = app_for_thread.get_webview_window("print-window") else {
@@ -2182,30 +2232,32 @@ fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
                             return;
                         }
                     };
-                    let v16: webview2_com_sys::Microsoft::Web::WebView2::Win32::ICoreWebView2_16 =
-                        match core.cast() {
-                            Ok(v) => v,
-                            Err(e) => {
-                                let _ = inner_tx
-                                    .send(Err(format!("WebView2 print interface: {}", e)));
-                                return;
-                            }
-                        };
-                    let kind = webview2_com_sys::Microsoft::Web::WebView2::Win32::
-                        COREWEBVIEW2_PRINT_DIALOG_KIND_BROWSER;
-                    if let Err(e) = v16.ShowPrintUI(kind) {
-                        let _ = inner_tx.send(Err(format!("ShowPrintUI: {}", e)));
+                    let v7: ICoreWebView2_7 = match core.cast() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            let _ =
+                                inner_tx.send(Err(format!("WebView2 print interface: {}", e)));
+                            return;
+                        }
+                    };
+                    let handler: ICoreWebView2PrintToPdfCompletedHandler =
+                        PrintPdfHandler { tx: inner_tx.clone() }.into();
+                    if let Err(e) = v7.PrintToPdf(pcwstr, None, &handler) {
+                        let _ = inner_tx.send(Err(format!("PrintToPdf: {}", e)));
                         return;
                     }
                 }
-                let _ = inner_tx.send(Ok(()));
             });
             if let Err(e) = res {
                 let _ = tx.send(Err(format!("print webview access: {}", e)));
             }
         })
         .map_err(|e| e.to_string())?;
-        rx.recv().map_err(|e| e.to_string())?
+        let result = rx.recv().map_err(|e| e.to_string())?;
+        if let Some(win) = app.get_webview_window("print-window") {
+            let _ = win.close();
+        }
+        result
     }
     #[cfg(not(target_os = "windows"))]
     {
