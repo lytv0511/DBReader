@@ -2163,6 +2163,7 @@ fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::sync::mpsc;
+        use std::os::windows::ffi::OsStrExt;
         use tauri_plugin_dialog::DialogExt;
         use webview2_com_sys::Microsoft::Web::WebView2::Win32::{
             ICoreWebView2PrintToPdfCompletedHandler, ICoreWebView2PrintToPdfCompletedHandler_Impl,
