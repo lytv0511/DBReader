@@ -2159,7 +2159,7 @@ fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result
 }
 
 #[tauri::command]
-fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
+async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::sync::mpsc;
