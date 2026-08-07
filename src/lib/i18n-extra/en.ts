@@ -130,8 +130,10 @@ export default {
   'adjust.batchLabel': 'Batch number',
   'adjust.dateLabel': 'Date',
   'adjust.quantityLabel': 'Quantity',
-  'adjust.providerLabel': 'Provider',
-  'adjust.noProvider': 'No provider',
+  'adjust.providerLabel': 'Storage',
+  'adjust.storageLocation': 'Storage location',
+  'adjust.noLocation': 'No location',
+  'adjust.noProvider': 'No storage',
   'adjust.notesLabel': 'Notes',
   'adjust.notesPlaceholder': 'e.g. Restock from supplier, event service...',
   'adjust.saving': 'Saving...',
@@ -219,8 +221,9 @@ export default {
   'logs.col.date': 'Date',
   'logs.col.type': 'Type',
   'logs.col.batch': 'Batch',
+  'logs.col.sku': 'SKU',
   'logs.col.qtyChange': 'Qty Change',
-  'logs.col.provider': 'Provider',
+  'logs.col.provider': 'Storage',
   'logs.col.notes': 'Notes',
 
   /* ===== used ===== */

@@ -160,7 +160,8 @@ describe('summarizeTx', () => {
   const row = (qty: number, type = 'PURCHASE'): TxRow => ({
     id: 1, created_at: '2026-01-01 10:00:00',
     product_name: 'Wine', sku: null, batch_number: null, quantity_change: qty,
-    category_name: 'Beverages', provider_name: null, unit_cost: 0, transaction_type: type,
+    category_name: 'Beverages', provider_name: null, provider_sub: null, current_stock: 0,
+    unit_cost: 0, transaction_type: type,
   });
 
   it('returns the net quantity change', () => {

@@ -66,6 +66,11 @@ const TX_QUERY = `
     il.quantity_change,
     COALESCE(c.name, 'Uncategorized') AS category_name,
     pr.name AS provider_name,
+    pr.sub_name AS provider_sub,
+    (SELECT COALESCE(SUM(l2.quantity_change), 0)
+       FROM inventory_logs l2
+       WHERE l2.batch_id = il.batch_id
+         AND datetime(l2.created_at) <= datetime(il.created_at)) AS current_stock,
     b.unit_cost_price,
     il.transaction_type
   FROM inventory_logs il
@@ -251,8 +256,10 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
           quantity_change: r[5] as number,
           category_name: r[6] as string,
           provider_name: r[7] as string | null,
-          unit_cost: r[8] as number,
-          transaction_type: r[9] as string,
+          provider_sub: r[8] as string | null,
+          current_stock: r[9] as number,
+          unit_cost: r[10] as number,
+          transaction_type: r[11] as string,
         })));
       }
     } catch { /* ignore */ }
@@ -346,11 +353,13 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
     <tr key={row.id} data-unit className="border-b border-gray-100">
       <DateTimeCell value={row.created_at} />
       <td className="py-1.5 col-indent text-gray-600">{row.category_name}</td>
+      <td className="py-1.5 col-indent text-gray-600 font-mono">{row.sku || '-'}</td>
+      <td className="py-1.5 col-indent text-gray-600 font-mono">{row.batch_number || '-'}</td>
       <td className="py-1.5 col-indent-sm text-gray-900">{row.product_name}</td>
-      <td className="py-1.5 col-indent text-gray-600 capitalize">{t(`common.tx.${row.transaction_type}`)}</td>
-      <td className={`py-1.5 text-right font-mono text-gray-900 ${reportType === 'activities' && row.transaction_type === 'ADJUSTMENT' ? 'underline underline-offset-2 decoration-gray-400' : ''}`}>{row.quantity_change >= 0 ? '+' : ''}{row.quantity_change}</td>
-      <td className="py-1.5 notes-cell text-gray-600">{row.provider_name || '-'}</td>
-      <td className="py-1.5 text-right font-mono text-gray-700">{currencySymbol}{Number(row.unit_cost).toFixed(2)}</td>
+      <td className="py-1.5 text-right font-mono text-gray-900">{Math.round(row.current_stock)}</td>
+      <td className="py-1.5 notes-cell text-gray-600">
+        {row.provider_name ? `${row.provider_name}${row.provider_sub ? ` - ${row.provider_sub}` : ''}` : '-'}
+      </td>
     </tr>
   );
 
@@ -527,11 +536,11 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
               <tr className="border-b border-gray-200">
                 <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.date')}</th>
                 <th className="text-left py-1.5 col-indent text-gray-500 font-medium">{t('dash.stock.category')}</th>
+                <th className="text-left py-1.5 col-indent text-gray-500 font-medium">{t('logs.col.sku')}</th>
+                <th className="text-left py-1.5 col-indent text-gray-500 font-medium">{t('logs.col.batch')}</th>
                 <th className="text-left py-1.5 col-indent-sm text-gray-500 font-medium">{t('logs.col.product')}</th>
-                <th className="text-left py-1.5 col-indent text-gray-500 font-medium">{t('logs.col.type')}</th>
-                <th className="text-right py-1.5 text-gray-500 font-medium">{t('logs.col.qtyChange')}</th>
+                <th className="text-right py-1.5 text-gray-500 font-medium">{t('dash.stock.current')}</th>
                 <th className="text-left py-1.5 notes-cell text-gray-500 font-medium">{t('logs.col.provider')}</th>
-                <th className="text-right py-1.5 text-gray-500 font-medium">{t('batch.col.unitCost')}</th>
               </tr>
             </thead>
           </>

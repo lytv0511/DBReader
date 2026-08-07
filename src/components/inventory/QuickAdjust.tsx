@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, Plus, Minus, ShoppingCart, Trash2, Wrench, AlertTriangle } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
 import { todayLocalISO, stampForDate } from '../../lib/dates';
@@ -49,6 +49,7 @@ export default function QuickAdjust() {
   const [txType, setTxType] = useState('PURCHASE');
   const [adjustDir, setAdjustDir] = useState<'add' | 'remove'>('add');
   const [qty, setQty] = useState('1');
+  const [storageCompany, setStorageCompany] = useState('');
   const [providerId, setProviderId] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
   const [batchNumber, setBatchNumber] = useState('');
@@ -56,6 +57,22 @@ export default function QuickAdjust() {
   const [submitting, setSubmitting] = useState(false);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
+
+  const storageCompanies = useMemo(() => {
+    const names = Array.from(new Set(providers.map((p) => p.name).filter(Boolean)));
+    return names.sort((a, b) => a.localeCompare(b));
+  }, [providers]);
+
+  const storageLocations = storageCompany
+    ? providers.filter((p) => p.name === storageCompany)
+    : [];
+
+  const handleStorageCompanyChange = (name: string) => {
+    setStorageCompany(name);
+    setProviderId('');
+    const rows = name ? providers.filter((p) => p.name === name) : [];
+    if (rows.length === 1) setProviderId(rows[0].id);
+  };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -388,23 +405,41 @@ export default function QuickAdjust() {
             />
           </div>
 
-          {/* Provider (optional) */}
-          <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
-              {t('adjust.providerLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
-            </label>
-            <select
-              value={providerId}
-              onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))}
-              className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
-            >
-              <option value="">{t('adjust.noProvider')}</option>
-              {providers.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}{l.sub_name ? ` - ${l.sub_name}` : ''}
-                </option>
-              ))}
-            </select>
+          {/* Storage company + location */}
+          <div className="space-y-5">
+            <div>
+              <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+                {t('adjust.providerLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
+              </label>
+              <select
+                value={storageCompany}
+                onChange={(e) => handleStorageCompanyChange(e.target.value)}
+                className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
+              >
+                <option value="">{t('adjust.noProvider')}</option>
+                {storageCompanies.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            {storageCompany && (
+              <div>
+                <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+                  {t('adjust.storageLocation')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
+                </label>
+                <select
+                  value={providerId}
+                  onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
+                >
+                  <option value="">{t('adjust.noLocation')}</option>
+                  {storageLocations.map((l) => (
+                    <option key={l.id} value={l.id}>{l.sub_name || t('adjust.noLocation')}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Notes (optional) */}

@@ -18,6 +18,8 @@ export interface TxRow {
   quantity_change: number;
   category_name: string;
   provider_name: string | null;
+  provider_sub: string | null;
+  current_stock: number;
   unit_cost: number;
   transaction_type: string;
 }
