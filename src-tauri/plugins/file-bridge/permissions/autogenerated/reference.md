@@ -1,3 +1,12 @@
+## Default Permission
+
+Default permissions for the file-bridge plugin
+
+#### This default permission set includes the following:
+
+- `allow-copy-uri-to-cache`
+- `allow-export-to-document`
+
 ## Permission Table
 
 <table>
