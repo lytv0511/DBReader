@@ -4,14 +4,18 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 
-struct DbState {
-    inner: Mutex<InnerState>,
+mod sync;
+
+pub(crate) struct DbState {
+    pub(crate) inner: Mutex<InnerState>,
 }
 
-struct InnerState {
-    conn: Option<Connection>,
-    path: Option<String>,
+pub(crate) struct InnerState {
+    pub(crate) conn: Option<Connection>,
+    pub(crate) path: Option<String>,
 }
+
+pub struct SyncGate(pub Mutex<()>);
 
 struct PrintState(Mutex<PrintStateInner>);
 
@@ -54,7 +58,7 @@ where
     f(conn)
 }
 
-const INVENTORY_SCHEMA: &str = "
+pub(crate) const INVENTORY_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name VARCHAR(100) NOT NULL UNIQUE,
@@ -199,7 +203,7 @@ CREATE INDEX IF NOT EXISTS idx_calendar_date ON calendar_events(event_date);
 CREATE INDEX IF NOT EXISTS idx_notifications_product ON product_notifications(product_id);
 ";
 
-const SEED_DATA: &str = "
+pub(crate) const SEED_DATA: &str = "
 INSERT INTO categories (name, description, icon, color) VALUES
 ('Red Wine', 'Full-bodied red varieties', '🍷', '#dc2626'),
 ('White Wine', 'Crisp and aromatic whites', '🥂', '#eab308'),
@@ -2533,7 +2537,8 @@ pub fn run() {
         })
         .manage(PrintState(Mutex::new(Default::default())))
         .manage(EmailState(Mutex::new("No check performed yet".into())))
-        .manage(NotificationState(Mutex::new(None)));
+        .manage(NotificationState(Mutex::new(None)))
+        .manage(SyncGate(Mutex::new(())));
 
     #[cfg(target_os = "android")]
     {
@@ -2597,6 +2602,11 @@ pub fn run() {
             test_notification,
             get_email_last_error,
             set_launch_at_login,
+            sync::sync_status,
+            sync::sync_configure,
+            sync::sync_enable,
+            sync::sync_disable,
+            sync::sync_now,
         ])
         .on_window_event(|window, event| {
             #[cfg(not(target_os = "android"))]
@@ -2624,6 +2634,12 @@ pub fn run() {
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(60));
                 notification_check(&handle);
+            });
+
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(30));
+                sync::background_sync(&handle);
             });
 
             #[cfg(not(target_os = "android"))]

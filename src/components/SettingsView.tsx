@@ -22,6 +22,7 @@ import {
   Bell,
   BellRing,
   Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -29,6 +30,7 @@ import type { AppPreferences, ThemeMode, LanguageCode } from '../types';
 import { DEFAULT_TABS } from '../types';
 import { LANGS } from '../lib/i18n';
 import { isAndroid } from '../lib/platform';
+import { syncConfigure, syncDisable, syncEnable, syncNow, syncStatus, type SyncStatus } from '../lib/sync';
 
 interface SettingsViewProps {
   prefs: AppPreferences;
@@ -128,6 +130,62 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
       setLastError(String(e));
     } finally {
       setNotifTesting(false);
+    }
+  };
+
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [syncForm, setSyncForm] = useState({ transport: 'relay', endpoint: '', token: '', dbId: '' });
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    syncStatus()
+      .then((s) => {
+        setSync(s);
+        setSyncForm({
+          transport: s.transport || 'relay',
+          endpoint: s.endpoint,
+          token: s.token,
+          dbId: s.dbId,
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveSyncConfig = async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const s = await syncConfigure(syncForm.transport, syncForm.endpoint, syncForm.token, syncForm.dbId);
+      setSync(s);
+      setSyncMsg(t('settings.sync.saveDone'));
+    } catch (e) {
+      setSyncMsg(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const toggleSync = async () => {
+    try {
+      const s = sync?.enabled ? await syncDisable() : await syncEnable();
+      setSync(s);
+      setSyncMsg(null);
+    } catch (e) {
+      setSyncMsg(String(e));
+    }
+  };
+
+  const doSyncNow = async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const s = await syncNow();
+      setSync(s);
+    } catch (e) {
+      setSyncMsg(String(e));
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -521,6 +579,113 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
           )}
           </>
           )}
+        </section>
+
+        {/* Sync */}
+        <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <RefreshCw size={14} className="text-accent" />
+              <span className={rowLabel}>{t('settings.sync.title')}</span>
+            </div>
+            <button
+              role="switch"
+              aria-checked={!!sync?.enabled}
+              onClick={toggleSync}
+              className={`relative w-10 h-5 rounded-full transition-colors ${
+                sync?.enabled ? 'bg-accent' : 'bg-bg-tertiary border border-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                  sync?.enabled ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </div>
+          <p className="text-xs text-text-secondary">{t('settings.sync.desc')}</p>
+          {!sync?.dbOpen && <p className="text-xs text-text-secondary">{t('settings.sync.noDb')}</p>}
+          <div className={`flex flex-col gap-3 ${sync?.dbOpen ? '' : 'opacity-40 pointer-events-none'}`}>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">{t('settings.sync.transport')}</span>
+              <select
+                className={selectCls}
+                value={syncForm.transport}
+                onChange={(e) => setSyncForm({ ...syncForm, transport: e.target.value })}
+              >
+                <option value="relay">Relay server</option>
+                <option value="folder">Folder</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">{t('settings.sync.endpoint')}</span>
+              <input
+                className={inputCls}
+                value={syncForm.endpoint}
+                onChange={(e) => setSyncForm({ ...syncForm, endpoint: e.target.value })}
+                placeholder="http://192.168.1.10:8787"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">{t('settings.sync.token')}</span>
+              <input
+                className={inputCls}
+                value={syncForm.token}
+                onChange={(e) => setSyncForm({ ...syncForm, token: e.target.value })}
+                placeholder="optional"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">{t('settings.sync.dbId')}</span>
+              <input
+                className={inputCls}
+                value={syncForm.dbId}
+                onChange={(e) => setSyncForm({ ...syncForm, dbId: e.target.value })}
+                placeholder="wineshop"
+              />
+              <span className="text-xs text-text-secondary">{t('settings.sync.dbIdHint')}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={saveSyncConfig}
+                disabled={syncing}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:opacity-90 disabled:opacity-50 rounded-md text-xs text-white transition-opacity"
+              >
+                {syncing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                {t('settings.sync.save')}
+              </button>
+              <button
+                onClick={doSyncNow}
+                disabled={syncing || !sync?.enabled}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-md text-xs text-text-primary transition-colors disabled:opacity-50"
+              >
+                {syncing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                {t('settings.sync.now')}
+              </button>
+              {syncMsg && <span className="text-xs text-text-secondary truncate">{syncMsg}</span>}
+            </div>
+            {sync?.dbOpen && (
+              <div className="flex flex-col gap-0.5 text-xs text-text-secondary">
+                <span>
+                  {t('settings.sync.status')
+                    .replace('{site}', sync.siteId || '—')
+                    .replace('{pending}', String(sync.pushPending))}
+                </span>
+                <span>
+                  {t('settings.sync.lastSync').replace(
+                    '{time}',
+                    sync.lastSync ?? t('settings.sync.never')
+                  )}
+                </span>
+                {sync.syncedTables.length > 0 && (
+                  <span>
+                    {t('settings.sync.tables').replace('{tables}', sync.syncedTables.join(', '))}
+                  </span>
+                )}
+                {sync.lastError && <span className="text-error">{sync.lastError}</span>}
+              </div>
+            )}
+          </div>
         </section>
 
         {/* Danger / reset */}
