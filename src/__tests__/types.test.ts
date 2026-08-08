@@ -108,9 +108,9 @@ describe('PresetData', () => {
 describe('ViewMode', () => {
   it('should accept all valid view modes', () => {
     const modes: ViewMode[] = [
-      'canvas', 'query', 'dashboard', 'gallery',
+      'dashboard', 'gallery',
       'detail', 'products', 'batches', 'logs', 'adjust', 'used', 'categories',
     ]
-    expect(modes).toHaveLength(11)
+    expect(modes).toHaveLength(9)
   })
 })

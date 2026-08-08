@@ -319,10 +319,22 @@
           "markdownDescription": "Denies the export_to_document command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the file-bridge plugin\n#### This default permission set includes:\n\n- `allow-copy-uri-to-cache`\n- `allow-export-to-document`",
+          "description": "Enables the print_html command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-print-html",
+          "markdownDescription": "Enables the print_html command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the print_html command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-print-html",
+          "markdownDescription": "Denies the print_html command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the file-bridge plugin\n#### This default permission set includes:\n\n- `allow-copy-uri-to-cache`\n- `allow-export-to-document`\n- `allow-print-html`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the file-bridge plugin\n#### This default permission set includes:\n\n- `allow-copy-uri-to-cache`\n- `allow-export-to-document`"
+          "markdownDescription": "Default permissions for the file-bridge plugin\n#### This default permission set includes:\n\n- `allow-copy-uri-to-cache`\n- `allow-export-to-document`\n- `allow-print-html`"
         }
       ]
     }

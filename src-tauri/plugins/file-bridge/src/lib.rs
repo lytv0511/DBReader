@@ -24,9 +24,44 @@ struct CopyResponse {
     path: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct PrintArgs {
+    html: String,
+    title: String,
+}
+
+#[tauri::command]
+async fn print_html(args: PrintArgs, app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let state = app.state::<FileBridgeState>();
+        let handle = state
+            .0
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or("file-bridge plugin not started")?;
+        drop(state);
+        handle
+            .run_mobile_plugin_async::<serde_json::Value>("printHtml", args)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (args, app);
+        Err("Printing is only supported on Android".into())
+    }
+}
+
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("filebridge")
-        .invoke_handler(tauri::generate_handler![copy_uri_to_cache, export_to_document])
+        .invoke_handler(tauri::generate_handler![
+            copy_uri_to_cache,
+            export_to_document,
+            print_html
+        ])
         .setup(|app, api| {
             #[cfg(target_os = "android")]
             {

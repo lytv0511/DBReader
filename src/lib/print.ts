@@ -1,5 +1,7 @@
+import { invoke } from '@tauri-apps/api/core';
 import { printReport } from './db';
 import { save } from '@tauri-apps/plugin-dialog';
+import { isAndroid } from './platform';
 
 const IS_WINDOWS =
   typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent || '');
@@ -43,6 +45,16 @@ export async function printDom(selector: string): Promise<void> {
   const css = await collectCSS();
   const body = nodes.map((n) => n.outerHTML).join('\n');
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DBReader</title><style>${css.join('\n')}</style><style>${PRINT_WINDOW_CSS}</style></head><body>${body}</body></html>`;
+
+  if (isAndroid()) {
+    try {
+      await invoke('plugin:filebridge|print_html', { html, title: 'DBReader Report' });
+    } catch (e) {
+      console.error('Android print failed:', e);
+      throw e;
+    }
+    return;
+  }
 
   if (IS_WINDOWS) {
     const path = await save({

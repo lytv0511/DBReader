@@ -1,4 +1,4 @@
-const COMMANDS: &[&str] = &["copy_uri_to_cache", "export_to_document"];
+const COMMANDS: &[&str] = &["copy_uri_to_cache", "export_to_document", "print_html"];
 
 fn main() {
     let result = tauri_plugin::Builder::new(COMMANDS)

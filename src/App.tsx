@@ -5,10 +5,6 @@ import {
   Database,
   FolderOpen,
   X,
-  Workflow,
-  Terminal,
-  Save,
-  FolderOpenIcon,
   LayoutDashboard,
   Package,
   Boxes,
@@ -28,10 +24,6 @@ import {
   Share2,
 } from 'lucide-react';
 
-import Sidebar from './components/Sidebar';
-import QueryEditor from './components/QueryEditor';
-import ResultsGrid from './components/ResultsGrid';
-import Canvas from './components/Canvas';
 import SettingsView from './components/SettingsView';
 import HelpChat from './components/HelpChat';
 import Dashboard from './components/inventory/Dashboard';
@@ -47,11 +39,10 @@ import Reports from './components/inventory/Reports';
 import TransactionHistory from './components/inventory/TransactionHistory';
 import Workspace from './components/Workspace';
 import { openDatabase, closeDatabase, createNewDatabase, migrateSchema, savePreferences, loadPreferences, getDatabasePath, mobileImportDatabase, mobileCreateDatabase, mobileExportDatabase } from './lib/db';
-import { savePreset, loadPreset } from './lib/presets';
 import { t as translate, resolveLang } from './lib/i18n';
 import { I18nProvider } from './lib/language';
 import { isAndroid, applyFormFactor } from './lib/platform';
-import type { QueryResult, PresetData, ViewMode, AppPreferences } from './types';
+import type { ViewMode, AppPreferences } from './types';
 import { DEFAULT_TABS } from './types';
 import type { Product } from './components/inventory/ProductGallery';
 
@@ -95,20 +86,13 @@ const INVENTORY_TABS: { mode: ViewMode; labelKey: string; icon: React.ReactNode 
   { mode: 'reports', labelKey: 'tab.reports', icon: <Printer size={12} /> },
 ];
 
-const ALL_TABS: { mode: ViewMode; labelKey: string }[] = [
-  { mode: 'canvas', labelKey: 'view.canvas' },
-  { mode: 'query', labelKey: 'view.query' },
-  ...INVENTORY_TABS.map((t) => ({ mode: t.mode, labelKey: t.labelKey })),
-];
+const ALL_TABS: { mode: ViewMode; labelKey: string }[] = INVENTORY_TABS.map((t) => ({ mode: t.mode, labelKey: t.labelKey }));
 
 export default function App() {
   const isMobile = isAndroid();
   const [isConnected, setIsConnected] = useState(false);
   const [dbPath, setDbPath] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>(isMobile ? 'workspace' : 'canvas');
-  const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [currentSql, setCurrentSql] = useState('SELECT * FROM ');
+  const [viewMode, setViewMode] = useState<ViewMode>(isMobile ? 'workspace' : 'gallery');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [galleryStockFilter, setGalleryStockFilter] = useState<StockFilter>('all');
   const [initializing, setInitializing] = useState(true);
@@ -161,7 +145,7 @@ useEffect(() => {
     if (isMobile) return true;
     if (mode === 'settings') return true;
     if (prefs.useDefaultTaskbar) {
-      return mode === 'canvas' || mode === 'query' || DEFAULT_TABS.includes(mode);
+      return DEFAULT_TABS.includes(mode);
     }
     return (prefs.enabledTabs ?? ALL_TABS.map((t) => t.mode)).includes(mode);
   };
@@ -249,16 +233,14 @@ useEffect(() => {
   const t = (key: string) => translate(lang, key);
 
   const launcherTabs = useMemo(() => {
-    const all: { mode: string; label: string; icon: React.ReactNode; enabled: boolean }[] = [
-      { mode: 'canvas', label: t('view.canvas'), icon: <Workflow size={22} />, enabled: isTabEnabled('canvas') },
-      { mode: 'query', label: t('view.query'), icon: <Terminal size={22} />, enabled: isTabEnabled('query') },
-      ...INVENTORY_TABS.map((tb) => ({
+    const all: { mode: string; label: string; icon: React.ReactNode; enabled: boolean }[] = INVENTORY_TABS.map(
+      (tb) => ({
         mode: tb.mode,
         label: t(tb.labelKey),
         icon: tb.icon,
         enabled: isTabEnabled(tb.mode),
-      })),
-    ];
+      })
+    );
     return all;
   }, [prefs.enabledTabs, lang]);
 
@@ -453,26 +435,7 @@ useEffect(() => {
     await closeDatabase();
     setIsConnected(false);
     setDbPath(null);
-    setQueryResult(null);
     setPrefs((p) => ({ ...p, lastDbPath: null }));
-  }, []);
-
-  const handleSavePreset = useCallback(async () => {
-    const nodes = (window as unknown as Record<string, () => unknown[]>).__canvasGetNodes?.() || [];
-    const edges = (window as unknown as Record<string, () => unknown[]>).__canvasGetEdges?.() || [];
-
-    await savePreset({
-      name: t('preset.currentLayout'),
-      nodes,
-      edges,
-    });
-  }, [t]);
-
-  const handleLoadPreset = useCallback(async () => {
-    const preset = await loadPreset();
-    if (preset) {
-      (window as unknown as Record<string, (p: PresetData) => void>).__canvasLoadPreset?.(preset);
-    }
   }, []);
 
   const fileName = dbPath?.split(/[\\/]/).pop() || '';
@@ -590,19 +553,6 @@ useEffect(() => {
                 <div className="w-0.5 shrink-0 self-stretch bg-accent rounded my-1.5 transition-all" />
               )}
             </div>
-
-            <button
-              onClick={handleSavePreset}
-              className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors shrink-0"
-            >
-              <Save size={10} /> {t('action.save')}
-            </button>
-            <button
-              onClick={handleLoadPreset}
-              className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors shrink-0"
-            >
-              <FolderOpenIcon size={10} /> {t('action.load')}
-            </button>
           </div>
         )}
       </header>
@@ -610,41 +560,6 @@ useEffect(() => {
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar - only for canvas/query modes */}
-        {!isMobile && sidebarOpen && isConnected && (viewMode === 'canvas' || viewMode === 'query') && (
-          <div className="w-64 border-r border-border bg-bg-secondary shrink-0 overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-              <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                {t('sidebar.schema')}
-              </span>
-              <button
-                onClick={() => setSidebarOpen(false)}
-                className="text-text-secondary hover:text-text-primary"
-              >
-                <X size={12} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <Sidebar
-                isConnected={isConnected}
-                dbPath={dbPath}
-                onSelectTable={(table) => {
-                  setCurrentSql(`SELECT * FROM "${table}" LIMIT ${prefs.defaultQueryLimit}`);
-                }}
-              />
-            </div>
-          </div>
-        )}
-
-        {!isMobile && !sidebarOpen && isConnected && (viewMode === 'canvas' || viewMode === 'query') && (
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="w-8 border-r border-border bg-bg-secondary hover:bg-bg-hover flex items-center justify-center shrink-0 transition-colors"
-          >
-            <Database size={14} className="text-text-secondary" />
-          </button>
-        )}
-
         {/* Center area */}
         <div className="flex-1 flex flex-col overflow-hidden relative">
           {isMobile && (
@@ -682,24 +597,6 @@ useEffect(() => {
                 </button>
               )}
             </div>
-          )}
-          <div className={viewMode === 'canvas' ? 'flex-1 overflow-hidden' : 'hidden'}>
-            <Canvas isConnected={isConnected} dbPath={dbPath} />
-          </div>
-          {viewMode === 'query' && (
-            <>
-              <div className="h-[200px] shrink-0 border-b border-border">
-                <QueryEditor
-                  isConnected={isConnected}
-                  onResult={setQueryResult}
-                  initialSql={currentSql}
-                  onSqlChange={setCurrentSql}
-                />
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <ResultsGrid result={queryResult} />
-              </div>
-            </>
           )}
           {viewMode === 'dashboard' && (
             <Dashboard onNavigate={(stockFilter) => {
@@ -856,7 +753,7 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Welcome overlay */}      {!isMobile && !initializing && !isConnected && viewMode === 'canvas' && (
+      {/* Welcome overlay */}      {!isMobile && !initializing && !isConnected && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="text-center pointer-events-auto">
             <Database size={64} className="mx-auto mb-4 text-text-secondary/30" />

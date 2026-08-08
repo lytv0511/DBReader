@@ -37,3 +37,7 @@ T.db
 i.db
 test-inventory.db
 wine_inventory.db
+
+# Android plugin build artifacts
+src-tauri/plugins/file-bridge/android/build
+src-tauri/plugins/file-bridge/android/.gradle

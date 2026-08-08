@@ -6,6 +6,7 @@ Default permissions for the file-bridge plugin
 
 - `allow-copy-uri-to-cache`
 - `allow-export-to-document`
+- `allow-print-html`
 
 ## Permission Table
 
@@ -64,6 +65,32 @@ Enables the export_to_document command without any pre-configured scope.
 <td>
 
 Denies the export_to_document command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`filebridge:allow-print-html`
+
+</td>
+<td>
+
+Enables the print_html command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`filebridge:deny-print-html`
+
+</td>
+<td>
+
+Denies the print_html command without any pre-configured scope.
 
 </td>
 </tr>

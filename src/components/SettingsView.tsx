@@ -337,6 +337,43 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
 
         {/* Email alerts */}
         <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
+          {isMobile && (
+          <>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bell size={14} className="text-accent" />
+              <span className="text-sm text-text-primary">{t('settings.email.confirmDesktopNotifications')}</span>
+            </div>
+            <button
+              role="switch"
+              aria-checked={prefs.desktopNotifications}
+              onClick={() => onChange({ desktopNotifications: !prefs.desktopNotifications })}
+              className={`relative w-10 h-5 rounded-full transition-colors ${
+                prefs.desktopNotifications ? 'bg-accent' : 'bg-bg-tertiary border border-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                  prefs.desktopNotifications ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={sendTestNotification}
+              disabled={notifTesting}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-md text-xs text-text-primary transition-colors"
+            >
+              {notifTesting ? <Loader2 size={11} className="animate-spin" /> : <BellRing size={11} />}
+              {t('settings.email.testNotif')}
+            </button>
+            {lastError && <span className="text-xs text-text-secondary truncate">{lastError}</span>}
+          </div>
+          </>
+          )}
+          {!isMobile && (
+          <>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Mail size={14} className="text-accent" />
@@ -481,6 +518,8 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
               />
             </button>
           </div>
+          )}
+          </>
           )}
         </section>
 

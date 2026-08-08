@@ -3,7 +3,12 @@ package com.vincentleong.dbreader
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.print.PrintAttributes
+import android.print.PrintManager
 import android.provider.OpenableColumns
+import android.view.ViewGroup
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.result.ActivityResult
 import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
@@ -21,6 +26,12 @@ import java.io.FileOutputStream
 class CopyArgs {
   lateinit var uri: String
   lateinit var file_name: String
+}
+
+@InvokeArg
+class PrintArgs {
+  lateinit var html: String
+  var title: String = "DBReader Report"
 }
 
 @TauriPlugin
@@ -48,6 +59,52 @@ class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
       startActivityForResult(invoke, intent, "pickDatabaseResult")
     } catch (ex: Exception) {
       val message = ex.message ?: "Failed to pick database file"
+      Logger.error(message)
+      invoke.reject(message)
+    }
+  }
+
+  @Command
+  fun printHtml(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(PrintArgs::class.java)
+      val jobName = args.title.ifBlank { "DBReader Report" }
+      val webView = WebView(activity)
+      webView.layoutParams = ViewGroup.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+      )
+      webView.settings.javaScriptEnabled = false
+      var printed = false
+      webView.webViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView?, url: String?) {
+          if (printed) return
+          printed = true
+          try {
+            val printManager = activity.getSystemService(Activity.PRINT_SERVICE) as? PrintManager
+              ?: throw IllegalStateException("Print service unavailable")
+            val printAdapter = view?.createPrintDocumentAdapter(jobName)
+              ?: throw IllegalStateException("Print adapter unavailable")
+            printManager.print(
+              jobName,
+              printAdapter,
+              PrintAttributes.Builder().build()
+            )
+            val ret = JSObject()
+            ret.put("done", true)
+            invoke.resolve(ret)
+          } catch (ex: Exception) {
+            invoke.reject(ex.message ?: "Failed to print")
+          }
+        }
+      }
+      activity.addContentView(
+        webView,
+        ViewGroup.LayoutParams(1, 1)
+      )
+      webView.loadDataWithBaseURL(null, args.html, "text/html", "UTF-8", null)
+    } catch (ex: Exception) {
+      val message = ex.message ?: "Failed to print"
       Logger.error(message)
       invoke.reject(message)
     }

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect, typ
 import { Printer, RefreshCw } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
 import { printDom } from '../../lib/print';
-import { isAndroid } from '../../lib/platform';
 import { todayLocalISO } from '../../lib/dates';
 import { useI18n, I18nProvider } from '../../lib/language';
 import { LANGS } from '../../lib/i18n';
@@ -675,14 +674,12 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
             >
               <RefreshCw size={12} />
             </button>
-            {!isAndroid() && (
             <button
               onClick={() => printDom('.report-print')}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white"
             >
               <Printer size={12} /> {t('reports.print')}
             </button>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-4 flex-wrap">
