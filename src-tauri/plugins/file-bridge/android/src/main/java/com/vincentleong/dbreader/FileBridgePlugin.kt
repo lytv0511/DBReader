@@ -35,6 +35,16 @@ class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
       val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
       intent.addCategory(Intent.CATEGORY_OPENABLE)
       intent.type = "*/*"
+      intent.putExtra(
+        Intent.EXTRA_MIME_TYPES,
+        arrayOf(
+          "*/*",
+          "application/octet-stream",
+          "application/x-sqlite3",
+          "application/vnd.sqlite3",
+          "application/x-sqlite-3"
+        )
+      )
       startActivityForResult(invoke, intent, "pickDatabaseResult")
     } catch (ex: Exception) {
       val message = ex.message ?: "Failed to pick database file"
