@@ -168,6 +168,7 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
   const [rows, setRows] = useState<TxRow[]>([]);
   const [productRows, setProductRows] = useState<ProductRow[]>([]);
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
+  const [printError, setPrintError] = useState<string | null>(null);
 
   useEffect(() => {
     executeQuery('SELECT id, name, sku, category_id FROM products ORDER BY name')
@@ -675,12 +676,21 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
               <RefreshCw size={12} />
             </button>
             <button
-              onClick={() => printDom('.report-print')}
+              onClick={() => {
+                setPrintError(null);
+                printDom('.report-print').catch((e) => {
+                  console.error('Print failed:', e);
+                  setPrintError(e instanceof Error ? e.message : String(e));
+                });
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white"
             >
               <Printer size={12} /> {t('reports.print')}
             </button>
           </div>
+          {printError && (
+            <p className="text-xs text-error mb-2 break-words">{printError}</p>
+          )}
         </div>
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">

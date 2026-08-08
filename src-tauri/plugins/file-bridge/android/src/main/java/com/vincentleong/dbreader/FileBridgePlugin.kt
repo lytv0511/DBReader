@@ -66,8 +66,9 @@ class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
 
   @Command
   fun printHtml(invoke: Invoke) {
+    var args: PrintArgs? = null
     try {
-      val args = invoke.parseArgs(PrintArgs::class.java)
+      args = invoke.parseArgs(PrintArgs::class.java)
       val jobName = args.title.ifBlank { "DBReader Report" }
       val webView = WebView(activity)
       webView.layoutParams = ViewGroup.LayoutParams(
@@ -80,33 +81,72 @@ class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
         override fun onPageFinished(view: WebView?, url: String?) {
           if (printed) return
           printed = true
-          try {
-            val printManager = activity.getSystemService(Activity.PRINT_SERVICE) as? PrintManager
-              ?: throw IllegalStateException("Print service unavailable")
-            val printAdapter = view?.createPrintDocumentAdapter(jobName)
-              ?: throw IllegalStateException("Print adapter unavailable")
-            printManager.print(
-              jobName,
-              printAdapter,
-              PrintAttributes.Builder().build()
-            )
-            val ret = JSObject()
-            ret.put("done", true)
-            invoke.resolve(ret)
-          } catch (ex: Exception) {
-            invoke.reject(ex.message ?: "Failed to print")
+          view?.post {
+            try {
+              val printManager = activity.getSystemService(Activity.PRINT_SERVICE) as? PrintManager
+                ?: throw IllegalStateException("Print service unavailable")
+              val printAdapter = view.createPrintDocumentAdapter(jobName)
+              printManager.print(
+                jobName,
+                printAdapter,
+                PrintAttributes.Builder().build()
+              )
+              val ret = JSObject()
+              ret.put("done", true)
+              invoke.resolve(ret)
+            } catch (ex: Exception) {
+              startHtmlExport(invoke, args, ex.message ?: "Failed to print")
+            }
           }
         }
+
+        @Suppress("DEPRECATION")
+        override fun onReceivedError(
+          view: WebView?,
+          errorCode: Int,
+          description: String?,
+          failingUrl: String?
+        ) {
+          if (printed) return
+          printed = true
+          startHtmlExport(invoke, args, "Failed to load report")
+        }
       }
+      val dm = activity.resources.displayMetrics
       activity.addContentView(
         webView,
-        ViewGroup.LayoutParams(1, 1)
+        ViewGroup.LayoutParams(dm.widthPixels, dm.heightPixels)
       )
+      webView.postDelayed({
+        (webView.parent as? ViewGroup)?.removeView(webView)
+      }, 120_000L)
       webView.loadDataWithBaseURL(null, args.html, "text/html", "UTF-8", null)
     } catch (ex: Exception) {
       val message = ex.message ?: "Failed to print"
       Logger.error(message)
+      startHtmlExport(invoke, args, message)
+    }
+  }
+
+  private fun startHtmlExport(invoke: Invoke, args: PrintArgs?, message: String) {
+    if (args == null) {
       invoke.reject(message)
+      return
+    }
+    try {
+      var fileName = args.title.ifBlank { "dbreader-report" }
+      if (!fileName.endsWith(".html", ignoreCase = true)) fileName = "$fileName.html"
+      fileName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+      val cached = File(activity.cacheDir, fileName)
+      cached.writeText(args.html, Charsets.UTF_8)
+      exportSourcePath = cached.absolutePath
+      val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+      intent.addCategory(Intent.CATEGORY_OPENABLE)
+      intent.type = "text/html"
+      intent.putExtra(Intent.EXTRA_TITLE, fileName)
+      startActivityForResult(invoke, intent, "exportDocumentResult")
+    } catch (ex: Exception) {
+      invoke.reject(ex.message ?: "Failed to save report")
     }
   }
 
