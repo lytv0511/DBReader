@@ -25,7 +25,7 @@ struct CopyResponse {
 }
 
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    tauri::plugin::Builder::new("file-bridge")
+    tauri::plugin::Builder::new("filebridge")
         .invoke_handler(tauri::generate_handler![copy_uri_to_cache, export_to_document])
         .setup(|app, api| {
             #[cfg(target_os = "android")]
