@@ -2,13 +2,21 @@ package com.vincentleong.dbreader
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.print.PrintAttributes
+import android.print.PrintJob
 import android.print.PrintManager
 import android.provider.OpenableColumns
+import android.view.Gravity
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.activity.result.ActivityResult
 import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
@@ -38,6 +46,8 @@ class PrintArgs {
 class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
 
   private var exportSourcePath: String? = null
+  private var printPreviewContainer: ViewGroup? = null
+  private val mainHandler = Handler(Looper.getMainLooper())
 
   @Command
   fun copyToCache(invoke: Invoke) {
@@ -70,12 +80,14 @@ class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
     try {
       args = invoke.parseArgs(PrintArgs::class.java)
       val jobName = args.title.ifBlank { "DBReader Report" }
+      removePrintPreview()
       val webView = WebView(activity)
-      webView.layoutParams = ViewGroup.LayoutParams(
+      webView.layoutParams = FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.MATCH_PARENT
       )
       webView.settings.javaScriptEnabled = false
+      webView.setBackgroundColor(Color.WHITE)
       var printed = false
       webView.webViewClient = object : WebViewClient() {
         override fun onPageFinished(view: WebView?, url: String?) {
@@ -86,11 +98,12 @@ class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
               val printManager = activity.getSystemService(Activity.PRINT_SERVICE) as? PrintManager
                 ?: throw IllegalStateException("Print service unavailable")
               val printAdapter = view.createPrintDocumentAdapter(jobName)
-              printManager.print(
+              val job = printManager.print(
                 jobName,
                 printAdapter,
                 PrintAttributes.Builder().build()
               )
+              pollPrintJob(job)
               val ret = JSObject()
               ret.put("done", true)
               invoke.resolve(ret)
@@ -112,13 +125,34 @@ class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
           startHtmlExport(invoke, args, "Failed to load report")
         }
       }
+
       val dm = activity.resources.displayMetrics
-      activity.addContentView(
-        webView,
-        ViewGroup.LayoutParams(dm.widthPixels, dm.heightPixels)
-      )
-      webView.postDelayed({
-        (webView.parent as? ViewGroup)?.removeView(webView)
+      val container = FrameLayout(activity)
+      container.layoutParams = ViewGroup.LayoutParams(dm.widthPixels, dm.heightPixels)
+      container.setBackgroundColor(Color.WHITE)
+      container.addView(webView)
+
+      val closeBtn = TextView(activity)
+      closeBtn.text = "✕"
+      closeBtn.textSize = 18f
+      closeBtn.setTextColor(Color.WHITE)
+      closeBtn.gravity = Gravity.CENTER
+      closeBtn.setPadding(0, 0, 0, 0)
+      val closeBg = GradientDrawable()
+      closeBg.shape = GradientDrawable.OVAL
+      closeBg.setColor(0xAA000000.toInt())
+      closeBtn.background = closeBg
+      val closeLp = FrameLayout.LayoutParams(dp(40), dp(40))
+      closeLp.gravity = Gravity.TOP or Gravity.END
+      closeLp.setMargins(0, dp(16), dp(16), 0)
+      closeBtn.layoutParams = closeLp
+      closeBtn.setOnClickListener { removePrintPreview() }
+      container.addView(closeBtn)
+
+      printPreviewContainer = container
+      activity.addContentView(container, ViewGroup.LayoutParams(dm.widthPixels, dm.heightPixels))
+      container.postDelayed({
+        removePrintPreview()
       }, 120_000L)
       webView.loadDataWithBaseURL(null, args.html, "text/html", "UTF-8", null)
     } catch (ex: Exception) {
@@ -127,6 +161,28 @@ class FileBridgePlugin(private val activity: Activity) : Plugin(activity) {
       startHtmlExport(invoke, args, message)
     }
   }
+
+  private fun pollPrintJob(job: PrintJob) {
+    val check = object : Runnable {
+      override fun run() {
+        if (job.isCompleted || job.isFailed || job.isCancelled) {
+          removePrintPreview()
+          return
+        }
+        mainHandler.postDelayed(this, 500L)
+      }
+    }
+    mainHandler.postDelayed(check, 1000L)
+  }
+
+  private fun removePrintPreview() {
+    printPreviewContainer?.let { container ->
+      (container.parent as? ViewGroup)?.removeView(container)
+      printPreviewContainer = null
+    }
+  }
+
+  private fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()
 
   private fun startHtmlExport(invoke: Invoke, args: PrintArgs?, message: String) {
     if (args == null) {
