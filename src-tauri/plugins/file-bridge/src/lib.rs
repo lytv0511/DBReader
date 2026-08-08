@@ -31,7 +31,11 @@ struct PrintArgs {
 }
 
 #[tauri::command]
-async fn print_html(args: PrintArgs, app: tauri::AppHandle) -> Result<(), String> {
+async fn print_html(
+    html: String,
+    title: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         let state = app.state::<FileBridgeState>();
@@ -43,14 +47,20 @@ async fn print_html(args: PrintArgs, app: tauri::AppHandle) -> Result<(), String
             .ok_or("file-bridge plugin not started")?;
         drop(state);
         handle
-            .run_mobile_plugin_async::<serde_json::Value>("printHtml", args)
+            .run_mobile_plugin_async::<serde_json::Value>(
+                "printHtml",
+                PrintArgs {
+                    html: html.clone(),
+                    title: title.clone(),
+                },
+            )
             .await
             .map_err(|e| e.to_string())?;
         Ok(())
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (args, app);
+        let _ = (html, title, app);
         Err("Printing is only supported on Android".into())
     }
 }
