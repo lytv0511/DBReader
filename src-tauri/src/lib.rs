@@ -13,7 +13,13 @@ struct InnerState {
     path: Option<String>,
 }
 
-struct PrintState(Mutex<Option<String>>);
+struct PrintState(Mutex<PrintStateInner>);
+
+#[derive(Default)]
+struct PrintStateInner {
+    html: Option<String>,
+    save_path: Option<String>,
+}
 
 struct EmailState(Mutex<String>);
 
@@ -2118,23 +2124,51 @@ mod tests {
     }
 }
 
+fn plog(msg: &str) {
+    use std::io::Write;
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(std::path::Path::new(&home).join("dbreader-print.log"))
+    {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 #[tauri::command]
-fn print_report(app: tauri::AppHandle, html: String) -> Result<(), String> {
-    let state = app.state::<PrintState>();
-    *state.0.lock().unwrap() = Some(html);
+fn print_report(
+    app: tauri::AppHandle,
+    html: String,
+    save_path: Option<String>,
+) -> Result<(), String> {
+    plog(&format!("print_report: save_path={}", save_path.as_deref().unwrap_or("none")));
+    {
+        let state = app.state::<PrintState>();
+        let mut inner = state.0.lock().unwrap();
+        inner.html = Some(html);
+        inner.save_path = save_path;
+    }
     if let Some(win) = app.get_webview_window("print-window") {
         let _ = win.set_focus();
         let _ = win.eval("window.location.reload()");
     } else {
-        let win = WebviewWindowBuilder::new(
+        let builder = WebviewWindowBuilder::new(
             &app,
             "print-window",
             WebviewUrl::App("print.html".into()),
         )
-        .title("DBReader Print")
-        .inner_size(800.0, 1000.0)
-        .build()
-        .map_err(|e| e.to_string())?;
+        .title("DBReader Report")
+        .inner_size(800.0, 1000.0);
+        #[cfg(target_os = "windows")]
+        let builder = builder.position(tauri::LogicalPosition::new(40000.0, 40000.0));
+        let win = builder.build().map_err(|e| e.to_string())?;
         let _ = win.set_focus();
     }
     Ok(())
@@ -2143,7 +2177,7 @@ fn print_report(app: tauri::AppHandle, html: String) -> Result<(), String> {
 #[tauri::command]
 fn get_print_html(app: tauri::AppHandle) -> Result<String, String> {
     let state = app.state::<PrintState>();
-    let html = state.0.lock().unwrap().clone();
+    let html = state.0.lock().unwrap().html.clone();
     html.ok_or_else(|| "no print html pending".into())
 }
 
@@ -2162,33 +2196,33 @@ fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result
 async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use std::sync::mpsc;
         use std::os::windows::ffi::OsStrExt;
-        use tauri_plugin_dialog::DialogExt;
+        use std::sync::mpsc;
         use webview2_com_sys::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2Environment6, ICoreWebView2PrintSettings,
             ICoreWebView2PrintToPdfCompletedHandler, ICoreWebView2PrintToPdfCompletedHandler_Impl,
             ICoreWebView2_7,
         };
         use windows_core::{implement, BOOL, HRESULT, PCWSTR};
 
-        let save_path = app
-            .dialog()
-            .file()
-            .add_filter("PDF", &["pdf"])
-            .set_file_name("dbreader-report.pdf")
-            .blocking_save_file();
-        let Some(save_path) = save_path else {
+        plog("print_ready: begin");
+
+        let save_path = {
+            let state = app.state::<PrintState>();
+            state.0.lock().unwrap().save_path.clone()
+        };
+        let Some(path) = save_path else {
+            plog("print_ready: no save path, closing window");
             if let Some(win) = app.get_webview_window("print-window") {
                 let _ = win.close();
             }
             return Ok(());
         };
-        let save_path = save_path.into_path().map_err(|e| e.to_string())?;
-        let path_wide: Vec<u16> = save_path
-            .as_os_str()
+        let path_wide: Vec<u16> = path
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
+        plog(&format!("print_ready: saving PDF to {}", path));
 
         #[implement(ICoreWebView2PrintToPdfCompletedHandler)]
         struct PrintPdfHandler {
@@ -2196,11 +2230,7 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
         }
 
         impl ICoreWebView2PrintToPdfCompletedHandler_Impl for PrintPdfHandler_Impl {
-            fn Invoke(
-                &self,
-                error_code: HRESULT,
-                is_successful: BOOL,
-            ) -> windows_core::Result<()> {
+            fn Invoke(&self, error_code: HRESULT, is_successful: BOOL) -> windows_core::Result<()> {
                 if error_code.is_ok() && is_successful.as_bool() {
                     let _ = self.tx.send(Ok(()));
                 } else {
@@ -2222,9 +2252,8 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
             let _ = win.set_focus();
             let inner_tx = tx.clone();
             let res = win.with_webview(move |webview| {
-                use windows_core::Interface;
-                let pcwstr = PCWSTR::from_raw(path_wide.as_ptr());
                 unsafe {
+                    use windows_core::Interface;
                     let controller = webview.controller();
                     let core = match controller.CoreWebView2() {
                         Ok(c) => c,
@@ -2241,11 +2270,43 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
                             return;
                         }
                     };
+                    let settings: Option<ICoreWebView2PrintSettings> = match core.Environment() {
+                        Ok(env) => match env.cast::<ICoreWebView2Environment6>() {
+                            Ok(env6) => match env6.CreatePrintSettings() {
+                                Ok(s) => {
+                                    let _ = s.SetPageWidth(210.0 / 25.4);
+                                    let _ = s.SetPageHeight(1122.0 / 96.0);
+                                    let _ = s.SetMarginTop(0.0);
+                                    let _ = s.SetMarginBottom(0.0);
+                                    let _ = s.SetMarginLeft(0.0);
+                                    let _ = s.SetMarginRight(0.0);
+                                    let _ = s.SetShouldPrintBackgrounds(true);
+                                    let _ = s.SetShouldPrintHeaderAndFooter(false);
+                                    Some(s)
+                                }
+                                Err(e) => {
+                                    plog(&format!("CreatePrintSettings failed: {e:?}"));
+                                    None
+                                }
+                            },
+                            Err(e) => {
+                                plog(&format!("Environment6 cast failed: {e:?}"));
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            plog(&format!("Environment failed: {e:?}"));
+                            None
+                        }
+                    };
+                    let pcwstr = PCWSTR::from_raw(path_wide.as_ptr());
                     let handler: ICoreWebView2PrintToPdfCompletedHandler =
                         PrintPdfHandler { tx: inner_tx.clone() }.into();
-                    if let Err(e) = v7.PrintToPdf(pcwstr, None, &handler) {
-                        let _ = inner_tx.send(Err(format!("PrintToPdf: {}", e)));
-                        return;
+                    match v7.PrintToPdf(pcwstr, settings.as_ref(), &handler) {
+                        Ok(_) => plog("print_ready: PrintToPdf submitted"),
+                        Err(e) => {
+                            let _ = inner_tx.send(Err(format!("PrintToPdf: {}", e)));
+                        }
                     }
                 }
             });
@@ -2255,6 +2316,18 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
         })
         .map_err(|e| e.to_string())?;
         let result = rx.recv().map_err(|e| e.to_string())?;
+        if result.is_ok() {
+            let exists = std::path::Path::new(&path)
+                .metadata()
+                .map(|m| m.is_file())
+                .unwrap_or(false);
+            plog(&format!(
+                "print_ready: PrintToPdf ok, file exists={}",
+                exists
+            ));
+        } else {
+            plog(&format!("print_ready: {}", result.as_ref().unwrap_err()));
+        }
         if let Some(win) = app.get_webview_window("print-window") {
             let _ = win.close();
         }
@@ -2393,7 +2466,7 @@ pub fn run() {
                 path: None,
             }),
         })
-        .manage(PrintState(Mutex::new(None)))
+        .manage(PrintState(Mutex::new(Default::default())))
         .manage(EmailState(Mutex::new("No check performed yet".into())))
         .manage(NotificationState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![

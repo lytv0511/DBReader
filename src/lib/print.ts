@@ -1,4 +1,8 @@
 import { printReport } from './db';
+import { save } from '@tauri-apps/plugin-dialog';
+
+const IS_WINDOWS =
+  typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent || '');
 
 async function collectCSS(): Promise<string[]> {
   const css: string[] = [];
@@ -39,6 +43,17 @@ export async function printDom(selector: string): Promise<void> {
   const css = await collectCSS();
   const body = nodes.map((n) => n.outerHTML).join('\n');
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DBReader</title><style>${css.join('\n')}</style><style>${PRINT_WINDOW_CSS}</style></head><body>${body}</body></html>`;
+
+  if (IS_WINDOWS) {
+    const path = await save({
+      title: 'Save report as PDF',
+      defaultPath: 'dbreader-report.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (path === null) return;
+    await printReport(html, path);
+    return;
+  }
 
   try {
     await printReport(html);

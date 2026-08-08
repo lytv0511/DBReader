@@ -21,6 +21,7 @@
       document.body.appendChild(div);
     };
     const sleep = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 180)));
+    const IS_WINDOWS = navigator.userAgent.indexOf('Windows') !== -1;
     let closed = false;
     const closeOnce = () => {
       if (closed) return;
@@ -44,12 +45,14 @@
           document.close();
           document.title = 'DBReader Report';
           const width = 794;
-          await window.__TAURI__.core.invoke('resize_print_window', { width, height: 1000 });
-          await sleep();
-          const n = document.querySelectorAll('.report-page').length;
-          const h = Math.max(400, n * 1122);
-          await window.__TAURI__.core.invoke('resize_print_window', { width, height: h });
-          await sleep();
+          if (!IS_WINDOWS) {
+            await window.__TAURI__.core.invoke('resize_print_window', { width, height: 1000 });
+            await sleep();
+            const n = document.querySelectorAll('.report-page').length;
+            const h = Math.max(400, n * 1122);
+            await window.__TAURI__.core.invoke('resize_print_window', { width, height: h });
+            await sleep();
+          }
         } catch (e) {
           showError(e);
         }
@@ -58,7 +61,11 @@
         try {
           await window.__TAURI__.core.invoke('print_ready');
         } catch (e) {
-          showError(e);
+          if (IS_WINDOWS) {
+            window.print();
+          } else {
+            showError(e);
+          }
         }
       }
     })();
