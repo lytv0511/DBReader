@@ -26,3 +26,14 @@ src-tauri/gen
 *.njsproj
 *.sln
 *.sw?
+
+# Local database files
+Wine and Cigars.db
+Wine and Cigars.backup.db
+DBinv1.db
+H.db
+Office.db
+T.db
+i.db
+test-inventory.db
+wine_inventory.db
