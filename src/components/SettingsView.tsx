@@ -28,6 +28,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { AppPreferences, ThemeMode, LanguageCode } from '../types';
 import { DEFAULT_TABS } from '../types';
 import { LANGS } from '../lib/i18n';
+import { isAndroid } from '../lib/platform';
 
 interface SettingsViewProps {
   prefs: AppPreferences;
@@ -41,6 +42,7 @@ const LIMIT_OPTIONS = [50, 100, 250, 500, 1000];
 const MAX_ENABLED_TABS = 6;
 
 export default function SettingsView({ prefs, tabs, onChange, onReset, t }: SettingsViewProps) {
+  const isMobile = isAndroid();
   const themes: { mode: ThemeMode; icon: React.ReactNode; label: string }[] = [
     { mode: 'dark', icon: <Moon size={14} />, label: t('settings.theme.dark') },
     { mode: 'light', icon: <Sun size={14} />, label: t('settings.theme.light') },
@@ -227,7 +229,8 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
           </div>
         </section>
 
-        {/* Tabs */}
+        {/* Tabs (desktop only - mobile has no tab bar) */}
+        {!isMobile && (
         <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -300,6 +303,7 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
             })}
           </div>
         </section>
+        )}
 
         {/* Currency symbol */}
         <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
@@ -449,6 +453,7 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
               />
             </button>
           </div>
+          {!isMobile && (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Power size={14} className="text-accent" />
@@ -476,6 +481,7 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
               />
             </button>
           </div>
+          )}
         </section>
 
         {/* Danger / reset */}

@@ -158,6 +158,7 @@ useEffect(() => {
   }, [isMobile, goBack]);
 
   const isTabEnabled = (mode: string) => {
+    if (isMobile) return true;
     if (mode === 'settings') return true;
     if (prefs.useDefaultTaskbar) {
       return mode === 'canvas' || mode === 'query' || DEFAULT_TABS.includes(mode);
