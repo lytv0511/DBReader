@@ -189,7 +189,7 @@ export async function printReport(html: string, savePath?: string): Promise<void
 export async function mobileImportDatabase(fileName: string): Promise<string> {
   const path = await invoke<string>('plugin:filebridge|copy_uri_to_cache', {
     uri: '',
-    file_name: fileName,
+    fileName,
   });
   return path;
 }
@@ -199,5 +199,5 @@ export async function mobileCreateDatabase(name: string): Promise<TableInfo> {
 }
 
 export async function mobileExportDatabase(path: string, fileName: string): Promise<void> {
-  return invoke<void>('plugin:filebridge|export_to_document', { path, file_name: fileName });
+  return invoke<void>('plugin:filebridge|export_to_document', { path, fileName });
 }
