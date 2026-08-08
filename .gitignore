@@ -41,3 +41,7 @@ wine_inventory.db
 # Android plugin build artifacts
 src-tauri/plugins/file-bridge/android/build
 src-tauri/plugins/file-bridge/android/.gradle
+
+# Sync relay server build artifacts and data
+relay/target
+relay/sync-data

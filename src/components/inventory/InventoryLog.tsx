@@ -6,12 +6,11 @@ import { useI18n } from '../../lib/language';
 interface LogEntry {
   id: number;
   product_name: string;
+  product_sku: string | null;
   batch_number: string | null;
-  quantity_change: number;
   transaction_type: string;
   provider_name: string | null;
   provider_sub: string | null;
-  notes: string | null;
   created_at: string;
 }
 
@@ -36,12 +35,11 @@ export default function InventoryLog() {
         SELECT
           il.id,
           p.name AS product_name,
+          p.sku AS product_sku,
           b.batch_number,
-          il.quantity_change,
           il.transaction_type,
           pr.name AS provider_name,
           pr.sub_name,
-          il.notes,
           il.created_at
         FROM inventory_logs il
         JOIN batches b ON il.batch_id = b.id
@@ -55,13 +53,12 @@ export default function InventoryLog() {
       setLogs(result.rows.map((r) => ({
         id: r[0] as number,
         product_name: r[1] as string,
-        batch_number: r[2] as string | null,
-        quantity_change: r[3] as number,
+        product_sku: r[2] as string | null,
+        batch_number: r[3] as string | null,
         transaction_type: r[4] as string,
         provider_name: r[5] as string | null,
         provider_sub: r[6] as string | null,
-        notes: r[7] as string | null,
-        created_at: r[8] as string,
+        created_at: r[7] as string,
       })));
     } catch (err) {
       setError(String(err));
@@ -134,10 +131,10 @@ export default function InventoryLog() {
               className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
             >
               <option value="">{t('logs.all')}</option>
-              <option value="PURCHASE">PURCHASE</option>
-              <option value="USAGE">USAGE</option>
-              <option value="SPOILAGE">SPOILAGE</option>
-              <option value="ADJUSTMENT">ADJUSTMENT</option>
+              <option value="PURCHASE">{t('logs.typeName.PURCHASE')}</option>
+              <option value="USAGE">{t('logs.typeName.USAGE')}</option>
+              <option value="SPOILAGE">{t('logs.typeName.SPOILAGE')}</option>
+              <option value="ADJUSTMENT">{t('logs.typeName.ADJUSTMENT')}</option>
             </select>
           </div>
           <div className="flex items-center gap-2">
@@ -172,10 +169,9 @@ export default function InventoryLog() {
                 <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.date')}</th>
                 <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.type')}</th>
                 <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.product')}</th>
+                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.sku')}</th>
                 <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.batch')}</th>
-                <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.qtyChange')}</th>
                 <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.provider')}</th>
-                <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('logs.col.notes')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -184,18 +180,15 @@ export default function InventoryLog() {
                   <td className="px-4 py-2.5 text-text-secondary whitespace-nowrap">{log.created_at?.replace('T', ' ').slice(0, 19)}</td>
                   <td className="px-4 py-2.5">
                     <span className={`inline-block px-2 py-0.5 rounded border text-[10px] font-semibold ${txBg[log.transaction_type]} ${txColor[log.transaction_type]}`}>
-                      {log.transaction_type}
+                      {t(`logs.typeName.${log.transaction_type}`)}
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-text-primary font-medium">{log.product_name}</td>
+                  <td className="px-4 py-2.5 text-text-secondary font-mono">{log.product_sku || '-'}</td>
                   <td className="px-4 py-2.5 text-text-secondary font-mono">{log.batch_number || '-'}</td>
-                  <td className={`px-4 py-2.5 text-right font-bold ${log.quantity_change >= 0 ? 'text-success' : 'text-error'}`}>
-                    {log.quantity_change >= 0 ? '+' : ''}{log.quantity_change}
-                  </td>
                   <td className="px-4 py-2.5 text-text-secondary">
                     {log.provider_name ? `${log.provider_name}${log.provider_sub ? ` - ${log.provider_sub}` : ''}` : '-'}
                   </td>
-                  <td className="px-4 py-2.5 text-text-secondary truncate max-w-[200px]">{log.notes || '-'}</td>
                 </tr>
               ))}
             </tbody>
