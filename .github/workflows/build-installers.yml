@@ -57,3 +57,65 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build mobile APK
+        env:
+          VITE_FORM_FACTOR: mobile
+        run: pnpm tauri android build
+
+      - name: Stage mobile APK
+        run: |
+          mkdir -p apk-mobile
+          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp {} apk-mobile/ \;
+
+      - name: Build tablet APK
+        env:
+          VITE_FORM_FACTOR: tablet
+        run: pnpm tauri android build
+
+      - name: Stage tablet APK
+        run: |
+          mkdir -p apk-tablet
+          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp {} apk-tablet/ \;
+
+      - name: Upload mobile APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-mobile
+          path: apk-mobile
+          if-no-files-found: error
+
+      - name: Upload tablet APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-tablet
+          path: apk-tablet
+          if-no-files-found: error

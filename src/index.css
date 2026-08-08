@@ -275,3 +275,31 @@ textarea {
 .help-icon-anim:hover {
   animation-play-state: paused;
 }
+
+/* -------- Platform form-factor adjustments -------- */
+html[data-form-factor='mobile'] {
+  font-size: 15px;
+}
+
+html[data-form-factor='mobile'] .workspace-hero,
+html[data-form-factor='tablet'] .workspace-hero {
+  padding-left: 1.25rem !important;
+  padding-right: 1.25rem !important;
+}
+
+html[data-form-factor='mobile'] .workspace-hero > div,
+html[data-form-factor='tablet'] .workspace-hero > div,
+html[data-form-factor='mobile'] .workspace-hero .flex.items-center,
+html[data-form-factor='tablet'] .workspace-hero .flex.items-center {
+  gap: 0.75rem !important;
+}
+
+html[data-form-factor='mobile'] .theme-art {
+  opacity: 0.55;
+}
+
+html[data-form-factor='mobile'] ::-webkit-scrollbar,
+html[data-form-factor='tablet'] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}

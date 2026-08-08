@@ -1,5 +1,6 @@
 import { Fragment, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { open, save } from '@tauri-apps/plugin-dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Database,
   FolderOpen,
@@ -21,6 +22,10 @@ import {
   History,
   Settings as SettingsIcon,
   HelpCircle,
+  ChevronLeft,
+  UploadCloud,
+  FilePlus2,
+  Share2,
 } from 'lucide-react';
 
 import Sidebar from './components/Sidebar';
@@ -41,10 +46,11 @@ import CategoryManager from './components/inventory/CategoryManager';
 import Reports from './components/inventory/Reports';
 import TransactionHistory from './components/inventory/TransactionHistory';
 import Workspace from './components/Workspace';
-import { openDatabase, closeDatabase, createNewDatabase, migrateSchema, savePreferences, loadPreferences } from './lib/db';
+import { openDatabase, closeDatabase, createNewDatabase, migrateSchema, savePreferences, loadPreferences, getDatabasePath, mobileImportDatabase, mobileCreateDatabase, mobileExportDatabase } from './lib/db';
 import { savePreset, loadPreset } from './lib/presets';
 import { t as translate, resolveLang } from './lib/i18n';
 import { I18nProvider } from './lib/language';
+import { isAndroid, applyFormFactor } from './lib/platform';
 import type { QueryResult, PresetData, ViewMode, AppPreferences } from './types';
 import { DEFAULT_TABS } from './types';
 import type { Product } from './components/inventory/ProductGallery';
@@ -96,9 +102,10 @@ const ALL_TABS: { mode: ViewMode; labelKey: string }[] = [
 ];
 
 export default function App() {
+  const isMobile = isAndroid();
   const [isConnected, setIsConnected] = useState(false);
   const [dbPath, setDbPath] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('canvas');
+  const [viewMode, setViewMode] = useState<ViewMode>(isMobile ? 'workspace' : 'canvas');
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentSql, setCurrentSql] = useState('SELECT * FROM ');
@@ -112,6 +119,43 @@ export default function App() {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const suppressClickRef = useRef(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
+  const [mobileCreateName, setMobileCreateName] = useState('wine_inventory');
+  const [mobileError, setMobileError] = useState<string | null>(null);
+  const [mobileBusy, setMobileBusy] = useState(false);
+  const viewModeRef = useRef<ViewMode>(viewMode);
+
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+  }, [viewMode]);
+
+useEffect(() => {
+    applyFormFactor();
+  }, []);
+
+  const goBack = useCallback((): boolean => {
+    if (viewModeRef.current !== 'workspace') {
+      setViewMode('workspace');
+      setMobileError(null);
+      return true;
+    }
+    return false;
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        if (goBack()) event.preventDefault();
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [isMobile, goBack]);
 
   const isTabEnabled = (mode: string) => {
     if (mode === 'settings') return true;
@@ -297,6 +341,24 @@ export default function App() {
   }, []);
 
   const handleOpenFile = useCallback(async () => {
+    if (isMobile) {
+      setMobileError(null);
+      setMobileBusy(true);
+      try {
+        const path = await mobileImportDatabase('dbreader.db');
+        await openDatabase(path);
+        await migrateSchema().catch(() => {});
+        setIsConnected(true);
+        setDbPath(path);
+        setPrefs((p) => ({ ...p, lastDbPath: path }));
+        setViewMode('workspace');
+      } catch (err) {
+        setMobileError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setMobileBusy(false);
+      }
+      return;
+    }
     const selected = await open({
       multiple: false,
       filters: [
@@ -318,9 +380,15 @@ export default function App() {
     } catch (err) {
       console.error('Failed to open database:', err);
     }
-  }, []);
+  }, [isMobile]);
 
   const handleCreateNew = useCallback(async () => {
+    if (isMobile) {
+      setMobileCreateName('wine_inventory');
+      setMobileError(null);
+      setMobileCreateOpen(true);
+      return;
+    }
     const path = await save({
       defaultPath: 'wine_inventory.db',
       filters: [
@@ -340,6 +408,43 @@ export default function App() {
       setPrefs((p) => ({ ...p, lastDbPath: path }));
     } catch (err) {
       console.error('Failed to create database:', err);
+    }
+  }, [isMobile]);
+
+  const handleMobileCreateConfirm = useCallback(async () => {
+    const name = mobileCreateName.trim() || 'wine_inventory';
+    setMobileBusy(true);
+    setMobileError(null);
+    try {
+      await mobileCreateDatabase(name);
+      const currentPath = await getDatabasePath();
+      setIsConnected(true);
+      setDbPath(currentPath);
+      setPrefs((p) => ({ ...p, lastDbPath: currentPath }));
+      setMobileCreateOpen(false);
+      setViewMode('workspace');
+    } catch (e) {
+      setMobileError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMobileBusy(false);
+    }
+  }, [mobileCreateName]);
+
+  const handleMobileExport = useCallback(async () => {
+    setMobileError(null);
+    setMobileBusy(true);
+    try {
+      const currentPath = await getDatabasePath();
+      if (!currentPath) {
+        setMobileError('No database opened');
+        return;
+      }
+      const fileName = currentPath.split('/').pop() || 'dbreader.db';
+      await mobileExportDatabase(currentPath, fileName);
+    } catch (e) {
+      setMobileError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMobileBusy(false);
     }
   }, []);
 
@@ -375,6 +480,7 @@ export default function App() {
     <I18nProvider language={prefs.language}>
       <div className="h-screen flex flex-col bg-bg-primary text-text-primary">
       {/* Header */}
+      {!isMobile && (
       <header className="flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary shrink-0 min-w-0">
         <div className="flex items-center gap-2 shrink-0">
           <Database size={18} className="text-accent" />
@@ -499,11 +605,12 @@ export default function App() {
           </div>
         )}
       </header>
+      )}
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar - only for canvas/query modes */}
-        {sidebarOpen && isConnected && (viewMode === 'canvas' || viewMode === 'query') && (
+        {!isMobile && sidebarOpen && isConnected && (viewMode === 'canvas' || viewMode === 'query') && (
           <div className="w-64 border-r border-border bg-bg-secondary shrink-0 overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-border">
               <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
@@ -528,7 +635,7 @@ export default function App() {
           </div>
         )}
 
-        {!sidebarOpen && isConnected && (viewMode === 'canvas' || viewMode === 'query') && (
+        {!isMobile && !sidebarOpen && isConnected && (viewMode === 'canvas' || viewMode === 'query') && (
           <button
             onClick={() => setSidebarOpen(true)}
             className="w-8 border-r border-border bg-bg-secondary hover:bg-bg-hover flex items-center justify-center shrink-0 transition-colors"
@@ -539,6 +646,42 @@ export default function App() {
 
         {/* Center area */}
         <div className="flex-1 flex flex-col overflow-hidden relative">
+          {isMobile && (
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-secondary shrink-0">
+              {viewMode !== 'workspace' ? (
+                <button
+                  onClick={goBack}
+                  className="flex items-center justify-center w-8 h-8 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-text-primary transition-colors shrink-0"
+                  aria-label="Back"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Database size={15} className="text-accent" />
+                  <h1 className="text-sm font-bold tracking-tight">DBReader</h1>
+                </div>
+              )}
+              <div className="flex-1 min-w-0 text-right">
+                {isConnected && (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-success/10 border border-success/20 rounded-md text-[11px] text-success max-w-full truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse shrink-0" />
+                    <span className="truncate">{dbPath?.split('/').pop() || ''}</span>
+                  </span>
+                )}
+              </div>
+              {isConnected && (
+                <button
+                  onClick={handleMobileExport}
+                  disabled={mobileBusy}
+                  className="flex items-center justify-center w-8 h-8 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-text-secondary hover:text-text-primary transition-colors shrink-0"
+                  aria-label="Export database"
+                >
+                  <Share2 size={14} />
+                </button>
+              )}
+            </div>
+          )}
           <div className={viewMode === 'canvas' ? 'flex-1 overflow-hidden' : 'hidden'}>
             <Canvas isConnected={isConnected} dbPath={dbPath} />
           </div>
@@ -587,7 +730,7 @@ export default function App() {
           {viewMode === 'logs' && <InventoryLog />}
           {viewMode === 'txhistory' && <TransactionHistory />}
           {viewMode === 'reports' && <Reports currencySymbol={prefs.currencySymbol} />}
-          {viewMode === 'workspace' && (
+          {viewMode === 'workspace' && !isMobile && (
             <Workspace
               tabs={launcherTabs}
               theme={prefs.theme}
@@ -607,6 +750,99 @@ export default function App() {
               }}
             />
           )}
+          {viewMode === 'workspace' && isMobile && (
+            <> 
+              {!isConnected && !initializing ? (
+                <div className="flex-1 overflow-y-auto">
+                  <div className="max-w-md mx-auto px-5 py-10 flex flex-col items-center text-center">
+                    <div className="w-20 h-20 rounded-2xl bg-accent/15 border border-accent/30 flex items-center justify-center mb-5">
+                      <Database size={36} className="text-accent" />
+                    </div>
+                    <h2 className="text-lg font-bold text-text-primary mb-1">DBReader</h2>
+                    <p className="text-sm text-text-secondary mb-8 leading-relaxed">
+                      {t('welcome.tagline')}
+                    </p>
+                    <p className="text-xs text-text-secondary mb-4">
+                      To get started, import an existing database file or create a new one.
+                    </p>
+                    {mobileError && (
+                      <div className="w-full mb-3 px-3 py-2 bg-error/10 border border-error/30 rounded-md text-xs text-error text-left break-words">
+                        {mobileError}
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-3 w-full max-w-[260px]">
+                      <button
+                        onClick={handleOpenFile}
+                        disabled={mobileBusy}
+                        className="flex items-center justify-center gap-2 px-4 py-3 bg-accent hover:bg-accent-hover rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-50"
+                      >
+                        <UploadCloud size={16} />
+                        {t('welcome.open')}
+                      </button>
+                      <button
+                        onClick={handleCreateNew}
+                        disabled={mobileBusy}
+                        className="flex items-center justify-center gap-2 px-4 py-3 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-xl text-sm font-medium text-accent transition-colors disabled:opacity-50"
+                      >
+                        <FilePlus2 size={16} />
+                        {t('welcome.create')}
+                      </button>
+                      {mobileBusy && (
+                        <span className="text-xs text-text-secondary animate-pulse">Working…</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto">
+                  <Workspace
+                    tabs={launcherTabs}
+                    theme={prefs.theme}
+                    onNavigate={(mode) => {
+                      if (!isTabEnabled(mode)) {
+                        const all = ALL_TABS.map((x) => x.mode);
+                        const enabledSet = new Set(prefs.enabledTabs ?? all);
+                        enabledSet.add(mode);
+                        const next = all.filter((m) => enabledSet.has(m));
+                        setPrefs((p) => ({ ...p, enabledTabs: next.length === all.length ? null : next }));
+                      }
+                      setViewMode(mode as ViewMode);
+                    }}
+                  />
+                  <div className="px-4 pb-8">
+                    <div className="grid grid-cols-3 gap-3">
+                      <button
+                        onClick={() => setViewMode('settings')}
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl bg-bg-secondary border border-border hover:bg-bg-hover transition-colors"
+                      >
+                        <SettingsIcon size={22} className="text-text-secondary" />
+                        <span className="text-xs text-text-secondary">{t('app.settings')}</span>
+                      </button>
+                      <button
+                        onClick={() => setHelpOpen(true)}
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl bg-bg-secondary border border-border hover:bg-bg-hover transition-colors"
+                      >
+                        <HelpCircle size={22} className="text-text-secondary" />
+                        <span className="text-xs text-text-secondary">{t('app.help')}</span>
+                      </button>
+                      <button
+                        onClick={handleClose}
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl bg-bg-secondary border border-border hover:bg-bg-hover transition-colors"
+                      >
+                        <X size={22} className="text-text-secondary" />
+                        <span className="text-xs text-text-secondary">Close database</span>
+                      </button>
+                    </div>
+                    {mobileError && (
+                      <div className="mt-3 px-3 py-2 bg-error/10 border border-error/30 rounded-md text-xs text-error break-words">
+                        {mobileError}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
           {viewMode === 'settings' && (
             <SettingsView
               prefs={prefs}
@@ -619,7 +855,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Welcome overlay */}      {!isConnected && viewMode === 'canvas' && !initializing && (
+      {/* Welcome overlay */}      {!isMobile && !initializing && !isConnected && viewMode === 'canvas' && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="text-center pointer-events-auto">
             <Database size={64} className="mx-auto mb-4 text-text-secondary/30" />
@@ -647,6 +883,50 @@ export default function App() {
       </div>
 
       <HelpChat open={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      {isMobile && mobileCreateOpen && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 px-6">
+          <div className="w-full max-w-sm rounded-2xl bg-bg-secondary border border-border p-5">
+            <h3 className="text-base font-bold text-text-primary mb-1">
+              {t('welcome.create')}
+            </h3>
+            <p className="text-xs text-text-secondary mb-4">
+              A new inventory database will be created on this device.
+            </p>
+            <label className="block text-xs text-text-secondary mb-1.5">Database name</label>
+            <input
+              value={mobileCreateName}
+              onChange={(e) => setMobileCreateName(e.target.value)}
+              placeholder="wine_inventory"
+              autoFocus
+              className="w-full px-3 py-2 bg-bg-tertiary border border-border rounded-md text-sm text-text-primary outline-none focus:border-accent mb-4"
+            />
+            {mobileError && (
+              <div className="mb-3 px-3 py-2 bg-error/10 border border-error/30 rounded-md text-xs text-error break-words">
+                {mobileError}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setMobileCreateOpen(false);
+                  setMobileError(null);
+                }}
+                className="flex-1 px-3 py-2.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-lg text-sm text-text-secondary transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMobileCreateConfirm}
+                disabled={mobileBusy}
+                className="flex-1 px-3 py-2.5 bg-accent hover:bg-accent-hover rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+              >
+                {mobileBusy ? 'Creating…' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </I18nProvider>
   );
 }

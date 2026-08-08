@@ -185,3 +185,19 @@ export async function loadPreferences(): Promise<AppPreferences> {
 export async function printReport(html: string, savePath?: string): Promise<void> {
   return invoke<void>('print_report', { html, savePath });
 }
+
+export async function mobileImportDatabase(fileName: string): Promise<string> {
+  const path = await invoke<string>('plugin:file-bridge|copy_uri_to_cache', {
+    uri: '',
+    file_name: fileName,
+  });
+  return path;
+}
+
+export async function mobileCreateDatabase(name: string): Promise<TableInfo> {
+  return invoke<TableInfo>('mobile_create_database', { name });
+}
+
+export async function mobileExportDatabase(path: string, fileName: string): Promise<void> {
+  return invoke<void>('plugin:file-bridge|export_to_document', { path, file_name: fileName });
+}

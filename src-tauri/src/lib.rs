@@ -462,6 +462,22 @@ fn create_new_database(path: String, state: State<DbState>, app: tauri::AppHandl
 }
 
 #[tauri::command]
+fn mobile_create_database(name: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
+    #[cfg(target_os = "android")]
+    {
+        let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(dir.join("databases")).map_err(|e| e.to_string())?;
+        let path = dir.join("databases").join(format!("{}.db", name));
+        create_new_database(path.display().to_string(), state, app)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (name, state, app);
+        Err("Creating databases is not supported on desktop".into())
+    }
+}
+
+#[tauri::command]
 fn get_schema(state: State<DbState>) -> Result<TableInfo, String> {
     with_conn(&state, |conn| {
         let tables = get_tables_internal(conn)?;
@@ -1187,26 +1203,43 @@ impl Default for AppPreferences {
     }
 }
 
-fn prefs_path() -> Result<std::path::PathBuf, String> {
+fn prefs_desktop_path() -> Result<std::path::PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map_err(|_| "Cannot find HOME/USERPROFILE".to_string())?;
     Ok(std::path::PathBuf::from(home).join(".dbreader-state.json"))
 }
 
+fn prefs_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "android")]
+    {
+        let dir = app
+            .path()
+            .app_config_dir()
+            .map_err(|e| format!("Cannot find app config dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        Ok(dir.join(".dbreader-state.json"))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        prefs_desktop_path()
+    }
+}
+
 #[tauri::command]
-fn save_preferences(prefs: AppPreferences) -> Result<(), String> {
+fn save_preferences(app: tauri::AppHandle, prefs: AppPreferences) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?;
-    std::fs::write(prefs_path()?, json).map_err(|e| e.to_string())
+    std::fs::write(prefs_path(&app)?, json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn load_preferences() -> Result<AppPreferences, String> {
-    load_prefs_internal()
+fn load_preferences(app: tauri::AppHandle) -> Result<AppPreferences, String> {
+    load_prefs_internal(&app)
 }
 
-fn load_prefs_internal() -> Result<AppPreferences, String> {
-    let path = prefs_path()?;
+fn load_prefs_internal(app: &tauri::AppHandle) -> Result<AppPreferences, String> {
+    let path = prefs_path(app)?;
     if !path.exists() {
         return Ok(AppPreferences::default());
     }
@@ -1310,15 +1343,15 @@ fn slot_due_index(prefs: &AppPreferences) -> Option<usize> {
     None
 }
 
-fn mark_slot_fired(idx: usize) {
+fn mark_slot_fired(app: &tauri::AppHandle, idx: usize) {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let Ok(mut prefs) = load_prefs_internal() else { return };
+    let Ok(mut prefs) = load_prefs_internal(app) else { return };
     if let Some(slots) = prefs.email_slots.as_mut() {
         if let Some(slot) = slots.get_mut(idx) {
             slot.last_fired = Some(today);
         }
     }
-    let _ = save_preferences(prefs);
+    let _ = save_preferences(app.clone(), prefs);
 }
 
 fn send_alert_email(prefs: &AppPreferences, subject: String, html: String) -> Result<(), String> {
@@ -1388,7 +1421,7 @@ fn email_check(app: &tauri::AppHandle, force: bool) {
 }
 
 fn do_email_check(app: &tauri::AppHandle, force: bool) -> String {
-    let prefs = match load_prefs_internal() {
+    let prefs = match load_prefs_internal(app) {
         Ok(p) => p,
         Err(e) => return format!("Failed to load preferences: {}", e),
     };
@@ -1425,7 +1458,7 @@ fn do_email_check(app: &tauri::AppHandle, force: bool) -> String {
     match send_alert_email(&prefs, subject, html) {
         Ok(()) => {
             if let Some(idx) = fired_index {
-                mark_slot_fired(idx);
+                mark_slot_fired(app, idx);
             }
             format!("sent ({})", items.len())
         }
@@ -1438,7 +1471,7 @@ fn check_stock_alerts(app: tauri::AppHandle) -> Result<(), String> {
     let handle = app.clone();
     std::thread::spawn(move || {
         email_check(&handle, true);
-        let prefs = match load_prefs_internal() {
+        let prefs = match load_prefs_internal(&handle) {
             Ok(p) => p,
             Err(_) => return,
         };
@@ -1465,8 +1498,8 @@ fn check_stock_alerts(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn test_email_connection() -> Result<String, String> {
-    let prefs = load_prefs_internal()?;
+fn test_email_connection(app: tauri::AppHandle) -> Result<String, String> {
+    let prefs = load_prefs_internal(&app)?;
     if !prefs.email_alerts_enabled.unwrap_or(false) {
         return Err("Email alerts are disabled in settings".into());
     }
@@ -1507,7 +1540,7 @@ fn send_notification(app: &tauri::AppHandle, body: &str) {
 }
 
 fn notification_check(app: &tauri::AppHandle) {
-    let prefs = match load_prefs_internal() {
+    let prefs = match load_prefs_internal(app) {
         Ok(p) => p,
         Err(_) => return,
     };
@@ -2071,7 +2104,7 @@ mod tests {
     fn test_preferences_path_format() {
         let home = std::env::var("HOME").unwrap();
         let expected = std::path::PathBuf::from(&home).join(".dbreader-state.json");
-        assert_eq!(prefs_path().unwrap(), expected);
+        assert_eq!(prefs_desktop_path().unwrap(), expected);
     }
 
     #[test]
@@ -2148,6 +2181,11 @@ fn print_report(
     html: String,
     save_path: Option<String>,
 ) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, html, save_path);
+        return Err("Printing is not supported on Android".into());
+    }
     plog(&format!("print_report: save_path={}", save_path.as_deref().unwrap_or("none")));
     {
         let state = app.state::<PrintState>();
@@ -2176,6 +2214,11 @@ fn print_report(
 
 #[tauri::command]
 fn get_print_html(app: tauri::AppHandle) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        return Err("Printing is not supported on Android".into());
+    }
     let state = app.state::<PrintState>();
     let html = state.0.lock().unwrap().html.clone();
     html.ok_or_else(|| "no print html pending".into())
@@ -2183,6 +2226,11 @@ fn get_print_html(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, width, height);
+        return Err("printing resizing is not supported on Android".into());
+    }
     if let Some(win) = app.get_webview_window("print-window") {
         let h = height.clamp(400.0, 20000.0);
         win.set_size(tauri::LogicalSize::new(width, h))
@@ -2200,6 +2248,11 @@ fn take_print_path(app: &tauri::AppHandle) -> Option<String> {
 
 #[tauri::command]
 async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        return Err("Printing is not supported on Android".into());
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -2341,7 +2394,7 @@ Err(e) => {
         }
         result
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
     {
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let app_for_thread = app.clone();
@@ -2361,6 +2414,11 @@ Err(e) => {
 
 #[tauri::command]
 fn close_print_window(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        return Ok(());
+    }
     if let Some(win) = app.get_webview_window("print-window") {
         win.close().map_err(|e| e.to_string())
     } else {
@@ -2370,6 +2428,11 @@ fn close_print_window(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn set_launch_at_login(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = enabled;
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var("HOME").map_err(|e| e.to_string())?;
@@ -2422,7 +2485,7 @@ fn set_launch_at_login(enabled: bool) -> Result<(), String> {
             Err(String::from_utf8_lossy(&out.stderr).into_owned())
         }
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
     {
         Ok(())
     }
@@ -2458,16 +2521,10 @@ fn tray_icon_image() -> tauri::image::Image<'static> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let start_hidden = std::env::args().any(|a| a == "--background");
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.set_focus();
-            }
-        }))
         .manage(DbState {
             inner: Mutex::new(InnerState {
                 conn: None,
@@ -2476,7 +2533,23 @@ pub fn run() {
         })
         .manage(PrintState(Mutex::new(Default::default())))
         .manage(EmailState(Mutex::new("No check performed yet".into())))
-        .manage(NotificationState(Mutex::new(None)))
+        .manage(NotificationState(Mutex::new(None)));
+
+    #[cfg(target_os = "android")]
+    {
+        builder = builder.plugin(file_bridge::init());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }));
+    }
+
+    builder
         .invoke_handler(tauri::generate_handler![
             open_database,
             print_report,
@@ -2485,6 +2558,7 @@ pub fn run() {
             print_ready,
             close_print_window,
             create_new_database,
+            mobile_create_database,
             get_schema,
             get_tables,
             get_table_columns,
@@ -2525,11 +2599,18 @@ pub fn run() {
             set_launch_at_login,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
+            #[cfg(not(target_os = "android"))]
+            {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if window.label() == "main" {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
+            }
+            #[cfg(target_os = "android")]
+            {
+                let _ = (window, event);
             }
         })
         .setup(move |app| {
@@ -2545,31 +2626,34 @@ pub fn run() {
                 notification_check(&handle);
             });
 
-            use tauri::menu::{Menu, MenuItem};
-            use tauri::tray::TrayIconBuilder;
-            let show_i = MenuItem::with_id(app, "show", "Open DBReader", true, None::<&str>)
-                .map_err(|e| e.to_string())?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit DBReader", true, None::<&str>)
-                .map_err(|e| e.to_string())?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i]).map_err(|e| e.to_string())?;
-            let _tray = TrayIconBuilder::new()
-                .icon(tray_icon_image())
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.show();
-                            let _ = win.set_focus();
+            #[cfg(not(target_os = "android"))]
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::TrayIconBuilder;
+                let show_i = MenuItem::with_id(app, "show", "Open DBReader", true, None::<&str>)
+                    .map_err(|e| e.to_string())?;
+                let quit_i = MenuItem::with_id(app, "quit", "Quit DBReader", true, None::<&str>)
+                    .map_err(|e| e.to_string())?;
+                let menu = Menu::with_items(app, &[&show_i, &quit_i]).map_err(|e| e.to_string())?;
+                let _tray = TrayIconBuilder::new()
+                    .icon(tray_icon_image())
+                    .menu(&menu)
+                    .show_menu_on_left_click(true)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => {
+                            if let Some(win) = app.get_webview_window("main") {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
                         }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .build(app)
-                .map_err(|e| e.to_string())?;
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .build(app)
+                    .map_err(|e| e.to_string())?;
+            }
 
             if start_hidden {
                 if let Some(win) = app.get_webview_window("main") {

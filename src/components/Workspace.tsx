@@ -167,16 +167,17 @@ function GoldSparkleArt() {
   );
 }
 
-function ThemeArt({ theme }: { theme: string }) {
+function ThemeArt({ classNames, theme }: { classNames?: string; theme: string }) {
+  const cls = classNames ?? '';
   switch (theme) {
-    case 'forest': return <ForestArt />;
-    case 'lava': return <LavaArt />;
-    case 'gold': return <GoldSparkleArt />;
-    case 'ocean': return <OceanArt />;
-    case 'sunset': return <SunsetArt />;
-    case 'midnight': return <MidnightArt />;
-    case 'aurora': return <AuroraArt />;
-    case 'candy': return <CandyArt />;
+    case 'forest': return <div className={cls}><ForestArt /></div>;
+    case 'lava': return <div className={cls}><LavaArt /></div>;
+    case 'gold': return <div className={cls}><GoldSparkleArt /></div>;
+    case 'ocean': return <div className={cls}><OceanArt /></div>;
+    case 'sunset': return <div className={cls}><SunsetArt /></div>;
+    case 'midnight': return <div className={cls}><MidnightArt /></div>;
+    case 'aurora': return <div className={cls}><AuroraArt /></div>;
+    case 'candy': return <div className={cls}><CandyArt /></div>;
     default: return null;
   }
 }
@@ -190,8 +191,8 @@ export default function Workspace({ tabs, onNavigate, theme }: WorkspaceProps) {
   }, []);
   return (
     <div className="flex-1 overflow-y-auto bg-bg-primary text-text-primary">
-      <div className={`relative overflow-hidden bg-gradient-to-br ${gradient}`}>
-        <ThemeArt theme={theme} />
+      <div className={`workspace-hero relative overflow-hidden bg-gradient-to-br ${gradient}`}>
+        <ThemeArt classNames="theme-art" theme={theme} />
         <div className="relative flex items-center justify-between px-10 py-8">
           <div className="flex items-center gap-5">
             <div className="w-16 h-16 rounded-2xl bg-white/15 backdrop-blur-sm border border-white/20 shadow-lg grid place-items-center">
