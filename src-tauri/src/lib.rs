@@ -2194,7 +2194,8 @@ fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result
 
 fn take_print_path(app: &tauri::AppHandle) -> Option<String> {
     let state = app.state::<PrintState>();
-    state.0.lock().unwrap().save_path.clone()
+    let inner = state.0.lock().unwrap();
+    inner.save_path.clone()
 }
 
 #[tauri::command]
