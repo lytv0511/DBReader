@@ -91,11 +91,6 @@ jobs:
           VITE_FORM_FACTOR: mobile
         run: pnpm tauri android build
 
-      - name: Build tablet APK
-        env:
-          VITE_FORM_FACTOR: tablet
-        run: pnpm tauri android build
-
       - name: Sign mobile APK
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -112,6 +107,11 @@ jobs:
             --out apk-mobile/DBReader-mobile.apk /tmp/aligned.apk
           "$BT/apksigner" verify --print-certs apk-mobile/DBReader-mobile.apk
           rm -f /tmp/dbreader-release.keystore /tmp/aligned.apk
+
+      - name: Build tablet APK
+        env:
+          VITE_FORM_FACTOR: tablet
+        run: pnpm tauri android build
 
       - name: Sign tablet APK
         env:
