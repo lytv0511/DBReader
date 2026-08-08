@@ -91,20 +91,44 @@ jobs:
           VITE_FORM_FACTOR: mobile
         run: pnpm tauri android build
 
-      - name: Stage mobile APK
-        run: |
-          mkdir -p apk-mobile
-          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp {} apk-mobile/ \;
-
       - name: Build tablet APK
         env:
           VITE_FORM_FACTOR: tablet
         run: pnpm tauri android build
 
-      - name: Stage tablet APK
+      - name: Sign mobile APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/dbreader-release.keystore
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | tail -1)
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
+          mkdir -p apk-mobile
+          "$BT/zipalign" -f -p 4 "$APK" /tmp/aligned.apk
+          "$BT/apksigner" sign --ks /tmp/dbreader-release.keystore --ks-key-alias dbreader \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEYSTORE_PASSWORD" \
+            --out apk-mobile/DBReader-mobile.apk /tmp/aligned.apk
+          "$BT/apksigner" verify --print-certs apk-mobile/DBReader-mobile.apk
+          rm -f /tmp/dbreader-release.keystore /tmp/aligned.apk
+
+      - name: Sign tablet APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/dbreader-release.keystore
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | tail -1)
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
           mkdir -p apk-tablet
-          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp {} apk-tablet/ \;
+          "$BT/zipalign" -f -p 4 "$APK" /tmp/aligned.apk
+          "$BT/apksigner" sign --ks /tmp/dbreader-release.keystore --ks-key-alias dbreader \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEYSTORE_PASSWORD" \
+            --out apk-tablet/DBReader-tablet.apk /tmp/aligned.apk
+          "$BT/apksigner" verify --print-certs apk-tablet/DBReader-tablet.apk
+          rm -f /tmp/dbreader-release.keystore /tmp/aligned.apk
 
       - name: Upload mobile APK
         uses: actions/upload-artifact@v4
