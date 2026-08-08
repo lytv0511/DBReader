@@ -39,7 +39,7 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 }
 
 #[tauri::command]
-fn copy_uri_to_cache(
+async fn copy_uri_to_cache(
     uri: String,
     file_name: String,
     app: tauri::AppHandle,
@@ -53,14 +53,16 @@ fn copy_uri_to_cache(
             .unwrap()
             .clone()
             .ok_or("file-bridge plugin not started")?;
+        drop(state);
         let response: CopyResponse = handle
-            .run_mobile_plugin(
+            .run_mobile_plugin_async(
                 "copyToCache",
                 CopyArgs {
                     uri: &uri,
                     file_name: &file_name,
                 },
             )
+            .await
             .map_err(|e| e.to_string())?;
         response.path.ok_or_else(|| "Copy failed, no path returned".into())
     }
@@ -72,7 +74,7 @@ fn copy_uri_to_cache(
 }
 
 #[tauri::command]
-fn export_to_document(
+async fn export_to_document(
     path: String,
     file_name: String,
     app: tauri::AppHandle,
@@ -86,14 +88,16 @@ fn export_to_document(
             .unwrap()
             .clone()
             .ok_or("file-bridge plugin not started")?;
+        drop(state);
         handle
-            .run_mobile_plugin::<serde_json::Value>(
+            .run_mobile_plugin_async::<serde_json::Value>(
                 "exportDocument",
                 CopyArgs {
                     uri: &path,
                     file_name: &file_name,
                 },
             )
+            .await
             .map_err(|e| e.to_string())?;
         Ok(())
     }
