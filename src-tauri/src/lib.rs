@@ -2167,7 +2167,7 @@ fn print_report(
         .title("DBReader Report")
         .inner_size(800.0, 1000.0);
         #[cfg(target_os = "windows")]
-        let builder = builder.position(tauri::LogicalPosition::new(40000.0, 40000.0));
+        let builder = builder.position(40000.0, 40000.0);
         let win = builder.build().map_err(|e| e.to_string())?;
         let _ = win.set_focus();
     }
@@ -2201,7 +2201,7 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
         use webview2_com_sys::Microsoft::Web::WebView2::Win32::{
             ICoreWebView2Environment6, ICoreWebView2PrintSettings,
             ICoreWebView2PrintToPdfCompletedHandler, ICoreWebView2PrintToPdfCompletedHandler_Impl,
-            ICoreWebView2_7,
+            ICoreWebView2_19, ICoreWebView2_7,
         };
         use windows_core::{implement, BOOL, HRESULT, PCWSTR};
 
@@ -2218,7 +2218,8 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
             }
             return Ok(());
         };
-        let path_wide: Vec<u16> = path
+        let path_wide: Vec<u16> = std::path::Path::new(&path)
+            .as_os_str()
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
@@ -2270,8 +2271,12 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
                             return;
                         }
                     };
-                    let settings: Option<ICoreWebView2PrintSettings> = match core.Environment() {
-                        Ok(env) => match env.cast::<ICoreWebView2Environment6>() {
+                    let settings: Option<ICoreWebView2PrintSettings> = match core
+                        .cast::<ICoreWebView2_19>()
+                        .ok()
+                        .and_then(|v19| v19.Environment().ok())
+                    {
+                        Some(env) => match env.cast::<ICoreWebView2Environment6>() {
                             Ok(env6) => match env6.CreatePrintSettings() {
                                 Ok(s) => {
                                     let _ = s.SetPageWidth(210.0 / 25.4);
@@ -2289,13 +2294,13 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
                                     None
                                 }
                             },
-                            Err(e) => {
-                                plog(&format!("Environment6 cast failed: {e:?}"));
+Err(e) => {
+                                plog(&format!("Environment failed: {e:?}"));
                                 None
                             }
                         },
-                        Err(e) => {
-                            plog(&format!("Environment failed: {e:?}"));
+                        None => {
+                            plog("Environment (core 19) unavailable");
                             None
                         }
                     };
