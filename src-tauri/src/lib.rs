@@ -2192,6 +2192,11 @@ fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result
     }
 }
 
+fn take_print_path(app: &tauri::AppHandle) -> Option<String> {
+    let state = app.state::<PrintState>();
+    state.0.lock().unwrap().save_path.clone()
+}
+
 #[tauri::command]
 async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -2207,10 +2212,7 @@ async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
 
         plog("print_ready: begin");
 
-        let save_path = {
-            let state = app.state::<PrintState>();
-            state.0.lock().unwrap().save_path.clone()
-        };
+        let save_path = take_print_path(&app);
         let Some(path) = save_path else {
             plog("print_ready: no save path, closing window");
             if let Some(win) = app.get_webview_window("print-window") {
