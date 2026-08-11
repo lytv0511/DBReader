@@ -232,9 +232,9 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
   }
 
   return (
-    <div className="h-full flex overflow-hidden">
+    <div className="h-full flex flex-col sm:flex-row overflow-hidden">
       {/* Left: Adjust form */}
-      <div className="w-[420px] border-r border-border bg-bg-secondary flex flex-col shrink-0 overflow-y-auto">
+      <div className="w-full sm:w-[420px] border-b sm:border-b-0 sm:border-r border-border bg-bg-secondary flex flex-col shrink-0 max-h-[55%] sm:max-h-none overflow-y-auto">
         <div className="px-5 py-4 border-b border-border">
           <h2 className="text-base font-bold text-text-primary">{t('adjust.title')}</h2>
           <p className="text-xs text-text-secondary mt-0.5">{t('adjust.subtitle')}</p>

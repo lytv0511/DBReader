@@ -6,6 +6,7 @@ interface WorkspaceProps {
   tabs: { mode: string; label: string; icon: React.ReactNode; enabled: boolean }[];
   onNavigate: (mode: string) => void;
   theme: ThemeMode;
+  isMobile?: boolean;
 }
 
 const THEME_GRADIENTS: Record<string, string> = {
@@ -182,7 +183,7 @@ function ThemeArt({ classNames, theme }: { classNames?: string; theme: string })
   }
 }
 
-export default function Workspace({ tabs, onNavigate, theme }: WorkspaceProps) {
+export default function Workspace({ tabs, onNavigate, theme, isMobile }: WorkspaceProps) {
   const gradient = THEME_GRADIENTS[theme] ?? THEME_GRADIENTS.dark;
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -191,28 +192,30 @@ export default function Workspace({ tabs, onNavigate, theme }: WorkspaceProps) {
   }, []);
   return (
     <div className="flex-1 overflow-y-auto bg-bg-primary text-text-primary">
-      <div className={`workspace-hero relative overflow-hidden bg-gradient-to-br ${gradient}`}>
-        <ThemeArt classNames="theme-art" theme={theme} />
-        <div className="relative flex items-center justify-between px-10 py-8">
-          <div className="flex items-center gap-5">
-            <div className="w-16 h-16 rounded-2xl bg-white/15 backdrop-blur-sm border border-white/20 shadow-lg grid place-items-center">
-              <Database size={34} className="text-white" />
+      {!isMobile && (
+        <div className={`workspace-hero relative overflow-hidden bg-gradient-to-br ${gradient}`}>
+          <ThemeArt classNames="theme-art" theme={theme} />
+          <div className="relative flex items-center justify-between px-10 py-8">
+            <div className="flex items-center gap-5">
+              <div className="w-16 h-16 rounded-2xl bg-white/15 backdrop-blur-sm border border-white/20 shadow-lg grid place-items-center">
+                <Database size={34} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-black tracking-tight text-white">DBReader</h1>
+                <p className="text-sm text-white/70 font-medium">Workspace</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl font-black tracking-tight text-white">DBReader</h1>
-              <p className="text-sm text-white/70 font-medium">Workspace</p>
-            </div>
-          </div>
-          <div className="text-right text-white">
-            <div className="text-3xl font-black tabular-nums">
-              {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </div>
-            <div className="text-sm text-white/80">
-              {now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
+            <div className="text-right text-white">
+              <div className="text-3xl font-black tabular-nums">
+                {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
+              <div className="text-sm text-white/80">
+                {now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="p-8">
         {tabs.length === 0 ? (

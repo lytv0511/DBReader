@@ -187,9 +187,9 @@ export default function CategoryManager({ refreshKey }: { refreshKey?: number })
   }
 
   return (
-    <div className="h-full flex overflow-hidden">
+    <div className="h-full flex flex-col sm:flex-row overflow-hidden">
       {/* Category list */}
-      <div className="w-[300px] border-r border-border bg-bg-secondary flex flex-col shrink-0">
+      <div className="w-full sm:w-[300px] border-b sm:border-b-0 sm:border-r border-border bg-bg-secondary flex flex-col shrink-0 max-h-[40%] sm:max-h-none">
         <div className="px-3 py-2 border-b border-border flex items-center justify-between">
           <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">{t('cats.title')}</span>
           <button

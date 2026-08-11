@@ -252,7 +252,7 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
             {filterCategoryId !== null ? t('gallery.noInCategory') : t('gallery.noFound')}
           </div>
         ) : (
-          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {filtered.map((product) => {
               const stock = Math.round(product.current_stock);
               const isLow = product.reorder_threshold > 0 && stock <= product.reorder_threshold;

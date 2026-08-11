@@ -2683,10 +2683,15 @@ let mut builder = tauri::Builder::default()
             #[cfg(not(windows))]
             let main_url = WebviewUrl::App("index.html".into());
 
-            WebviewWindowBuilder::new(app, "main", main_url)
-                .title("DBReader")
-                .inner_size(1400.0, 900.0)
-                .min_inner_size(800.0, 600.0)
+            let mut main_window = WebviewWindowBuilder::new(app, "main", main_url)
+                .title("DBReader");
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                main_window = main_window
+                    .inner_size(1400.0, 900.0)
+                    .min_inner_size(800.0, 600.0);
+            }
+            main_window
                 .build()
                 .map_err(|e| e.to_string())?;
 
