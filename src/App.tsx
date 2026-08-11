@@ -660,16 +660,17 @@ useEffect(() => {
               )}
             </div>
           )}
-          <div key={`${viewMode}-${syncTick}`} className={`${viewMode === 'workspace' || viewMode === 'settings' ? 'hidden' : 'flex-1'} flex flex-col overflow-hidden`}>
+          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' ? 'hidden' : 'flex-1'} flex flex-col overflow-hidden`}>
           {viewMode === 'dashboard' && (
-            <Dashboard onNavigate={(stockFilter) => {
+            <Dashboard refreshKey={syncTick} onNavigate={(stockFilter) => {
               setGalleryStockFilter(stockFilter);
               setViewMode('gallery');
             }} />
           )}
-          {viewMode === 'adjust' && <QuickAdjust />}
+          {viewMode === 'adjust' && <QuickAdjust refreshKey={syncTick} />}
           {viewMode === 'gallery' && (
             <ProductGallery
+              refreshKey={syncTick}
               initialStockFilter={galleryStockFilter}
               onSelectProduct={(product) => {
                 setSelectedProduct(product);
@@ -679,18 +680,19 @@ useEffect(() => {
           )}
           {viewMode === 'detail' && selectedProduct && (
             <ProductDetail
+              refreshKey={syncTick}
               product={selectedProduct}
               onBack={() => setViewMode('gallery')}
               currencySymbol={prefs.currencySymbol}
             />
           )}
-          {viewMode === 'categories' && <CategoryManager />}
-          {viewMode === 'used' && <UseHistory />}
-          {viewMode === 'products' && <ProductManager />}
-          {viewMode === 'batches' && <BatchManager currencySymbol={prefs.currencySymbol} />}
-          {viewMode === 'logs' && <InventoryLog />}
-          {viewMode === 'txhistory' && <TransactionHistory />}
-          {viewMode === 'reports' && <Reports currencySymbol={prefs.currencySymbol} />}
+          {viewMode === 'categories' && <CategoryManager refreshKey={syncTick} />}
+          {viewMode === 'used' && <UseHistory refreshKey={syncTick} />}
+          {viewMode === 'products' && <ProductManager refreshKey={syncTick} />}
+          {viewMode === 'batches' && <BatchManager refreshKey={syncTick} currencySymbol={prefs.currencySymbol} />}
+          {viewMode === 'logs' && <InventoryLog refreshKey={syncTick} />}
+          {viewMode === 'txhistory' && <TransactionHistory refreshKey={syncTick} />}
+          {viewMode === 'reports' && <Reports refreshKey={syncTick} currencySymbol={prefs.currencySymbol} />}
           </div>
           {viewMode === 'workspace' && !isMobile && (
             <Workspace

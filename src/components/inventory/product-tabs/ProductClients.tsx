@@ -12,7 +12,7 @@ const STATUS_STYLES: Record<string, string> = {
   fulfilled: 'bg-success/10 text-success', cancelled: 'bg-error/10 text-error',
 };
 
-export default function ProductClients({ productId }: { productId: number }) {
+export default function ProductClients({ productId, refreshKey }: { productId: number; refreshKey?: number }) {
   const { t } = useI18n();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -35,8 +35,8 @@ export default function ProductClients({ productId }: { productId: number }) {
   const [rStatus, setRStatus] = useState('reserved');
   const [rNotes, setRNotes] = useState('');
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const [resResult, clientsResult] = await Promise.all([
         executeQuery(`
@@ -61,6 +61,10 @@ export default function ProductClients({ productId }: { productId: number }) {
   }, [productId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   const saveClient = async () => {
     if (!cName.trim()) return;

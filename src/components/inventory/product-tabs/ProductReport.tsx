@@ -18,13 +18,13 @@ const TYPE_COLORS: Record<string, string> = {
   PURCHASE: '#22c55e', USAGE: '#eab308', SPOILAGE: '#ef4444', ADJUSTMENT: '#8b5cf6',
 };
 
-export default function ProductReport({ productId, currencySymbol }: { productId: number; currencySymbol: string }) {
+export default function ProductReport({ productId, currencySymbol, refreshKey }: { productId: number; currencySymbol: string; refreshKey?: number }) {
   const { t } = useI18n();
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const result = await getProductReportData(productId);
       if (result && typeof result === 'object' && 'product' in result && 'history' in result) {
@@ -37,6 +37,10 @@ export default function ProductReport({ productId, currencySymbol }: { productId
   }, [productId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   if (loading) return <div className="flex items-center justify-center h-full text-text-secondary text-sm">{t('preport.loading')}</div>;
   if (!data) return <div className="flex items-center justify-center h-full text-text-secondary text-sm">{t('preport.noData')}</div>;

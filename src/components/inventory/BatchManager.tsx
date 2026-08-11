@@ -27,7 +27,7 @@ interface Provider {
   sub_name: string | null;
 }
 
-export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?: string }) {
+export default function BatchManager({ currencySymbol = '$', refreshKey }: { currencySymbol?: string; refreshKey?: number }) {
   const { t } = useI18n();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -54,8 +54,8 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
   const [logFormType, setLogFormType] = useState('PURCHASE');
   const [logFormNotes, setLogFormNotes] = useState('');
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const [batchesResult, productsResult, providersResult] = await Promise.all([
@@ -101,6 +101,10 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   const openNewBatch = () => {
     setEditingBatch(null);

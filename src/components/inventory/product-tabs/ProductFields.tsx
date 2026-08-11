@@ -32,6 +32,7 @@ interface CategoryTemplate {
 interface ProductFieldsProps {
   productId: number;
   categoryId: number | null;
+  refreshKey?: number;
 }
 
 const ATTRIBUTE_TYPES = ["string", "number", "boolean", "date", "url"] as const;
@@ -39,6 +40,7 @@ const ATTRIBUTE_TYPES = ["string", "number", "boolean", "date", "url"] as const;
 export default function ProductFields({
   productId,
   categoryId,
+  refreshKey,
 }: ProductFieldsProps) {
   const { t } = useI18n();
   const [attributes, setAttributes] = useState<ProductAttribute[]>([]);
@@ -91,6 +93,13 @@ export default function ProductFields({
   useEffect(() => {
     fetchAttributes();
   }, [fetchAttributes]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) {
+      fetchAttributes();
+      fetchTemplates();
+    }
+  }, [refreshKey, fetchAttributes, fetchTemplates]);
 
   useEffect(() => {
     fetchTemplates();

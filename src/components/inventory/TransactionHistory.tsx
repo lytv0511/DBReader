@@ -24,7 +24,7 @@ const PERIODS: Period[] = ['all', 'week', 'month', 'year', 'custom'];
 
 const ACTIONS = ['PURCHASE', 'USAGE', 'SPOILAGE', 'ADJUSTMENT'];
 
-export default function TransactionHistory() {
+export default function TransactionHistory({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
   const [entries, setEntries] = useState<TxEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,8 +61,8 @@ export default function TransactionHistory() {
 
   const esc = (v: string) => v.replace(/'/g, "''");
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const parts: string[] = [];
@@ -123,6 +123,10 @@ export default function TransactionHistory() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
+
   const hasCustomRange = fromDate !== '' || toDate !== '';
   const hasFilters = filterStorage !== '' || filterSku !== '' || filterProduct !== '' || filterCategory !== '' || filterAction !== '';
 
@@ -175,7 +179,7 @@ export default function TransactionHistory() {
             {t('logs.filters')}
           </button>
           <button
-            onClick={fetchData}
+            onClick={() => fetchData()}
             className="p-2 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-text-secondary transition-colors"
           >
             <RefreshCw size={12} />

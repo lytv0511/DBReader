@@ -14,6 +14,7 @@ interface PieItem {
 
 interface PieChartWidgetProps {
   mode: 'spending' | 'quantity';
+  refreshKey?: number;
 }
 
 const PRODUCT_PALETTE = ['#5b6abf', '#4ade80', '#fbbf24', '#f87171', '#60a5fa', '#f472b6', '#34d399', '#a78bfa', '#fb923c', '#22d3ee'];
@@ -64,7 +65,7 @@ function PieSector(props: Record<string, unknown>) {
   );
 }
 
-export default function PieChartWidget({ mode }: PieChartWidgetProps) {
+export default function PieChartWidget({ mode, refreshKey }: PieChartWidgetProps) {
   const { t } = useI18n();
   const isSpending = mode === 'spending';
   const [metricMode, setMetricMode] = useState<'historical' | 'current'>('current');
@@ -75,8 +76,8 @@ export default function PieChartWidget({ mode }: PieChartWidgetProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       if (selectedCategory) {
@@ -208,6 +209,10 @@ export default function PieChartWidget({ mode }: PieChartWidgetProps) {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   const total = data.reduce((s, d) => s + d.value, 0);
 

@@ -15,9 +15,10 @@ interface Note {
 
 interface ProductNotesProps {
   productId: number;
+  refreshKey?: number;
 }
 
-export default function ProductNotes({ productId }: ProductNotesProps) {
+export default function ProductNotes({ productId, refreshKey }: ProductNotesProps) {
   const { t } = useI18n();
   const [notes, setNotes] = useState<Note[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -53,6 +54,10 @@ export default function ProductNotes({ productId }: ProductNotesProps) {
     setExpandedId(null);
     setError(null);
   }, [productId]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchNotes();
+  }, [refreshKey, productId]);
 
   const handleExpand = (note: Note) => {
     if (expandedId === note.id) {

@@ -32,9 +32,10 @@ interface ProductDetailProps {
   product: Product;
   onBack: () => void;
   currencySymbol: string;
+  refreshKey?: number;
 }
 
-export default function ProductDetail({ product, onBack, currencySymbol }: ProductDetailProps) {
+export default function ProductDetail({ product, onBack, currencySymbol, refreshKey }: ProductDetailProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>('history');
   const [editingProduct, setEditingProduct] = useState(false);
@@ -55,19 +56,19 @@ export default function ProductDetail({ product, onBack, currencySymbol }: Produ
   const renderTab = () => {
     switch (activeTab) {
       case 'history':
-        return <ProductHistory productId={product.id} />;
+        return <ProductHistory refreshKey={refreshKey} productId={product.id} />;
       case 'fields':
-        return <ProductFields productId={product.id} categoryId={product.category_id} />;
+        return <ProductFields refreshKey={refreshKey} productId={product.id} categoryId={product.category_id} />;
       case 'calendar':
-        return <ProductCalendar productId={product.id} />;
+        return <ProductCalendar refreshKey={refreshKey} productId={product.id} />;
       case 'notes':
-        return <ProductNotes productId={product.id} />;
+        return <ProductNotes refreshKey={refreshKey} productId={product.id} />;
       case 'clients':
-        return <ProductClients productId={product.id} />;
+        return <ProductClients refreshKey={refreshKey} productId={product.id} />;
       case 'alerts':
-        return <ProductNotifications productId={product.id} />;
+        return <ProductNotifications refreshKey={refreshKey} productId={product.id} />;
       case 'report':
-        return <ProductReport productId={product.id} currencySymbol={currencySymbol} />;
+        return <ProductReport refreshKey={refreshKey} productId={product.id} currencySymbol={currencySymbol} />;
     }
   };
 

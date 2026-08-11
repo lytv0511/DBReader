@@ -19,6 +19,7 @@ type SortDir = 'asc' | 'desc';
 
 interface ProductHistoryProps {
   productId: number;
+  refreshKey?: number;
 }
 
 const TX_COLORS: Record<string, { text: string; bg: string; border: string }> = {
@@ -28,7 +29,7 @@ const TX_COLORS: Record<string, { text: string; bg: string; border: string }> = 
   ADJUSTMENT: { text: 'text-accent', bg: 'bg-accent/10', border: 'border-accent/20' },
 };
 
-export default function ProductHistory({ productId }: ProductHistoryProps) {
+export default function ProductHistory({ productId, refreshKey }: ProductHistoryProps) {
   const { t } = useI18n();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,8 +43,8 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
   const [sortField, setSortField] = useState<SortField>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
+  const fetchLogs = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const result = await executeQuery(`
@@ -81,6 +82,10 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
   }, [productId]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchLogs(true);
+  }, [refreshKey, fetchLogs]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -205,7 +210,7 @@ export default function ProductHistory({ productId }: ProductHistoryProps) {
               </button>
             )}
             <button
-              onClick={fetchLogs}
+              onClick={() => fetchLogs()}
               className="p-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-text-secondary transition-colors"
             >
               <RefreshCw size={12} />

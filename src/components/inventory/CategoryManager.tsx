@@ -33,7 +33,7 @@ const COLOR_OPTIONS = [
   '#ffffff',
 ];
 
-export default function CategoryManager() {
+export default function CategoryManager({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,8 +52,8 @@ export default function CategoryManager() {
   const [tplFormType, setTplFormType] = useState('string');
   const [tplFormRequired, setTplFormRequired] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const result = await executeQuery(`
@@ -94,6 +94,9 @@ export default function CategoryManager() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
   useEffect(() => {
     if (selectedCategory) fetchTemplates(selectedCategory.id);
   }, [selectedCategory, fetchTemplates]);

@@ -145,18 +145,18 @@ const DateTimeCell = ({ value }: { value: string | null | undefined }) => {
   return <td className="py-1.5 text-gray-600 whitespace-nowrap">{s.slice(0, 10)}</td>;
 };
 
-export default function Reports({ currencySymbol }: { currencySymbol: string }) {
+export default function Reports({ currencySymbol, refreshKey }: { currencySymbol: string; refreshKey?: number }) {
   const appCtx = useI18n();
   const [reportLang, setReportLang] = useState('');
   const active = (reportLang || appCtx.lang) as LanguageCode;
   return (
     <I18nProvider language={active}>
-      <ReportsInner reportLang={reportLang} setReportLang={setReportLang} currencySymbol={currencySymbol} />
+      <ReportsInner reportLang={reportLang} setReportLang={setReportLang} currencySymbol={currencySymbol} refreshKey={refreshKey} />
     </I18nProvider>
   );
 }
 
-function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLang: string; setReportLang: (l: string) => void; currencySymbol: string }) {
+function ReportsInner({ reportLang, setReportLang, currencySymbol, refreshKey }: { reportLang: string; setReportLang: (l: string) => void; currencySymbol: string; refreshKey?: number }) {
   const { t } = useI18n();
   const [reportType, setReportType] = useState<ReportType>('activities');
   const [filters, setFilters] = useState<TxFilters>({ ...EMPTY_TX_FILTERS });
@@ -204,8 +204,8 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
     });
   };
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       if (reportType === 'overall') {
         const productWhere = buildProductWhere(filters);
@@ -272,6 +272,10 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
   }, [reportType, filters, bundleSimilar]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   const set = (patch: Partial<TxFilters>) => setFilters((f) => ({ ...f, ...patch }));
   const summary = summarizeTx(rows);
@@ -688,7 +692,7 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
           <h2 className="text-lg font-bold text-text-primary">{t('reports.title')}</h2>
           <div className="flex items-center gap-2">
             <button
-              onClick={fetchData}
+              onClick={() => fetchData()}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
             >
               <RefreshCw size={12} />

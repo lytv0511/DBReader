@@ -14,7 +14,7 @@ interface LogEntry {
   created_at: string;
 }
 
-export default function InventoryLog() {
+export default function InventoryLog({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,8 +23,8 @@ export default function InventoryLog() {
   const [filterProduct, setFilterProduct] = useState<string>('');
   const [showFilters, setShowFilters] = useState(false);
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
+  const fetchLogs = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       let where = 'WHERE 1=1';
@@ -69,6 +69,10 @@ export default function InventoryLog() {
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchLogs(true);
+  }, [refreshKey, fetchLogs]);
+
   const txColor: Record<string, string> = {
     PURCHASE: 'text-success',
     USAGE: 'text-warning',
@@ -112,7 +116,7 @@ export default function InventoryLog() {
             {t('logs.filters')}
           </button>
           <button
-            onClick={fetchLogs}
+            onClick={() => fetchLogs()}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
           >
             <RefreshCw size={12} />

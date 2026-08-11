@@ -14,6 +14,7 @@ interface Notification {
 
 interface ProductNotificationsProps {
   productId: number;
+  refreshKey?: number;
 }
 
 const NOTIFICATION_TYPES = [
@@ -32,7 +33,7 @@ const NOTIFICATION_LABEL_KEYS: Record<string, string> = {
   reservation: 'pnotif.type.reservation',
 };
 
-export default function ProductNotifications({ productId }: ProductNotificationsProps) {
+export default function ProductNotifications({ productId, refreshKey }: ProductNotificationsProps) {
   const { t } = useI18n();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentStock, setCurrentStock] = useState<number | null>(null);
@@ -44,8 +45,8 @@ export default function ProductNotifications({ productId }: ProductNotifications
   const [formThreshold, setFormThreshold] = useState('');
   const [formActive, setFormActive] = useState(true);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const [stockResult, notifsResult] = await Promise.all([
@@ -80,6 +81,10 @@ export default function ProductNotifications({ productId }: ProductNotifications
   }, [productId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   const handleToggleActive = async (notif: Notification) => {
     try {

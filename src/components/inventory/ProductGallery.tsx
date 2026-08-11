@@ -20,11 +20,13 @@ interface Product {
   batch_number: string;
 }
 
+export type StockFilter = 'all' | 'total' | 'out' | 'low' | 'ok';
+
 interface ProductGalleryProps {
   onSelectProduct: (product: Product) => void;
+  initialStockFilter?: StockFilter;
+  refreshKey?: number;
 }
-
-export type StockFilter = 'all' | 'total' | 'out' | 'low' | 'ok';
 
 const stockStatus = (p: Product): Exclude<StockFilter, 'all' | 'total'> => {
   const stock = Math.round(p.current_stock);
@@ -43,12 +45,7 @@ const matchesStock = (p: Product, filter: StockFilter): boolean => {
   return stockStatus(p) === filter;
 };
 
-interface ProductGalleryProps {
-  onSelectProduct: (product: Product) => void;
-  initialStockFilter?: StockFilter;
-}
-
-export default function ProductGallery({ onSelectProduct, initialStockFilter = 'all' }: ProductGalleryProps) {
+export default function ProductGallery({ onSelectProduct, initialStockFilter = 'all', refreshKey }: ProductGalleryProps) {
   const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,8 +54,8 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
   const [filterStock, setFilterStock] = useState<StockFilter>(initialStockFilter);
   const [categories, setCategories] = useState<{ id: number; name: string; icon: string; color: string; count: number }[]>([]);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const [productsResult, categoriesResult] = await Promise.all([
@@ -134,6 +131,10 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
+
   const filtered = products.filter((p) => {
     const inCategory = filterCategoryId === null
       || (filterCategoryId === -1 ? p.category_id === null : p.category_id === filterCategoryId);
@@ -162,7 +163,7 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
       <div className="px-6 py-4 border-b border-border bg-bg-secondary shrink-0">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-bold text-text-primary">{t('gallery.title')}</h2>
-          <button onClick={fetchData} className="p-2 text-text-secondary hover:text-text-primary transition-colors">
+          <button onClick={() => fetchData()} className="p-2 text-text-secondary hover:text-text-primary transition-colors">
             <RefreshCw size={14} />
           </button>
         </div>

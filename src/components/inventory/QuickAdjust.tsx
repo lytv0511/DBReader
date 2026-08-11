@@ -37,7 +37,7 @@ const TX_TYPES = [
 
 const QUICK_QTY = [1, 6, 12, 24];
 
-export default function QuickAdjust() {
+export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -74,8 +74,8 @@ export default function QuickAdjust() {
     if (rows.length === 1) setProviderId(rows[0].id);
   };
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const [productsResult, providersResult, recentResult] = await Promise.all([
@@ -134,6 +134,10 @@ export default function QuickAdjust() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   const handleSubmit = async () => {
     if (selectedProductId === '' || !qty || Number(qty) <= 0) return;
@@ -483,7 +487,7 @@ export default function QuickAdjust() {
         <div className="border-b border-border">
           <div className="px-5 py-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-text-primary">{t('adjust.recent')}</h3>
-            <button onClick={fetchData} className="text-text-secondary hover:text-text-primary transition-colors">
+            <button onClick={() => fetchData()} className="text-text-secondary hover:text-text-primary transition-colors">
               <RefreshCw size={12} />
             </button>
           </div>

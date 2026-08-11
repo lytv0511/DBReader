@@ -14,7 +14,7 @@ interface UsedEntry {
   created_at: string;
 }
 
-export default function UseHistory() {
+export default function UseHistory({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
   const [entries, setEntries] = useState<UsedEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,8 +22,8 @@ export default function UseHistory() {
   const [editingNotes, setEditingNotes] = useState<number | null>(null);
   const [notesValue, setNotesValue] = useState('');
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const result = await executeQuery(`
@@ -62,6 +62,10 @@ export default function UseHistory() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   const handleUndo = async (logId: number) => {
     if (!confirm(t('used.confirmUndo'))) return;
@@ -106,7 +110,7 @@ export default function UseHistory() {
             {t('used.subtitle', { count: entries.length })}
           </p>
         </div>
-        <button onClick={fetchData} className="p-2 text-text-secondary hover:text-text-primary transition-colors">
+        <button onClick={() => fetchData()} className="p-2 text-text-secondary hover:text-text-primary transition-colors">
           <RefreshCw size={14} />
         </button>
       </div>

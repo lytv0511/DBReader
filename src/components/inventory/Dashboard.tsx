@@ -69,9 +69,10 @@ function SummaryCard({ icon, label, value, color, onClick }: SummaryCardProps) {
 
 interface DashboardProps {
   onNavigate: (stockFilter: StockFilter) => void;
+  refreshKey?: number;
 }
 
-export default function Dashboard({ onNavigate }: DashboardProps) {
+export default function Dashboard({ onNavigate, refreshKey }: DashboardProps) {
   const { t } = useI18n();
   const [stockLevels, setStockLevels] = useState<StockRow[]>([]);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
@@ -80,8 +81,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const [stockResult, activityResult, weekCountResult] = await Promise.all([
@@ -166,6 +167,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (refreshKey) fetchData(true);
+  }, [refreshKey, fetchData]);
+
   const totalProducts = stockLevels.length;
   const totalStock = stockLevels.reduce((sum, s) => sum + s.current_stock, 0);
   const alertCount = lowStockItems.length;
@@ -206,7 +211,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-text-primary">{t('dash.title')}</h2>
         <button
-          onClick={fetchData}
+          onClick={() => fetchData()}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors"
         >
           <RefreshCw size={12} />
@@ -310,8 +315,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
       {/* Pie chart widgets */}
       <div className="grid grid-cols-2 gap-6">
-        <PieChartWidget mode="spending" />
-        <PieChartWidget mode="quantity" />
+        <PieChartWidget mode="spending" refreshKey={refreshKey} />
+        <PieChartWidget mode="quantity" refreshKey={refreshKey} />
       </div>
 
       {/* Full Stock Levels Table */}

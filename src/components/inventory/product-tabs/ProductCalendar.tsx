@@ -24,7 +24,7 @@ const EVENT_COLORS: Record<string, string> = {
   custom: 'bg-text-secondary',
 };
 
-export default function ProductCalendar({ productId }: { productId: number }) {
+export default function ProductCalendar({ productId, refreshKey }: { productId: number; refreshKey?: number }) {
   const { t } = useI18n();
   const months = Array.from({ length: 12 }, (_, i) => t(`pcal.mon.${i}`));
   const days = Array.from({ length: 7 }, (_, i) => t(`pcal.day.${i}`));
@@ -52,6 +52,10 @@ export default function ProductCalendar({ productId }: { productId: number }) {
   }, [productId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData();
+  }, [refreshKey, fetchData]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();

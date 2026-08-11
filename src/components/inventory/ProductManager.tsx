@@ -76,7 +76,7 @@ function UnitInput({ value, onChange, placeholder }: { value: string; onChange: 
   );
 }
 
-export default function ProductManager() {
+export default function ProductManager({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -101,8 +101,8 @@ export default function ProductManager() {
   const [formUnitName2, setFormUnitName2] = useState('');
   const [formConversionFactor, setFormConversionFactor] = useState('1');
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const [productsResult, categoriesResult] = await Promise.all([
@@ -155,6 +155,10 @@ export default function ProductManager() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
+  }, [refreshKey, fetchData]);
 
   useEffect(() => {
     if (selectedProduct) fetchProductDetails(selectedProduct.id);
