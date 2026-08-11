@@ -1,0 +1,29 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN, e.g. relay.example.com}
+      TOKEN: ${TOKEN:?set TOKEN}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - relay
+    restart: unless-stopped
+
+  relay:
+    build: .
+    environment:
+      TOKEN: ${TOKEN}
+      PORT: "8787"
+    volumes:
+      - relay_data:/data
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+  relay_data:

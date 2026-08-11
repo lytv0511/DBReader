@@ -6,14 +6,15 @@ export const FORM_FACTOR: FormFactor =
 
 export function detectFormFactor(): FormFactor {
   if (FORM_FACTOR !== 'desktop') return FORM_FACTOR;
-  if (/Android/i.test(navigator.userAgent || '')) {
-    const w = window.innerWidth || document.documentElement.clientWidth || 0;
-    return w >= 600 ? 'tablet' : 'mobile';
-  }
+  const w = window.innerWidth || document.documentElement.clientWidth || 0;
+  if (w < 600) return 'mobile';
+  const ua = navigator.userAgent || '';
+  if (/Android|iPhone|iPad|iPod/i.test(ua)) return 'tablet';
+  if (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1) return 'tablet';
   return 'desktop';
 }
 
-export function isAndroid(): boolean {
+export function isMobile(): boolean {
   return detectFormFactor() !== 'desktop';
 }
 

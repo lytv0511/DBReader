@@ -1,6 +1,7 @@
 import { Fragment, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
 import {
   Database,
   FolderOpen,
@@ -26,6 +27,8 @@ import {
 
 import SettingsView from './components/SettingsView';
 import HelpChat from './components/HelpChat';
+import LoginView from './components/LoginView';
+import { accountStatus, accountSignOut } from './lib/account';
 import Dashboard from './components/inventory/Dashboard';
 import ProductManager from './components/inventory/ProductManager';
 import BatchManager from './components/inventory/BatchManager';
@@ -41,7 +44,7 @@ import Workspace from './components/Workspace';
 import { openDatabase, closeDatabase, createNewDatabase, migrateSchema, savePreferences, loadPreferences, getDatabasePath, mobileImportDatabase, mobileCreateDatabase, mobileExportDatabase } from './lib/db';
 import { t as translate, resolveLang } from './lib/i18n';
 import { I18nProvider } from './lib/language';
-import { isAndroid, applyFormFactor } from './lib/platform';
+import { isMobile as isMobilePlatform, applyFormFactor } from './lib/platform';
 import type { ViewMode, AppPreferences } from './types';
 import { DEFAULT_TABS } from './types';
 import type { Product } from './components/inventory/ProductGallery';
@@ -89,10 +92,12 @@ const INVENTORY_TABS: { mode: ViewMode; labelKey: string; icon: React.ReactNode 
 const ALL_TABS: { mode: ViewMode; labelKey: string }[] = INVENTORY_TABS.map((t) => ({ mode: t.mode, labelKey: t.labelKey }));
 
 export default function App() {
-  const isMobile = isAndroid();
+  const [isMobile, setIsMobile] = useState<boolean>(() => isMobilePlatform());
+  const [debugInfo, setDebugInfo] = useState<string>('');
+  const [debugVisible, setDebugVisible] = useState(() => sessionStorage.getItem('hideDbg') !== '1');
   const [isConnected, setIsConnected] = useState(false);
   const [dbPath, setDbPath] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>(isMobile ? 'workspace' : 'gallery');
+  const [viewMode, setViewMode] = useState<ViewMode>('workspace');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [galleryStockFilter, setGalleryStockFilter] = useState<StockFilter>('all');
   const [initializing, setInitializing] = useState(true);
@@ -108,6 +113,48 @@ export default function App() {
   const [mobileError, setMobileError] = useState<string | null>(null);
   const [mobileBusy, setMobileBusy] = useState(false);
   const viewModeRef = useRef<ViewMode>(viewMode);
+  const [syncTick, setSyncTick] = useState(0);
+  const [account, setAccount] = useState<{ email: string } | null>(null);
+  const [accountChecked, setAccountChecked] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    accountStatus()
+      .then((s) => {
+        if (!disposed) setAccount(s.email ? { email: s.email } : null);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!disposed) setAccountChecked(true);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    try {
+      await accountSignOut();
+    } catch {
+      // ignore
+    }
+    setAccount(null);
+  };
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listen<number>('dbreader:synced', () => {
+      if (!disposed) setSyncTick((t) => t + 1);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     viewModeRef.current = viewMode;
@@ -115,6 +162,15 @@ export default function App() {
 
 useEffect(() => {
     applyFormFactor();
+    const update = () => {
+      applyFormFactor();
+      setIsMobile(isMobilePlatform());
+      setDebugInfo(`FF=${document.documentElement.dataset.formFactor} W=${window.innerWidth} UA=${navigator.userAgent}`);
+    };
+    update();
+    const onResize = () => requestAnimationFrame(update);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   const goBack = useCallback((): boolean => {
@@ -442,6 +498,12 @@ useEffect(() => {
 
   return (
     <I18nProvider language={prefs.language}>
+      {!accountChecked ? (
+        <div className="h-screen flex items-center justify-center bg-bg-primary" />
+      ) : !account ? (
+        <LoginView t={t} onSignedIn={(email) => setAccount({ email })} />
+      ) : (
+      <>
       <div className="h-screen flex flex-col bg-bg-primary text-text-primary">
       {/* Header */}
       {!isMobile && (
@@ -598,6 +660,7 @@ useEffect(() => {
               )}
             </div>
           )}
+          <div key={`${viewMode}-${syncTick}`} className={`${viewMode === 'workspace' || viewMode === 'settings' ? 'hidden' : 'flex-1'} flex flex-col overflow-hidden`}>
           {viewMode === 'dashboard' && (
             <Dashboard onNavigate={(stockFilter) => {
               setGalleryStockFilter(stockFilter);
@@ -628,6 +691,7 @@ useEffect(() => {
           {viewMode === 'logs' && <InventoryLog />}
           {viewMode === 'txhistory' && <TransactionHistory />}
           {viewMode === 'reports' && <Reports currencySymbol={prefs.currencySymbol} />}
+          </div>
           {viewMode === 'workspace' && !isMobile && (
             <Workspace
               tabs={launcherTabs}
@@ -748,6 +812,8 @@ useEffect(() => {
               onChange={(patch) => setPrefs((p) => ({ ...p, ...patch }))}
               onReset={() => setPrefs((p) => ({ ...DEFAULT_PREFS, lastDbPath: p.lastDbPath }))}
               t={t}
+              accountEmail={account?.email ?? ''}
+              onSignOut={handleSignOut}
             />
           )}
         </div>
@@ -779,6 +845,16 @@ useEffect(() => {
         </div>
       )}
       </div>
+
+      {debugVisible && (
+        <button
+          onClick={() => { setDebugVisible(false); sessionStorage.setItem('hideDbg', '1'); }}
+          className="fixed bottom-16 right-2 z-50 px-2 py-1 rounded bg-black/70 border border-white/20 text-xs text-white/90 font-mono max-w-[90%] truncate"
+          title="Tap to hide"
+        >
+          {debugInfo}
+        </button>
+      )}
 
       <HelpChat open={helpOpen} onClose={() => setHelpOpen(false)} />
 
@@ -824,6 +900,8 @@ useEffect(() => {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </I18nProvider>
   );

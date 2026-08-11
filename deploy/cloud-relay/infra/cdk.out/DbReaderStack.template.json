@@ -1,0 +1,693 @@
+{
+ "Resources": {
+  "SnapshotsBucketF8064843": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketName": "dbreader-snapshots-806938668256-ap-southeast-2",
+    "CorsConfiguration": {
+     "CorsRules": [
+      {
+       "AllowedHeaders": [
+        "*"
+       ],
+       "AllowedMethods": [
+        "GET",
+        "PUT"
+       ],
+       "AllowedOrigins": [
+        "*"
+       ],
+       "ExposedHeaders": [
+        "ETag"
+       ]
+      }
+     ]
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/SnapshotsBucket/Resource"
+   }
+  },
+  "Tableusers60537A7D": {
+   "Type": "AWS::DynamoDB::Table",
+   "Properties": {
+    "AttributeDefinitions": [
+     {
+      "AttributeName": "user_id",
+      "AttributeType": "S"
+     }
+    ],
+    "BillingMode": "PAY_PER_REQUEST",
+    "KeySchema": [
+     {
+      "AttributeName": "user_id",
+      "KeyType": "HASH"
+     }
+    ],
+    "TableName": "dbreader-users"
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/Table-users/Resource"
+   }
+  },
+  "Tablesessions5F65A6A6": {
+   "Type": "AWS::DynamoDB::Table",
+   "Properties": {
+    "AttributeDefinitions": [
+     {
+      "AttributeName": "token",
+      "AttributeType": "S"
+     }
+    ],
+    "BillingMode": "PAY_PER_REQUEST",
+    "KeySchema": [
+     {
+      "AttributeName": "token",
+      "KeyType": "HASH"
+     }
+    ],
+    "TableName": "dbreader-sessions"
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/Table-sessions/Resource"
+   }
+  },
+  "Tableteams16688969": {
+   "Type": "AWS::DynamoDB::Table",
+   "Properties": {
+    "AttributeDefinitions": [
+     {
+      "AttributeName": "team_id",
+      "AttributeType": "S"
+     }
+    ],
+    "BillingMode": "PAY_PER_REQUEST",
+    "KeySchema": [
+     {
+      "AttributeName": "team_id",
+      "KeyType": "HASH"
+     }
+    ],
+    "TableName": "dbreader-teams"
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/Table-teams/Resource"
+   }
+  },
+  "Tablefiles501C2015": {
+   "Type": "AWS::DynamoDB::Table",
+   "Properties": {
+    "AttributeDefinitions": [
+     {
+      "AttributeName": "team_id",
+      "AttributeType": "S"
+     },
+     {
+      "AttributeName": "file_id",
+      "AttributeType": "S"
+     }
+    ],
+    "BillingMode": "PAY_PER_REQUEST",
+    "KeySchema": [
+     {
+      "AttributeName": "team_id",
+      "KeyType": "HASH"
+     },
+     {
+      "AttributeName": "file_id",
+      "KeyType": "RANGE"
+     }
+    ],
+    "TableName": "dbreader-files"
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/Table-files/Resource"
+   }
+  },
+  "Tableops89251B2D": {
+   "Type": "AWS::DynamoDB::Table",
+   "Properties": {
+    "AttributeDefinitions": [
+     {
+      "AttributeName": "site_key",
+      "AttributeType": "S"
+     }
+    ],
+    "BillingMode": "PAY_PER_REQUEST",
+    "KeySchema": [
+     {
+      "AttributeName": "site_key",
+      "KeyType": "HASH"
+     }
+    ],
+    "TableName": "dbreader-ops"
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/Table-ops/Resource"
+   }
+  },
+  "RelayFnServiceRole51DC6C16": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "lambda.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "ManagedPolicyArns": [
+     {
+      "Fn::Join": [
+       "",
+       [
+        "arn:",
+        {
+         "Ref": "AWS::Partition"
+        },
+        ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+       ]
+      ]
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/RelayFn/ServiceRole/Resource"
+   }
+  },
+  "RelayFnServiceRoleDefaultPolicy9A16A601": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query",
+        "dynamodb:GetItem",
+        "dynamodb:Scan",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tableusers60537A7D",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tableusers60537A7D",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query",
+        "dynamodb:GetItem",
+        "dynamodb:Scan",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tablesessions5F65A6A6",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tablesessions5F65A6A6",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query",
+        "dynamodb:GetItem",
+        "dynamodb:Scan",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tableteams16688969",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tableteams16688969",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query",
+        "dynamodb:GetItem",
+        "dynamodb:Scan",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tablefiles501C2015",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tablefiles501C2015",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query",
+        "dynamodb:GetItem",
+        "dynamodb:Scan",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tableops89251B2D",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Tableops89251B2D",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging",
+        "s3:Abort*"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "SnapshotsBucketF8064843",
+            "Arn"
+           ]
+          },
+          "/*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "s3:GetObject*",
+        "s3:GetBucket*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "SnapshotsBucketF8064843",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "SnapshotsBucketF8064843",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "RelayFnServiceRoleDefaultPolicy9A16A601",
+    "Roles": [
+     {
+      "Ref": "RelayFnServiceRole51DC6C16"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/RelayFn/ServiceRole/DefaultPolicy/Resource"
+   }
+  },
+  "RelayFnA38D0606": {
+   "Type": "AWS::Lambda::Function",
+   "Properties": {
+    "Architectures": [
+     "arm64"
+    ],
+    "Code": {
+     "S3Bucket": "cdk-hnb659fds-assets-806938668256-ap-southeast-2",
+     "S3Key": "3e7ae092966612d846e34d1e0260b7f546bf7a555c35f43f166ceb9b968ae3b9.zip"
+    },
+    "Environment": {
+     "Variables": {
+      "SNAP_BUCKET": {
+       "Ref": "SnapshotsBucketF8064843"
+      },
+      "USERS_TABLE": {
+       "Ref": "Tableusers60537A7D"
+      },
+      "SESSIONS_TABLE": {
+       "Ref": "Tablesessions5F65A6A6"
+      },
+      "TEAMS_TABLE": {
+       "Ref": "Tableteams16688969"
+      },
+      "FILES_TABLE": {
+       "Ref": "Tablefiles501C2015"
+      },
+      "OPS_TABLE": {
+       "Ref": "Tableops89251B2D"
+      }
+     }
+    },
+    "FunctionName": "dbreader-relay",
+    "Handler": "bootstrap",
+    "MemorySize": 512,
+    "Role": {
+     "Fn::GetAtt": [
+      "RelayFnServiceRole51DC6C16",
+      "Arn"
+     ]
+    },
+    "Runtime": "provided.al2023",
+    "Timeout": 60
+   },
+   "DependsOn": [
+    "RelayFnServiceRoleDefaultPolicy9A16A601",
+    "RelayFnServiceRole51DC6C16"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/RelayFn/Resource",
+    "aws:asset:path": "asset.3e7ae092966612d846e34d1e0260b7f546bf7a555c35f43f166ceb9b968ae3b9.zip",
+    "aws:asset:is-bundled": false,
+    "aws:asset:property": "Code"
+   }
+  },
+  "DbReaderApi208B39D4": {
+   "Type": "AWS::ApiGatewayV2::Api",
+   "Properties": {
+    "CorsConfiguration": {
+     "AllowHeaders": [
+      "content-type",
+      "authorization"
+     ],
+     "AllowMethods": [
+      "GET",
+      "POST",
+      "OPTIONS"
+     ],
+     "AllowOrigins": [
+      "*"
+     ]
+    },
+    "Name": "dbreader-api",
+    "ProtocolType": "HTTP"
+   },
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/DbReaderApi/Resource"
+   }
+  },
+  "DbReaderApiDefaultStageB559B1E4": {
+   "Type": "AWS::ApiGatewayV2::Stage",
+   "Properties": {
+    "ApiId": {
+     "Ref": "DbReaderApi208B39D4"
+    },
+    "AutoDeploy": true,
+    "StageName": "$default"
+   },
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/DbReaderApi/DefaultStage/Resource"
+   }
+  },
+  "DbReaderApiANYproxyRelayIntegration09695C4F": {
+   "Type": "AWS::ApiGatewayV2::Integration",
+   "Properties": {
+    "ApiId": {
+     "Ref": "DbReaderApi208B39D4"
+    },
+    "IntegrationType": "AWS_PROXY",
+    "IntegrationUri": {
+     "Fn::GetAtt": [
+      "RelayFnA38D0606",
+      "Arn"
+     ]
+    },
+    "PayloadFormatVersion": "2.0"
+   },
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/DbReaderApi/ANY--{proxy+}/RelayIntegration/Resource"
+   }
+  },
+  "DbReaderApiANYproxyRelayIntegrationPermission0B32D2C7": {
+   "Type": "AWS::Lambda::Permission",
+   "Properties": {
+    "Action": "lambda:InvokeFunction",
+    "FunctionName": {
+     "Fn::GetAtt": [
+      "RelayFnA38D0606",
+      "Arn"
+     ]
+    },
+    "Principal": "apigateway.amazonaws.com",
+    "SourceArn": {
+     "Fn::Join": [
+      "",
+      [
+       "arn:",
+       {
+        "Ref": "AWS::Partition"
+       },
+       ":execute-api:ap-southeast-2:806938668256:",
+       {
+        "Ref": "DbReaderApi208B39D4"
+       },
+       "/*/*/{proxy+}"
+      ]
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/DbReaderApi/ANY--{proxy+}/RelayIntegration-Permission"
+   }
+  },
+  "DbReaderApiANYproxyE9DB7791": {
+   "Type": "AWS::ApiGatewayV2::Route",
+   "Properties": {
+    "ApiId": {
+     "Ref": "DbReaderApi208B39D4"
+    },
+    "AuthorizationType": "NONE",
+    "RouteKey": "ANY /{proxy+}",
+    "Target": {
+     "Fn::Join": [
+      "",
+      [
+       "integrations/",
+       {
+        "Ref": "DbReaderApiANYproxyRelayIntegration09695C4F"
+       }
+      ]
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/DbReaderApi/ANY--{proxy+}/Resource"
+   }
+  },
+  "CDKMetadata": {
+   "Type": "AWS::CDK::Metadata",
+   "Properties": {
+    "Analytics": "v2:deflate64:H4sIAAAAAAAA/12QQW+DMAyFf8vuIZtA672dNK2nVbT3ygQPuUCCsNMKRfnvI2GTpp3e95xnO0mpy12lX57gwYVp+2KgRoezgOnVWroGrnQ4eNOjqLcv+0ObHIAxqnaxMLp27bpAM2BKZYhqgLFpQYd3b42Qs+noL59wHol5dVERjDrUbuvPenIDmSXnMkXF1RWYUVjvkyiYqAPBByz3UocPkWk/UWpIkuz6jC4P3CCVaudlo6MV7Gb4vcw/m3MxqhrZ+dmgyivTHLJdCnx6mbxEZV2L+sbP93KnX9d/vDFRMXsrNKKuN/0G1/ef4mQBAAA="
+   },
+   "Metadata": {
+    "aws:cdk:path": "DbReaderStack/CDKMetadata/Default"
+   }
+  }
+ },
+ "Outputs": {
+  "ApiUrl": {
+   "Value": {
+    "Fn::GetAtt": [
+     "DbReaderApi208B39D4",
+     "ApiEndpoint"
+    ]
+   }
+  },
+  "BucketName": {
+   "Value": {
+    "Ref": "SnapshotsBucketF8064843"
+   }
+  },
+  "LambdaName": {
+   "Value": {
+    "Ref": "RelayFnA38D0606"
+   }
+  },
+  "Region": {
+   "Value": "ap-southeast-2"
+  }
+ },
+ "Parameters": {
+  "BootstrapVersion": {
+   "Type": "AWS::SSM::Parameter::Value<String>",
+   "Default": "/cdk-bootstrap/hnb659fds/version",
+   "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+  }
+ },
+ "Rules": {
+  "CheckBootstrapVersion": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Not": [
+       {
+        "Fn::Contains": [
+         [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+         ],
+         {
+          "Ref": "BootstrapVersion"
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+    }
+   ]
+  }
+ }
+}

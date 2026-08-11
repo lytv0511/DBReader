@@ -45,3 +45,6 @@ src-tauri/plugins/file-bridge/android/.gradle
 # Sync relay server build artifacts and data
 relay/target
 relay/sync-data
+
+# Tauri plugin build outputs
+src-tauri/plugins/*/target

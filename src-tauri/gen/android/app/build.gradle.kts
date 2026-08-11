@@ -45,6 +45,19 @@ android {
             )
         }
     }
+    signingConfigs {
+        create("release") {
+            storeFile = file("release.keystore")
+            storePassword = "dbreader2026"
+            keyAlias = "dbreader"
+            keyPassword = "dbreader2026"
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
     kotlinOptions {
         jvmTarget = "1.8"
     }

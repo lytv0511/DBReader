@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, Plus, Minus, ShoppingCart, Trash2, Wrench, AlertTriangle } from 'lucide-react';
 import { executeQuery } from '../../lib/db';
-import { todayLocalISO, stampForDate } from '../../lib/dates';
+import { todayLocalISO, nowLocalStamp } from '../../lib/dates';
 import { useI18n } from '../../lib/language';
 
 interface Product {
@@ -187,8 +187,8 @@ export default function QuickAdjust() {
       const notesVal = notes.trim() ? `'${notes.trim().replace(/'/g, "''")}'` : 'NULL';
 
       await executeQuery(`
-        INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at)
-        VALUES (${batchId}, ${provVal}, ${adjustedQty}, '${txType}', ${notesVal}, '${stampForDate(txDate)}')
+        INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at, log_date)
+        VALUES (${batchId}, ${provVal}, ${adjustedQty}, '${txType}', ${notesVal}, '${nowLocalStamp()}', '${txDate}')
       `);
 
       // Reset form but keep product selected

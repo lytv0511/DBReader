@@ -14,6 +14,10 @@ interface Product {
   current_stock: number;
   reorder_threshold: number;
   base_unit_name: string;
+  batch_id: number | null;
+  provider_id: number | null;
+  provider_name: string;
+  batch_number: string;
 }
 
 interface ProductGalleryProps {
@@ -67,13 +71,18 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
             COALESCE(c.color, '#5b6abf') AS category_color,
             COALESCE(SUM(il.quantity_change), 0) AS current_stock,
             p.reorder_threshold,
-            p.base_unit_name
+            p.base_unit_name,
+            b.id AS batch_id,
+            COALESCE(b.batch_number, '') AS batch_number,
+            pr.id AS provider_id,
+            COALESCE(pr.name, '') AS provider_name
           FROM products p
           LEFT JOIN categories c ON p.category_id = c.id
           LEFT JOIN batches b ON b.product_id = p.id
           LEFT JOIN inventory_logs il ON il.batch_id = b.id
-          GROUP BY p.id, p.name, p.sku, c.name, p.category_id, c.icon, c.color, p.reorder_threshold, p.base_unit_name
-          ORDER BY c.name, p.name
+          LEFT JOIN providers pr ON il.provider_id = pr.id
+          GROUP BY p.id, p.name, p.sku, c.name, p.category_id, c.icon, c.color, p.reorder_threshold, p.base_unit_name, b.id, b.batch_number, pr.id, pr.name
+          ORDER BY c.name, p.name, pr.name, b.purchase_date
         `),
         executeQuery(`
           SELECT c.id, c.name, c.icon, c.color, COUNT(p.id) AS cnt
@@ -95,6 +104,10 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
         current_stock: r[7] as number,
         reorder_threshold: r[8] as number,
         base_unit_name: r[9] as string || 'unit',
+        batch_id: r[10] as number | null,
+        batch_number: r[11] as string || '',
+        provider_id: r[12] as number | null,
+        provider_name: r[13] as string || '',
       })));
 
       const cats = categoriesResult.rows.map((r) => ({
@@ -246,7 +259,7 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
 
               return (
                 <button
-                  key={product.id}
+                  key={`${product.id}-${product.batch_id ?? 0}-${product.provider_id ?? 0}`}
                   onClick={() => onSelectProduct(product)}
                   className="group bg-bg-secondary border border-border rounded-xl p-4 flex flex-col items-center text-center hover:border-accent/40 hover:shadow-lg hover:shadow-accent/5 transition-all hover:scale-[1.02]"
                 >
@@ -260,6 +273,9 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
                     {product.name}
                   </p>
                   <p className="text-[10px] text-text-secondary mb-2">{product.category_name}</p>
+                  <p className="text-[10px] text-text-secondary truncate w-full mb-2 text-accent/80">
+                    {[product.provider_name, product.batch_number].filter(Boolean).join(' · ') || '-'}
+                  </p>
                   <div className={`text-lg font-bold ${isOut ? 'text-error' : isLow ? 'text-warning' : 'text-success'}`}>
                     {stock}
                   </div>

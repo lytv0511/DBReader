@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /Users/jasonleong/.cargo/bin/cargo-xwin xwin "$@"

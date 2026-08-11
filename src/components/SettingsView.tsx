@@ -23,14 +23,16 @@ import {
   BellRing,
   Loader2,
   RefreshCw,
+  KeyRound,
+  LogOut,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppPreferences, ThemeMode, LanguageCode } from '../types';
 import { DEFAULT_TABS } from '../types';
 import { LANGS } from '../lib/i18n';
-import { isAndroid } from '../lib/platform';
-import { syncConfigure, syncDisable, syncEnable, syncNow, syncStatus, type SyncStatus } from '../lib/sync';
+import { isMobile as isMobilePlatform } from '../lib/platform';
+import { syncDisable, syncEnable, syncInviteCode, syncJoin, syncNow, syncStatus, type SyncStatus } from '../lib/sync';
 
 interface SettingsViewProps {
   prefs: AppPreferences;
@@ -38,13 +40,15 @@ interface SettingsViewProps {
   onChange: (patch: Partial<AppPreferences>) => void;
   onReset: () => void;
   t: (key: string) => string;
+  accountEmail: string;
+  onSignOut: () => void;
 }
 
 const LIMIT_OPTIONS = [50, 100, 250, 500, 1000];
 const MAX_ENABLED_TABS = 6;
 
-export default function SettingsView({ prefs, tabs, onChange, onReset, t }: SettingsViewProps) {
-  const isMobile = isAndroid();
+export default function SettingsView({ prefs, tabs, onChange, onReset, t, accountEmail, onSignOut }: SettingsViewProps) {
+  const isMobile = isMobilePlatform();
   const themes: { mode: ThemeMode; icon: React.ReactNode; label: string }[] = [
     { mode: 'dark', icon: <Moon size={14} />, label: t('settings.theme.dark') },
     { mode: 'light', icon: <Sun size={14} />, label: t('settings.theme.light') },
@@ -134,43 +138,23 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
   };
 
   const [sync, setSync] = useState<SyncStatus | null>(null);
-  const [syncForm, setSyncForm] = useState({ transport: 'relay', endpoint: '', token: '', dbId: '' });
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState('');
+  const [joining, setJoining] = useState(false);
 
   useEffect(() => {
     syncStatus()
-      .then((s) => {
-        setSync(s);
-        setSyncForm({
-          transport: s.transport || 'relay',
-          endpoint: s.endpoint,
-          token: s.token,
-          dbId: s.dbId,
-        });
-      })
+      .then(setSync)
       .catch(() => {});
   }, []);
-
-  const saveSyncConfig = async () => {
-    setSyncing(true);
-    setSyncMsg(null);
-    try {
-      const s = await syncConfigure(syncForm.transport, syncForm.endpoint, syncForm.token, syncForm.dbId);
-      setSync(s);
-      setSyncMsg(t('settings.sync.saveDone'));
-    } catch (e) {
-      setSyncMsg(String(e));
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const toggleSync = async () => {
     try {
       const s = sync?.enabled ? await syncDisable() : await syncEnable();
       setSync(s);
-      setSyncMsg(null);
+      setSyncMsg(s?.enabled ? t('settings.sync.connected') : null);
     } catch (e) {
       setSyncMsg(String(e));
     }
@@ -186,6 +170,36 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
       setSyncMsg(String(e));
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const doShowInvite = async () => {
+    setSyncMsg(null);
+    try {
+      const code = await syncInviteCode();
+      setInviteCode(code);
+    } catch (e) {
+      setSyncMsg(String(e));
+    }
+  };
+
+  const doSignOut = () => {
+    onSignOut();
+    setInviteCode(null);
+  };
+
+  const doJoin = async () => {
+    if (!joinCode.trim()) return;
+    setJoining(true);
+    setSyncMsg(null);
+    try {
+      const s = await syncJoin(joinCode.trim());
+      setSync(s);
+      setSyncMsg(t('settings.sync.joinDone'));
+    } catch (e) {
+      setSyncMsg(String(e));
+    } finally {
+      setJoining(false);
     }
   };
 
@@ -606,54 +620,7 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
           <p className="text-xs text-text-secondary">{t('settings.sync.desc')}</p>
           {!sync?.dbOpen && <p className="text-xs text-text-secondary">{t('settings.sync.noDb')}</p>}
           <div className={`flex flex-col gap-3 ${sync?.dbOpen ? '' : 'opacity-40 pointer-events-none'}`}>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">{t('settings.sync.transport')}</span>
-              <select
-                className={selectCls}
-                value={syncForm.transport}
-                onChange={(e) => setSyncForm({ ...syncForm, transport: e.target.value })}
-              >
-                <option value="relay">Relay server</option>
-                <option value="folder">Folder</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">{t('settings.sync.endpoint')}</span>
-              <input
-                className={inputCls}
-                value={syncForm.endpoint}
-                onChange={(e) => setSyncForm({ ...syncForm, endpoint: e.target.value })}
-                placeholder="http://192.168.1.10:8787"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">{t('settings.sync.token')}</span>
-              <input
-                className={inputCls}
-                value={syncForm.token}
-                onChange={(e) => setSyncForm({ ...syncForm, token: e.target.value })}
-                placeholder="optional"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">{t('settings.sync.dbId')}</span>
-              <input
-                className={inputCls}
-                value={syncForm.dbId}
-                onChange={(e) => setSyncForm({ ...syncForm, dbId: e.target.value })}
-                placeholder="wineshop"
-              />
-              <span className="text-xs text-text-secondary">{t('settings.sync.dbIdHint')}</span>
-            </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={saveSyncConfig}
-                disabled={syncing}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:opacity-90 disabled:opacity-50 rounded-md text-xs text-white transition-opacity"
-              >
-                {syncing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                {t('settings.sync.save')}
-              </button>
               <button
                 onClick={doSyncNow}
                 disabled={syncing || !sync?.enabled}
@@ -663,6 +630,64 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t }: Sett
                 {t('settings.sync.now')}
               </button>
               {syncMsg && <span className="text-xs text-text-secondary truncate">{syncMsg}</span>}
+            </div>
+            <div className="flex flex-col gap-2 border-t border-border pt-3 mt-1">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">{t('settings.sync.invite')}</span>
+                <span className="text-xs text-text-secondary">{t('settings.sync.inviteHint')}</span>
+                {inviteCode && (
+                  <span className="text-sm font-mono tracking-widest text-accent">{inviteCode}</span>
+                )}
+                <button
+                  onClick={doShowInvite}
+                  disabled={!sync?.enabled}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-md text-xs text-text-primary transition-colors disabled:opacity-50"
+                >
+                  <KeyRound size={11} />
+                  {t('settings.sync.showCode')}
+                </button>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">{t('settings.sync.join')}</span>
+                <span className="text-xs text-text-secondary">{t('settings.sync.joinHint')}</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    className={inputCls}
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value)}
+                    placeholder="ABC12345"
+                    maxLength={8}
+                  />
+                  <button
+                    onClick={doJoin}
+                    disabled={joining || !joinCode.trim()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:opacity-90 disabled:opacity-50 rounded-md text-xs text-white transition-opacity"
+                  >
+                    {joining ? <Loader2 size={11} className="animate-spin" /> : <KeyRound size={11} />}
+                    {t('settings.sync.joinBtn')}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 border-t border-border pt-3 mt-1">
+              <span className="text-xs text-text-secondary">{t('settings.sync.account')}</span>
+              <span className="text-xs text-text-secondary">{t('settings.sync.accountHint')}</span>
+              {accountEmail ? (
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm text-text-primary">
+                    {t('settings.sync.signedInAs').replace('{email}', accountEmail)}
+                  </span>
+                  <button
+                    onClick={doSignOut}
+                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-md text-xs text-text-primary transition-colors"
+                  >
+                    <LogOut size={11} />
+                    {t('settings.sync.signOut')}
+                  </button>
+                </div>
+              ) : (
+                <span className="text-xs text-text-secondary">{t('settings.sync.signedOut')}</span>
+              )}
             </div>
             {sync?.dbOpen && (
               <div className="flex flex-col gap-0.5 text-xs text-text-secondary">

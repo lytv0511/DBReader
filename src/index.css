@@ -278,7 +278,7 @@ textarea {
 
 /* -------- Platform form-factor adjustments -------- */
 html[data-form-factor='mobile'] {
-  font-size: 15px;
+  font-size: 18px;
 }
 
 html[data-form-factor='mobile'] .workspace-hero,

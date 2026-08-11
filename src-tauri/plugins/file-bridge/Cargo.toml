@@ -2,7 +2,7 @@
 name = "filebridge"
 version = "0.1.0"
 edition = "2021"
-description = "Android-only file import/export bridge for DBReader"
+description = "Mobile file import/export bridge for DBReader (Android + iOS)"
 links = "filebridge"
 
 [lib]
@@ -15,4 +15,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [build-dependencies]
-tauri-plugin = "2"
+tauri-plugin = { version = "2", features = ["build"] }

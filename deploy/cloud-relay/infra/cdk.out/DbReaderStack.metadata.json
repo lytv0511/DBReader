@@ -1,0 +1,362 @@
+{
+  "/DbReaderStack": [
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/Table-users": [
+    {
+      "type": "aws:cdk:hasPhysicalName",
+      "data": {
+        "Ref": "Tableusers60537A7D"
+      }
+    }
+  ],
+  "/DbReaderStack/Table-sessions": [
+    {
+      "type": "aws:cdk:hasPhysicalName",
+      "data": {
+        "Ref": "Tablesessions5F65A6A6"
+      }
+    }
+  ],
+  "/DbReaderStack/Table-teams": [
+    {
+      "type": "aws:cdk:hasPhysicalName",
+      "data": {
+        "Ref": "Tableteams16688969"
+      }
+    }
+  ],
+  "/DbReaderStack/Table-files": [
+    {
+      "type": "aws:cdk:hasPhysicalName",
+      "data": {
+        "Ref": "Tablefiles501C2015"
+      }
+    }
+  ],
+  "/DbReaderStack/Table-ops": [
+    {
+      "type": "aws:cdk:hasPhysicalName",
+      "data": {
+        "Ref": "Tableops89251B2D"
+      }
+    }
+  ],
+  "/DbReaderStack/ApiUrl": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "ApiUrl"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:93:9)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/BucketName": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BucketName"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:94:9)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/LambdaName": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LambdaName"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:95:9)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/Region": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Region"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:96:9)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/DbReaderStack/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/DbReaderStack/SnapshotsBucket/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "SnapshotsBucketF8064843"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Bucket2 in aws-cdk-lib...",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:22:24)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/Table-users/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Tableusers60537A7D"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Table2 in aws-cdk-lib...",
+        "table (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:33:56)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:41:23)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/Table-sessions/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Tablesessions5F65A6A6"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Table2 in aws-cdk-lib...",
+        "table (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:33:56)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:42:26)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/Table-teams/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Tableteams16688969"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Table2 in aws-cdk-lib...",
+        "table (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:33:56)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:43:23)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/Table-files/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Tablefiles501C2015"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Table2 in aws-cdk-lib...",
+        "table (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:33:56)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:44:23)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/Table-ops/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Tableops89251B2D"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Table2 in aws-cdk-lib...",
+        "table (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:33:56)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:45:21)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/RelayFn/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "RelayFnA38D0606"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Function2 in aws-cdk-lib...",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:56:20)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/DbReaderApi/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DbReaderApi208B39D4"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new HttpApi2 in aws-cdk-lib...",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:80:21)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/CDKMetadata/Default": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CDKMetadata"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...App.synth in aws-cdk-lib...",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:10 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/RelayFn/ServiceRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "RelayFnServiceRole51DC6C16"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Function2 in aws-cdk-lib...",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:56:20)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/DbReaderApi/DefaultStage/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DbReaderApiDefaultStageB559B1E4"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new HttpApi2 in aws-cdk-lib...",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:80:21)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/DbReaderApi/ANY--{proxy+}/RelayIntegration-Permission": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DbReaderApiANYproxyRelayIntegrationPermission0B32D2C7"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../Users/jasonleong/DBReader/deploy/cloud-relay/infra/node_modules/aws-cdk-lib/aws-apigatewayv2/lib/http/api.js:1:96 in aws-cdk-lib...",
+        "Array.map (:)",
+        "...WrappedClass.<anonymous> in aws-cdk-lib...",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:88:13)"
+      ]
+    }
+  ],
+  "/DbReaderStack/DbReaderApi/ANY--{proxy+}/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DbReaderApiANYproxyE9DB7791"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../Users/jasonleong/DBReader/deploy/cloud-relay/infra/node_modules/aws-cdk-lib/aws-apigatewayv2/lib/http/api.js:1:96 in aws-cdk-lib...",
+        "Array.map (:)",
+        "...WrappedClass.<anonymous> in aws-cdk-lib...",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:88:13)",
+        "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/DbReaderStack/RelayFn/ServiceRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "RelayFnServiceRoleDefaultPolicy9A16A601"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/DbReaderStack/DbReaderApi/ANY--{proxy+}/RelayIntegration/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DbReaderApiANYproxyRelayIntegration09695C4F"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../Users/jasonleong/DBReader/deploy/cloud-relay/infra/node_modules/aws-cdk-lib/aws-apigatewayv2/lib/http/api.js:1:96 in aws-cdk-lib...",
+        "Array.map (:)",
+        "...WrappedClass.<anonymous> in aws-cdk-lib...",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:88:13)"
+      ]
+    }
+  ]
+}

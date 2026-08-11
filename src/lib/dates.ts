@@ -14,8 +14,3 @@ export function nowLocalStamp(): string {
   const ss = String(d.getSeconds()).padStart(2, '0');
   return `${d.getFullYear()}-${mm}-${dd} ${hh}:${min}:${ss}`;
 }
-
-export function stampForDate(date: string): string {
-  if (!date || date.length < 10) return nowLocalStamp();
-  return `${date.slice(0, 10)} ${nowLocalStamp().slice(11)}`;
-}

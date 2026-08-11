@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use dbreader_relay::{serve, Relay};
 
@@ -36,13 +37,13 @@ fn main() {
         i += 1;
     }
     let relay = match Relay::new(root, token) {
-        Ok(r) => r,
+        Ok(r) => Arc::new(r),
         Err(e) => {
             eprintln!("{}", e);
             std::process::exit(1);
         }
     };
-    if let Err(e) = serve(&relay, port) {
+    if let Err(e) = serve(relay, port) {
         eprintln!("{}", e);
         std::process::exit(1);
     }

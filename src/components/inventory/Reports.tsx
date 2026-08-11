@@ -25,6 +25,8 @@ interface ProductRow {
   batch_count: number;
   batches_in_period: number;
   suppliers_in_period: number;
+  provider_name: string;
+  batch_number: string;
 }
 
 interface BatchRow {
@@ -80,7 +82,14 @@ const TX_QUERY = `
   LEFT JOIN providers pr ON il.provider_id = pr.id
 `;
 
-const buildOverallSql = (productWhere: string, logJoin: string, logSub: string, batchSub: string) => `
+const buildOverallSql = (bundle: boolean, productWhere: string, logJoin: string, batchSub: string) => {
+  const storageSelect = bundle
+    ? "'' AS provider_name, '' AS batch_number"
+    : "COALESCE(pr.name, '') AS provider_name, COALESCE(b.batch_number, '') AS batch_number";
+  const group = bundle
+    ? 'GROUP BY p.id, p.name, p.sku, c.name, p.reorder_threshold, p.base_unit_name'
+    : 'GROUP BY p.id, p.name, p.sku, c.name, p.reorder_threshold, p.base_unit_name, b.id, b.batch_number, pr.id, pr.name';
+  return `
   SELECT
     p.id,
     p.name,
@@ -92,29 +101,22 @@ const buildOverallSql = (productWhere: string, logJoin: string, logSub: string, 
     COALESCE(SUM(CASE WHEN il.transaction_type = 'USAGE' THEN ABS(il.quantity_change) ELSE 0 END), 0) AS total_used,
     COALESCE(SUM(CASE WHEN il.transaction_type = 'SPOILAGE' THEN ABS(il.quantity_change) ELSE 0 END), 0) AS total_spoiled,
     COALESCE(SUM(il.quantity_change), 0) AS current_stock,
-    COALESCE((
-      SELECT SUM(il3.quantity_change * b3.unit_cost_price)
-      FROM inventory_logs il3
-      JOIN batches b3 ON il3.batch_id = b3.id
-      WHERE b3.product_id = p.id${logSub}
-    ), 0) AS stock_value,
-    COALESCE((
-      SELECT SUM(il3.quantity_change * b3.unit_cost_price)
-      FROM inventory_logs il3
-      JOIN batches b3 ON il3.batch_id = b3.id
-      WHERE b3.product_id = p.id AND il3.transaction_type IN ('PURCHASE', 'ADJUSTMENT')${logSub}
-    ), 0) AS money_spent,
+    COALESCE(SUM(il.quantity_change * b.unit_cost_price), 0) AS stock_value,
+    COALESCE(SUM(CASE WHEN il.transaction_type IN ('PURCHASE', 'ADJUSTMENT') THEN il.quantity_change * b.unit_cost_price ELSE 0 END), 0) AS money_spent,
     COUNT(DISTINCT b.id) AS batch_count,
-    COALESCE((SELECT COUNT(*) FROM batches b2 WHERE b2.product_id = p.id${batchSub}), 0) AS batches_in_period,
-    COALESCE((SELECT COUNT(DISTINCT b2.supplier_name) FROM batches b2 WHERE b2.product_id = p.id${batchSub}), 0) AS suppliers_in_period
+    COALESCE((SELECT COUNT(*) FROM batches b2 WHERE b2.product_id = p.id${bundle ? '' : ' AND b2.id = b.id'}${batchSub}), 0) AS batches_in_period,
+    COALESCE((SELECT COUNT(DISTINCT b2.supplier_name) FROM batches b2 WHERE b2.product_id = p.id${bundle ? '' : ' AND b2.id = b.id'}${batchSub}), 0) AS suppliers_in_period,
+    ${storageSelect}
   FROM products p
   LEFT JOIN categories c ON p.category_id = c.id
   LEFT JOIN batches b ON b.product_id = p.id
   LEFT JOIN inventory_logs il ON il.batch_id = b.id${logJoin}
+  LEFT JOIN providers pr ON il.provider_id = pr.id
   ${productWhere}
-  GROUP BY p.id, p.name, p.sku, c.name, p.reorder_threshold, p.base_unit_name
-  ORDER BY c.name, p.name
+  ${group}
+  ORDER BY c.name, p.name, pr.name, b.purchase_date, p.id
 `;
+};
 
 const buildBatchDetailSql = (where: string) => `
   SELECT
@@ -169,6 +171,7 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
   const [productRows, setProductRows] = useState<ProductRow[]>([]);
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [printError, setPrintError] = useState<string | null>(null);
+  const [bundleSimilar, setBundleSimilar] = useState(false);
 
   useEffect(() => {
     executeQuery('SELECT id, name, sku, category_id FROM products ORDER BY name')
@@ -208,12 +211,11 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
         const productWhere = buildProductWhere(filters);
         const logDate = buildLogDateFilters(filters);
         const logJoin = logDate.length ? ` AND ${logDate.join(' AND ')}` : '';
-        const logSub = logDate.length ? ` AND ${logDate.join(' AND ').replaceAll('il.', 'il3.')}` : '';
         const batchWhere = buildBatchWhere(filters);
         const batchDate = buildBatchDateFilters(filters, 'b2');
         const batchSub = batchDate.length ? ` AND ${batchDate.join(' AND ')}` : '';
         const [products, batches] = await Promise.all([
-          executeQuery(buildOverallSql(productWhere, logJoin, logSub, batchSub)),
+          executeQuery(buildOverallSql(bundleSimilar, productWhere, logJoin, batchSub)),
           executeQuery(buildBatchDetailSql(batchWhere)),
         ]);
         setProductRows(products.rows.map((r) => ({
@@ -232,6 +234,8 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
           batch_count: r[12] as number,
           batches_in_period: r[13] as number,
           suppliers_in_period: r[14] as number,
+          provider_name: r[15] as string,
+          batch_number: r[16] as string,
         })));
         setBatchRows(batches.rows.map((r) => ({
           batch_number: r[0] as string | null,
@@ -265,7 +269,7 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
       }
     } catch { /* ignore */ }
     setLoading(false);
-  }, [reportType, filters]);
+  }, [reportType, filters, bundleSimilar]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -365,10 +369,16 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
   );
 
   const renderProdRow = (row: ProductRow) => (
-    <tr key={row.id} data-unit className="border-b border-gray-100">
+    <tr key={`${row.id}-${row.batch_number}-${row.provider_name}`} data-unit className="border-b border-gray-100">
       <td className="py-1.5 text-gray-900">{row.name}</td>
       <td className="py-1.5 text-gray-600">{row.category_name}</td>
       <td className="py-1.5 text-gray-600 font-mono">{row.sku || '-'}</td>
+      {!bundleSimilar && (
+        <>
+          <td className="py-1.5 text-gray-600 font-mono">{row.batch_number || '-'}</td>
+          <td className="py-1.5 text-gray-600">{row.provider_name || '-'}</td>
+        </>
+      )}
       <td className="py-1.5 text-right font-mono text-gray-700">{row.total_purchased}</td>
       <td className="py-1.5 text-right font-mono text-gray-700">{row.total_used}</td>
       <td className="py-1.5 text-right font-mono text-gray-700">{row.total_spoiled}</td>
@@ -548,20 +558,28 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
         ) : kind === 'products' ? (
           <>
             <colgroup>
-              <col style={{ width: '12.5%' }} />
-              <col style={{ width: '12.5%' }} />
-              <col style={{ width: '12.5%' }} />
-              <col style={{ width: '12.5%' }} />
-              <col style={{ width: '12.5%' }} />
-              <col style={{ width: '12.5%' }} />
-              <col style={{ width: '12.5%' }} />
-              <col style={{ width: '12.5%' }} />
+              <col style={{ width: bundleSimilar ? '12.5%' : '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: bundleSimilar ? '12.5%' : '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
             </colgroup>
             <thead>
               <tr className="border-b border-gray-200">
                 <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.product')}</th>
                 <th className="text-left py-1.5 text-gray-500 font-medium">{t('dash.stock.category')}</th>
                 <th className="text-left py-1.5 text-gray-500 font-medium">{t('detail.sku')}</th>
+                {!bundleSimilar && (
+                  <>
+                    <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.batch')}</th>
+                    <th className="text-left py-1.5 text-gray-500 font-medium">{t('logs.col.provider')}</th>
+                  </>
+                )}
                 <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.purchased')}</th>
                 <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.used')}</th>
                 <th className="text-right py-1.5 text-gray-500 font-medium">{t('reports.spoiled')}</th>
@@ -773,6 +791,18 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol }: { reportLan
           >
             {t('reports.last7Days')}
           </button>
+          {reportType === 'overall' && (
+            <button
+              onClick={() => setBundleSimilar((v) => !v)}
+              className={`px-2 py-1 border rounded text-xs transition-colors ${
+                bundleSimilar
+                  ? 'bg-accent text-white border-accent'
+                  : 'bg-bg-tertiary hover:bg-bg-hover border-border text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              {t('reports.bundleAll')}
+            </button>
+          )}
         </div>
       </div>
 

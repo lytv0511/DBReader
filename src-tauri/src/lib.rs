@@ -5,6 +5,7 @@ use std::time::Duration;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 mod sync;
+mod sync_live;
 
 pub(crate) struct DbState {
     pub(crate) inner: Mutex<InnerState>,
@@ -16,6 +17,9 @@ pub(crate) struct InnerState {
 }
 
 pub struct SyncGate(pub Mutex<()>);
+
+#[cfg(windows)]
+static ASSET_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(14371);
 
 struct PrintState(Mutex<PrintStateInner>);
 
@@ -117,7 +121,8 @@ CREATE TABLE IF NOT EXISTS batches (
     unit_cost_price NUMERIC(12, 2) NOT NULL,
     purchase_date DATE NOT NULL,
     status VARCHAR(30) DEFAULT 'in_inventory' CHECK (status IN ('ordered', 'shipping', 'arrived', 'in_inventory', 'used', 'reserved')),
-    notes TEXT
+    notes TEXT,
+    is_removed INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS inventory_logs (
@@ -127,7 +132,8 @@ CREATE TABLE IF NOT EXISTS inventory_logs (
     quantity_change NUMERIC(10, 2) NOT NULL,
     transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('PURCHASE', 'USAGE', 'SPOILAGE', 'ADJUSTMENT')),
     notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    log_date DATE
 );
 
 CREATE TABLE IF NOT EXISTS product_notes (
@@ -407,6 +413,24 @@ fn get_columns_internal(conn: &Connection, table: &str) -> Result<Vec<ColumnInfo
     Ok(columns)
 }
 
+/// Wakes the live-sync push thread whenever the open database is written to.
+/// Called after a connection is opened or created, before it is stored.
+fn register_live_hook(conn: &Connection, app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    let live = app.state::<std::sync::Arc<sync_live::LiveSync>>().inner().clone();
+    conn.update_hook(Some(
+        move |_action: rusqlite::hooks::Action, _db_name: &str, table: &str, _rowid: i64| {
+            if live.applying.load(Ordering::Relaxed) {
+                return;
+            }
+            if table.starts_with("_dbsync") {
+                return;
+            }
+            live.signal();
+        },
+    ));
+}
+
 #[tauri::command]
 fn open_database(path: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
@@ -417,11 +441,14 @@ fn open_database(path: String, state: State<DbState>, app: tauri::AppHandle) -> 
     if let Some(first) = tables.first() {
         columns = get_columns_internal(&conn, first)?;
     }
+    register_live_hook(&conn, &app);
     let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
     *inner = InnerState {
         conn: Some(conn),
         path: Some(path),
     };
+    drop(inner);
+    sync::auto_connect_account(&app);
     let handle = app.clone();
     std::thread::spawn(move || email_check(&handle, false));
     Ok(TableInfo {
@@ -452,11 +479,14 @@ fn create_new_database(path: String, state: State<DbState>, app: tauri::AppHandl
     if let Some(first) = tables.first() {
         columns = get_columns_internal(&conn, first)?;
     }
+    register_live_hook(&conn, &app);
     let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
     *inner = InnerState {
         conn: Some(conn),
         path: Some(path),
     };
+    drop(inner);
+    sync::auto_connect_account(&app);
     let handle = app.clone();
     std::thread::spawn(move || email_check(&handle, false));
     Ok(TableInfo {
@@ -467,14 +497,14 @@ fn create_new_database(path: String, state: State<DbState>, app: tauri::AppHandl
 
 #[tauri::command]
 fn mobile_create_database(name: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
         std::fs::create_dir_all(dir.join("databases")).map_err(|e| e.to_string())?;
         let path = dir.join("databases").join(format!("{}.db", name));
         create_new_database(path.display().to_string(), state, app)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (name, state, app);
         Err("Creating databases is not supported on desktop".into())
@@ -664,9 +694,11 @@ fn migrate_schema(state: State<DbState>) -> Result<(), String> {
         if has_column("inventory_logs", "location_id") {
             conn.execute_batch("ALTER TABLE inventory_logs RENAME COLUMN location_id TO provider_id;").ok();
         }
-        let steps: [&str; 19] = [
+        let steps: [&str; 21] = [
             "ALTER TABLE batches ADD COLUMN status VARCHAR(30) DEFAULT 'in_inventory';",
             "CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status);",
+            "ALTER TABLE inventory_logs ADD COLUMN log_date DATE;",
+            "ALTER TABLE batches ADD COLUMN is_removed INTEGER DEFAULT 0;",
             "ALTER TABLE categories ADD COLUMN description TEXT;",
             "ALTER TABLE categories ADD COLUMN icon VARCHAR(10) DEFAULT '📋';",
             "ALTER TABLE categories ADD COLUMN color VARCHAR(20) DEFAULT '#5b6abf';",
@@ -1215,7 +1247,7 @@ fn prefs_desktop_path() -> Result<std::path::PathBuf, String> {
 }
 
 fn prefs_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let dir = app
             .path()
@@ -1224,7 +1256,7 @@ fn prefs_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         Ok(dir.join(".dbreader-state.json"))
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         prefs_desktop_path()
@@ -2185,7 +2217,7 @@ fn print_report(
     html: String,
     save_path: Option<String>,
 ) -> Result<(), String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (app, html, save_path);
         return Err("Printing is not supported on Android".into());
@@ -2218,7 +2250,7 @@ fn print_report(
 
 #[tauri::command]
 fn get_print_html(app: tauri::AppHandle) -> Result<String, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = app;
         return Err("Printing is not supported on Android".into());
@@ -2230,7 +2262,7 @@ fn get_print_html(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 fn resize_print_window(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (app, width, height);
         return Err("printing resizing is not supported on Android".into());
@@ -2252,7 +2284,7 @@ fn take_print_path(app: &tauri::AppHandle) -> Option<String> {
 
 #[tauri::command]
 async fn print_ready(app: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = app;
         return Err("Printing is not supported on Android".into());
@@ -2398,7 +2430,7 @@ Err(e) => {
         }
         result
     }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
+    #[cfg(all(not(target_os = "windows"), not(target_os = "android"), not(target_os = "ios")))]
     {
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let app_for_thread = app.clone();
@@ -2418,7 +2450,7 @@ Err(e) => {
 
 #[tauri::command]
 fn close_print_window(app: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = app;
         return Ok(());
@@ -2432,7 +2464,7 @@ fn close_print_window(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn set_launch_at_login(enabled: bool) -> Result<(), String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = enabled;
         return Ok(());
@@ -2525,7 +2557,7 @@ fn tray_icon_image() -> tauri::image::Image<'static> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let start_hidden = std::env::args().any(|a| a == "--background");
-    let mut builder = tauri::Builder::default()
+let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
@@ -2538,13 +2570,14 @@ pub fn run() {
         .manage(PrintState(Mutex::new(Default::default())))
         .manage(EmailState(Mutex::new("No check performed yet".into())))
         .manage(NotificationState(Mutex::new(None)))
-        .manage(SyncGate(Mutex::new(())));
+        .manage(SyncGate(Mutex::new(())))
+        .manage(sync_live::LiveSync::new());
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         builder = builder.plugin(file_bridge::init());
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
@@ -2552,6 +2585,14 @@ pub fn run() {
                 let _ = win.set_focus();
             }
         }));
+    }
+    #[cfg(windows)]
+    {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .map(|l| l.local_addr().map(|a| a.port()).unwrap_or(14371))
+            .unwrap_or(14371);
+        ASSET_PORT.store(port, std::sync::atomic::Ordering::Relaxed);
+        builder = builder.plugin(tauri_plugin_localhost::Builder::new(port).build());
     }
 
     builder
@@ -2603,13 +2644,19 @@ pub fn run() {
             get_email_last_error,
             set_launch_at_login,
             sync::sync_status,
-            sync::sync_configure,
             sync::sync_enable,
             sync::sync_disable,
             sync::sync_now,
+            sync::sync_join,
+            sync::sync_invite_code,
+            sync::sync_signin,
+            sync::sync_signout,
+            sync::account_status,
+            sync::account_signin,
+            sync::account_signout,
         ])
         .on_window_event(|window, event| {
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     if window.label() == "main" {
@@ -2618,12 +2665,31 @@ pub fn run() {
                     }
                 }
             }
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             {
                 let _ = (window, event);
             }
         })
         .setup(move |app| {
+            #[cfg(windows)]
+            let main_url = WebviewUrl::External(
+                format!(
+                    "http://127.0.0.1:{}/",
+                    ASSET_PORT.load(std::sync::atomic::Ordering::Relaxed)
+                )
+                .parse()
+                .expect("invalid localhost url"),
+            );
+            #[cfg(not(windows))]
+            let main_url = WebviewUrl::App("index.html".into());
+
+            WebviewWindowBuilder::new(app, "main", main_url)
+                .title("DBReader")
+                .inner_size(1400.0, 900.0)
+                .min_inner_size(800.0, 600.0)
+                .build()
+                .map_err(|e| e.to_string())?;
+
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(60));
@@ -2636,13 +2702,10 @@ pub fn run() {
                 notification_check(&handle);
             });
 
-            let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(Duration::from_secs(30));
-                sync::background_sync(&handle);
-            });
+            let live = app.state::<std::sync::Arc<sync_live::LiveSync>>().inner().clone();
+            live.start(app.handle().clone());
 
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 use tauri::menu::{Menu, MenuItem};
                 use tauri::tray::TrayIconBuilder;

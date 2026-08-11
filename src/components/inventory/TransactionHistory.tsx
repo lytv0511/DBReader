@@ -12,7 +12,9 @@ interface TxEntry {
   storage_name: string | null;
   storage_sub: string | null;
   transaction_type: string;
+  quantity_change: number;
   notes: string | null;
+  log_date: string | null;
   created_at: string;
 }
 
@@ -38,17 +40,18 @@ export default function TransactionHistory() {
   const [filterAction, setFilterAction] = useState('');
 
   const buildDateWhere = (p: Period, from: string, to: string): string => {
+    const d = `COALESCE(il.log_date, date(il.created_at))`;
     switch (p) {
       case 'week':
-        return `date(il.created_at) >= date('now', '-7 days')`;
+        return `${d} >= date('now', '-7 days')`;
       case 'month':
-        return `date(il.created_at) >= date('now', 'start of month')`;
+        return `${d} >= date('now', 'start of month')`;
       case 'year':
-        return `date(il.created_at) >= date('now', 'start of year')`;
+        return `${d} >= date('now', 'start of year')`;
       case 'custom': {
         const parts: string[] = [];
-        if (from) parts.push(`date(il.created_at) >= '${from}'`);
-        if (to) parts.push(`date(il.created_at) <= '${to}'`);
+        if (from) parts.push(`${d} >= '${from}'`);
+        if (to) parts.push(`${d} <= '${to}'`);
         return parts.join(' AND ');
       }
       default:
@@ -84,7 +87,9 @@ export default function TransactionHistory() {
           pr.name AS provider_name,
           pr.sub_name,
           il.transaction_type,
+          il.quantity_change,
           il.notes,
+          il.log_date,
           il.created_at
         FROM inventory_logs il
         JOIN batches b ON il.batch_id = b.id
@@ -104,8 +109,10 @@ export default function TransactionHistory() {
         storage_name: r[5] as string | null,
         storage_sub: r[6] as string | null,
         transaction_type: r[7] as string,
-        notes: r[8] as string | null,
-        created_at: r[9] as string,
+        quantity_change: r[8] as number,
+        notes: r[9] as string | null,
+        log_date: r[10] as string | null,
+        created_at: r[11] as string,
       })));
     } catch (err) {
       setError(String(err));
@@ -304,7 +311,7 @@ export default function TransactionHistory() {
             <tbody className="divide-y divide-border">
               {entries.map((entry) => (
                 <tr key={entry.id} className="hover:bg-bg-hover transition-colors">
-                  <td className="px-4 py-2.5 text-text-secondary whitespace-nowrap">{entry.created_at?.slice(0, 10)}</td>
+                  <td className="px-4 py-2.5 text-text-secondary whitespace-nowrap">{entry.log_date || entry.created_at?.slice(0, 10)}</td>
                   <td className="px-4 py-2.5 text-text-secondary">
                     {entry.storage_name
                       ? `${entry.storage_name}${entry.storage_sub ? ` - ${entry.storage_sub}` : ''}`
@@ -319,7 +326,12 @@ export default function TransactionHistory() {
                       {t(`logs.typeName.${entry.transaction_type}`)}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-text-secondary truncate max-w-[200px]">{entry.notes || '-'}</td>
+                  <td className="px-4 py-2.5 text-text-secondary truncate max-w-[240px]">
+                    <span className={`font-bold mr-1 ${entry.quantity_change > 0 ? 'text-success' : entry.quantity_change < 0 ? 'text-error' : ''}`}>
+                      {entry.quantity_change !== 0 ? `${entry.quantity_change > 0 ? '+' : ''}${entry.quantity_change} ` : ''}
+                    </span>
+                    {entry.notes || '-'}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -1,0 +1,36 @@
+{
+  "version": "54.0.0",
+  "files": {
+    "3e7ae092966612d846e34d1e0260b7f546bf7a555c35f43f166ceb9b968ae3b9": {
+      "displayName": "RelayFn/Code",
+      "source": {
+        "path": "asset.3e7ae092966612d846e34d1e0260b7f546bf7a555c35f43f166ceb9b968ae3b9.zip",
+        "packaging": "file"
+      },
+      "destinations": {
+        "806938668256-ap-southeast-2-988b4372": {
+          "bucketName": "cdk-hnb659fds-assets-806938668256-ap-southeast-2",
+          "objectKey": "3e7ae092966612d846e34d1e0260b7f546bf7a555c35f43f166ceb9b968ae3b9.zip",
+          "region": "ap-southeast-2",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::806938668256:role/cdk-hnb659fds-file-publishing-role-806938668256-ap-southeast-2"
+        }
+      }
+    },
+    "58c34a298316c942bb86da34861dcbd5905f271a647a1fd293b342f25b76bc9e": {
+      "displayName": "DbReaderStack Template",
+      "source": {
+        "path": "DbReaderStack.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "806938668256-ap-southeast-2-371de0e2": {
+          "bucketName": "cdk-hnb659fds-assets-806938668256-ap-southeast-2",
+          "objectKey": "58c34a298316c942bb86da34861dcbd5905f271a647a1fd293b342f25b76bc9e.json",
+          "region": "ap-southeast-2",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::806938668256:role/cdk-hnb659fds-file-publishing-role-806938668256-ap-southeast-2"
+        }
+      }
+    }
+  },
+  "dockerImages": {}
+}

@@ -5,6 +5,10 @@ use tauri::{Manager, plugin::PluginHandle};
 const PLUGIN_IDENTIFIER: &str = "com.vincentleong.dbreader";
 const PLUGIN_CLASS: &str = "FileBridgePlugin";
 
+#[cfg(target_os = "ios")]
+tauri::ios_plugin_binding!(init_plugin_filebridge);
+
+
 struct FileBridgeState(Mutex<Option<PluginHandle<tauri::Wry>>>);
 
 impl Default for FileBridgeState {
@@ -36,7 +40,7 @@ async fn print_html(
     title: String,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let state = app.state::<FileBridgeState>();
         let handle = state
@@ -58,10 +62,10 @@ async fn print_html(
             .map_err(|e| e.to_string())?;
         Ok(())
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (html, title, app);
-        Err("Printing is only supported on Android".into())
+        Err("Printing is only supported on mobile".into())
     }
 }
 
@@ -78,6 +82,11 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
                 let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, PLUGIN_CLASS)?;
                 app.manage(FileBridgeState(Mutex::new(Some(handle))));
             }
+            #[cfg(target_os = "ios")]
+            {
+                let handle = api.register_ios_plugin(init_plugin_filebridge)?;
+                app.manage(FileBridgeState(Mutex::new(Some(handle))));
+            }
             Ok(())
         })
         .build()
@@ -89,7 +98,7 @@ async fn copy_uri_to_cache(
     file_name: String,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let state = app.state::<FileBridgeState>();
         let handle = state
@@ -111,10 +120,10 @@ async fn copy_uri_to_cache(
             .map_err(|e| e.to_string())?;
         response.path.ok_or_else(|| "Copy failed, no path returned".into())
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (uri, file_name, app);
-        Err("File import is only supported on Android".into())
+        Err("File import is only supported on mobile".into())
     }
 }
 
@@ -124,7 +133,7 @@ async fn export_to_document(
     file_name: String,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let state = app.state::<FileBridgeState>();
         let handle = state
@@ -146,9 +155,9 @@ async fn export_to_document(
             .map_err(|e| e.to_string())?;
         Ok(())
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (path, file_name, app);
-        Err("File export is only supported on Android".into())
+        Err("File export is only supported on mobile".into())
     }
 }

@@ -204,7 +204,7 @@ impl Relay {
                     break;
                 }
                 {
-                    let mut gen = not.gen.lock().map_err(|_| HttpReply {
+                    let gen = not.gen.lock().map_err(|_| HttpReply {
                         status: 500,
                         body: "{\"error\":\"lock poisoned\"}".into(),
                     })?;
@@ -363,31 +363,35 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-pub fn serve(relay: &Relay, port: u16) -> Result<(), String> {
+pub fn serve(relay: std::sync::Arc<Relay>, port: u16) -> Result<(), String> {
     let server = tiny_http::Server::http(("0.0.0.0", port))
         .map_err(|e| format!("Cannot bind port {}: {}", port, e))?;
     eprintln!("dbreader-relay listening on port {}", port);
-    for mut request in server.incoming_requests() {
-        let method = request.method().to_string();
-        let url = request.url().to_string();
-        let auth = request
-            .headers()
-            .iter()
-            .find(|h| h.field.equiv("Authorization"))
-            .map(|h| h.value.as_str().to_string())
-            .unwrap_or_default();
-        let mut body = String::new();
-        if method == "POST" {
-            let _ = request.as_reader().read_to_string(&mut body);
-        }
-        let reply = match relay.handle(&method, &url, &auth, &body) {
-            Ok(r) => r,
-            Err(r) => r,
-        };
-        let _ = request.respond(
-            tiny_http::Response::from_string(reply.body)
-                .with_status_code(reply.status),
-        );
+    for request in server.incoming_requests() {
+        let relay = relay.clone();
+        std::thread::spawn(move || {
+            let mut request = request;
+            let method = request.method().to_string();
+            let url = request.url().to_string();
+            let auth = request
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Authorization"))
+                .map(|h| h.value.as_str().to_string())
+                .unwrap_or_default();
+            let mut body = String::new();
+            if method == "POST" {
+                let _ = request.as_reader().read_to_string(&mut body);
+            }
+            let reply = match relay.handle(&method, &url, &auth, &body) {
+                Ok(r) => r,
+                Err(r) => r,
+            };
+            let _ = request.respond(
+                tiny_http::Response::from_string(reply.body)
+                    .with_status_code(reply.status),
+            );
+        });
     }
     Ok(())
 }

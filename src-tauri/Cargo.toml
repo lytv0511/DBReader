@@ -18,7 +18,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "hooks"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "hostname", "rustls-tls"] }
 chrono = "0.4"
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
@@ -29,8 +29,11 @@ sha2 = "0.10"
 webview2-com-sys = "0.38"
 windows-core = "0.61"
 
-[dev-dependencies]
-dbreader-relay = { path = "../relay" }
-
 [target.'cfg(target_os = "android")'.dependencies]
 filebridge = { path = "plugins/file-bridge" }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+filebridge = { path = "plugins/file-bridge" }
+
+[dev-dependencies]
+dbreader-relay = { path = "../relay" }

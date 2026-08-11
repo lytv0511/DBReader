@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Plus, Pencil, Trash2, X, Save, ArrowRight } from 'lucide-react';
-import { executeQuery, updateBatchStatus } from '../../lib/db';
-import { todayLocalISO, stampForDate } from '../../lib/dates';
+import { RefreshCw, Plus, Pencil, Trash2, X, Save } from 'lucide-react';
+import { executeQuery } from '../../lib/db';
+import { todayLocalISO, nowLocalStamp } from '../../lib/dates';
 import { useI18n } from '../../lib/language';
 
 interface Batch {
@@ -12,7 +12,6 @@ interface Batch {
   supplier_name: string | null;
   unit_cost_price: number;
   purchase_date: string;
-  status: string;
   notes: string | null;
 }
 
@@ -28,17 +27,6 @@ interface Provider {
   sub_name: string | null;
 }
 
-const STATUSES = ['ordered', 'shipping', 'arrived', 'in_inventory', 'used', 'reserved'] as const;
-
-const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
-  ordered: { bg: 'bg-blue-500/10 border-blue-500/20', text: 'text-blue-400', dot: 'bg-blue-400' },
-  shipping: { bg: 'bg-purple-500/10 border-purple-500/20', text: 'text-purple-400', dot: 'bg-purple-400' },
-  arrived: { bg: 'bg-cyan-500/10 border-cyan-500/20', text: 'text-cyan-400', dot: 'bg-cyan-400' },
-  in_inventory: { bg: 'bg-success/10 border-success/20', text: 'text-success', dot: 'bg-success' },
-  used: { bg: 'bg-warning/10 border-warning/20', text: 'text-warning', dot: 'bg-warning' },
-  reserved: { bg: 'bg-accent/10 border-accent/20', text: 'text-accent', dot: 'bg-accent' },
-};
-
 export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?: string }) {
   const { t } = useI18n();
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -50,7 +38,6 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
   const [showLogModal, setShowLogModal] = useState(false);
   const [logBatchId, setLogBatchId] = useState<number | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>('');
 
   // Batch form
   const [formProductId, setFormProductId] = useState<number | ''>('');
@@ -59,6 +46,7 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
   const [formCostPrice, setFormCostPrice] = useState('');
   const [formPurchaseDate, setFormPurchaseDate] = useState(todayLocalISO());
   const [formNotes, setFormNotes] = useState('');
+  const [formQuantity, setFormQuantity] = useState('');
 
   // Log form
   const [logFormProviderId, setLogFormProviderId] = useState<number | ''>('');
@@ -73,9 +61,10 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
       const [batchesResult, productsResult, providersResult] = await Promise.all([
         executeQuery(`
           SELECT b.id, b.product_id, p.name AS product_name, b.batch_number, b.supplier_name,
-                 b.unit_cost_price, b.purchase_date, COALESCE(b.status, 'in_inventory') AS status, b.notes
+                 b.unit_cost_price, b.purchase_date, b.notes
           FROM batches b
           JOIN products p ON b.product_id = p.id
+          WHERE b.is_removed IS NULL OR b.is_removed = 0
           ORDER BY b.purchase_date DESC
         `),
         executeQuery('SELECT id, name, sku FROM products ORDER BY name'),
@@ -90,8 +79,7 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
         supplier_name: r[4] as string | null,
         unit_cost_price: r[5] as number,
         purchase_date: r[6] as string,
-        status: r[7] as string || 'in_inventory',
-        notes: r[8] as string | null,
+        notes: r[7] as string | null,
       })));
 
       setProducts(productsResult.rows.map((r) => ({
@@ -122,10 +110,11 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
     setFormCostPrice('');
     setFormPurchaseDate(todayLocalISO());
     setFormNotes('');
+    setFormQuantity('');
     setShowModal(true);
   };
 
-  const openEditBatch = (b: Batch) => {
+  const openEditBatch = async (b: Batch) => {
     setEditingBatch(b);
     setFormProductId(b.product_id);
     setFormBatchNumber(b.batch_number || '');
@@ -133,6 +122,12 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
     setFormCostPrice(String(b.unit_cost_price));
     setFormPurchaseDate(b.purchase_date?.slice(0, 10) || todayLocalISO());
     setFormNotes(b.notes || '');
+    try {
+      const stockRes = await executeQuery(`SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_logs WHERE batch_id = ${b.id}`);
+      setFormQuantity(String(Number(stockRes.rows[0][0] || 0)));
+    } catch {
+      setFormQuantity('0');
+    }
     setShowModal(true);
   };
 
@@ -144,23 +139,35 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
       const notes = formNotes ? `'${formNotes.replace(/'/g, "''")}'` : 'NULL';
 
       if (editingBatch) {
+        const oldRes = await executeQuery(`SELECT product_id, batch_number, purchase_date FROM batches WHERE id = ${editingBatch.id}`);
+        const oldRow = oldRes.rows[0];
+        const oldProductId = Number(oldRow[0]);
+        const oldBatchNumber = (oldRow[1] as string) || '';
+        const oldDate = ((oldRow[2] as string) || '').slice(0, 10);
+
+        const stockRes = await executeQuery(`SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_logs WHERE batch_id = ${editingBatch.id}`);
+        const currentQty = Number(stockRes.rows[0][0] || 0);
+        const newQty = formQuantity !== '' ? Number(formQuantity) : currentQty;
+
+        const changes: string[] = [];
+        let qtyDelta = 0;
+        if (newQty !== currentQty) {
+          changes.push(t('batch.changed.quantity'));
+          qtyDelta = newQty - currentQty;
+        }
+        if (oldDate !== formPurchaseDate) changes.push(t('batch.changed.date'));
+        if (oldProductId !== formProductId) changes.push(t('batch.changed.sku'));
+        if (oldBatchNumber !== formBatchNumber) changes.push(t('batch.changed.batch'));
+
         await executeQuery(`UPDATE batches SET product_id = ${formProductId}, batch_number = ${batchNum}, supplier_name = ${supplier}, unit_cost_price = ${Number(formCostPrice)}, purchase_date = '${formPurchaseDate}', notes = ${notes} WHERE id = ${editingBatch.id}`);
-        await executeQuery(`
-          UPDATE inventory_logs
-          SET created_at = CASE
-            WHEN length(created_at) > 10 THEN '${formPurchaseDate}' || substr(created_at, 11)
-            ELSE '${formPurchaseDate}'
-          END
-          WHERE batch_id = ${editingBatch.id}
-        `);
+        await executeQuery(`UPDATE inventory_logs SET log_date = '${formPurchaseDate}' WHERE batch_id = ${editingBatch.id}`);
+
+        if (changes.length > 0) {
+          const changeNote = changes.join(', ').replace(/'/g, "''");
+          await executeQuery(`INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at, log_date) VALUES (${editingBatch.id}, NULL, ${qtyDelta}, 'ADJUSTMENT', '${changeNote}', '${nowLocalStamp()}', '${todayLocalISO()}')`);
+        }
       } else {
         await executeQuery(`INSERT INTO batches (product_id, batch_number, supplier_name, unit_cost_price, purchase_date, notes) VALUES (${formProductId}, ${batchNum}, ${supplier}, ${Number(formCostPrice)}, '${formPurchaseDate}', ${notes})`);
-        const newBatch = await executeQuery(`SELECT last_insert_rowid()`);
-        await executeQuery(`
-          UPDATE inventory_logs
-          SET created_at = '${formPurchaseDate}' || substr(created_at, 11)
-          WHERE batch_id = ${newBatch.rows[0][0] as number}
-        `);
       }
       setShowModal(false);
       await fetchData();
@@ -172,17 +179,13 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
   const deleteBatch = async (id: number) => {
     if (!confirm(t('batch.confirmDelete'))) return;
     try {
-      await executeQuery(`DELETE FROM inventory_logs WHERE batch_id = ${id}`);
-      await executeQuery(`DELETE FROM batches WHERE id = ${id}`);
-      await fetchData();
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
-  const handleStatusChange = async (batchId: number, newStatus: string) => {
-    try {
-      await updateBatchStatus(batchId, newStatus);
+      const stockRes = await executeQuery(`SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_logs WHERE batch_id = ${id}`);
+      const stock = Number(stockRes.rows[0][0] || 0);
+      if (stock !== 0) {
+        const noteText = t('batch.removed').replace(/'/g, "''");
+        await executeQuery(`INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at, log_date) VALUES (${id}, NULL, ${-stock}, 'ADJUSTMENT', '${noteText}', '${nowLocalStamp()}', '${todayLocalISO()}')`);
+      }
+      await executeQuery(`UPDATE batches SET is_removed = 1 WHERE id = ${id}`);
       await fetchData();
     } catch (err) {
       setError(String(err));
@@ -207,22 +210,13 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
       const provVal = logFormProviderId === '' ? 'NULL' : String(logFormProviderId);
       const notes = logFormNotes ? `'${logFormNotes.replace(/'/g, "''")}'` : 'NULL';
       const batchInfo = await executeQuery(`SELECT purchase_date FROM batches WHERE id = ${logBatchId}`);
-      const stamp = stampForDate(batchInfo.rows[0][0] as string);
-      await executeQuery(`INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at) VALUES (${logBatchId}, ${provVal}, ${qty}, '${logFormType}', ${notes}, '${stamp}')`);
+      const logDate = ((batchInfo.rows[0][0] as string) || '').slice(0, 10);
+      await executeQuery(`INSERT INTO inventory_logs (batch_id, provider_id, quantity_change, transaction_type, notes, created_at, log_date) VALUES (${logBatchId}, ${provVal}, ${qty}, '${logFormType}', ${notes}, '${nowLocalStamp()}', '${logDate}')`);
       setShowLogModal(false);
     } catch (err) {
       setError(String(err));
     }
   };
-
-  const filtered = filterStatus
-    ? batches.filter((b) => b.status === filterStatus)
-    : batches;
-
-  const statusCounts = STATUSES.reduce((acc, s) => {
-    acc[s] = batches.filter((b) => b.status === s).length;
-    return acc;
-  }, {} as Record<string, number>);
 
   if (loading) {
     return (
@@ -235,49 +229,12 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
 
   return (
     <div className="h-full flex flex-col">
-      {/* Status filter bar */}
-      <div className="px-6 py-3 border-b border-border bg-bg-secondary shrink-0">
-        <div className="flex items-center gap-2 mb-2">
-          <button
-            onClick={() => setFilterStatus('')}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-              !filterStatus ? 'bg-accent text-white border-accent' : 'bg-bg-primary border-border text-text-secondary hover:border-accent/50'
-            }`}
-          >
-            {t('batch.all', { count: batches.length })}
-          </button>
-          {STATUSES.map((s) => {
-            const st = STATUS_STYLES[s];
-            return (
-              <button
-                key={s}
-                onClick={() => setFilterStatus(filterStatus === s ? '' : s)}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  filterStatus === s ? `${st.bg} ${st.text} border-current` : 'bg-bg-primary border-border text-text-secondary hover:border-accent/50'
-                }`}
-              >
-                <span className={`inline-block w-1.5 h-1.5 rounded-full ${st.dot} mr-1.5`} />
-                {t(`common.status.${s}`)} ({statusCounts[s] || 0})
-              </button>
-            );
-          })}
-        </div>
-        {/* Lifecycle visualization */}
-        <div className="flex items-center gap-1 text-[10px] text-text-secondary">
-          {STATUSES.map((s, i) => (
-            <span key={s} className="flex items-center gap-1">
-              <span className={`px-1.5 py-0.5 rounded ${STATUS_STYLES[s].bg} ${STATUS_STYLES[s].text} font-medium`}>
-                {t(`common.status.${s}`)}
-              </span>
-              {i < STATUSES.length - 1 && <ArrowRight size={8} className="text-text-secondary/30" />}
-            </span>
-          ))}
-        </div>
-      </div>
-
       {/* Header */}
       <div className="px-6 py-3 border-b border-border flex items-center justify-between shrink-0">
-        <h2 className="text-lg font-bold text-text-primary">{t('batch.title')}</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-bold text-text-primary">{t('batch.title')}</h2>
+          <span className="text-xs text-text-secondary">{t('batch.all', { count: batches.length })}</span>
+        </div>
         <button onClick={openNewBatch} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors">
           <Plus size={12} /> {t('batch.newBatch')}
         </button>
@@ -293,52 +250,37 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
               <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.supplier')}</th>
               <th className="text-right px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.unitCost')}</th>
               <th className="text-left px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.date')}</th>
-              <th className="text-center px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.status')}</th>
               <th className="text-center px-4 py-2.5 text-text-secondary font-semibold">{t('batch.col.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {filtered.map((b) => {
-              const st = STATUS_STYLES[b.status] || STATUS_STYLES.in_inventory;
-              return (
-                <tr key={b.id} className="hover:bg-bg-hover transition-colors">
-                  <td className="px-4 py-2.5 text-text-primary font-mono">{b.batch_number || '-'}</td>
-                  <td className="px-4 py-2.5 text-text-primary">{b.product_name}</td>
-                  <td className="px-4 py-2.5 text-text-secondary">{b.supplier_name || '-'}</td>
-                  <td className="px-4 py-2.5 text-text-primary text-right font-mono">{currencySymbol}{Number(b.unit_cost_price).toFixed(2)}</td>
-                  <td className="px-4 py-2.5 text-text-secondary">{b.purchase_date?.slice(0, 10)}</td>
-                  <td className="px-4 py-2.5 text-center">
-                    <select
-                      value={b.status}
-                      onChange={(e) => handleStatusChange(b.id, e.target.value)}
-                      className={`px-2 py-1 rounded-md border text-[10px] font-semibold ${st.bg} ${st.text} focus:outline-none cursor-pointer`}
-                    >
-                      {STATUSES.map((s) => (
-                        <option key={s} value={s}>{t(`common.status.${s}`)}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => openAddLog(b.id)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-accent transition-colors" title={t('batch.logTx')}>
-                        <Plus size={10} />
-                      </button>
-                      <button onClick={() => openEditBatch(b)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors" title={t('common.edit')}>
-                        <Pencil size={10} />
-                      </button>
-                      <button onClick={() => deleteBatch(b.id)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-error transition-colors" title={t('common.delete')}>
-                        <Trash2 size={10} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+            {batches.map((b) => (
+              <tr key={b.id} className="hover:bg-bg-hover transition-colors">
+                <td className="px-4 py-2.5 text-text-primary font-mono">{b.batch_number || '-'}</td>
+                <td className="px-4 py-2.5 text-text-primary">{b.product_name}</td>
+                <td className="px-4 py-2.5 text-text-secondary">{b.supplier_name || '-'}</td>
+                <td className="px-4 py-2.5 text-text-primary text-right font-mono">{currencySymbol}{Number(b.unit_cost_price).toFixed(2)}</td>
+                <td className="px-4 py-2.5 text-text-secondary">{b.purchase_date?.slice(0, 10)}</td>
+                <td className="px-4 py-2.5">
+                  <div className="flex items-center justify-center gap-1">
+                    <button onClick={() => openAddLog(b.id)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-accent transition-colors" title={t('batch.logTx')}>
+                      <Plus size={10} />
+                    </button>
+                    <button onClick={() => openEditBatch(b)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors" title={t('common.edit')}>
+                      <Pencil size={10} />
+                    </button>
+                    <button onClick={() => deleteBatch(b.id)} className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-error transition-colors" title={t('common.delete')}>
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
-        {filtered.length === 0 && (
+        {batches.length === 0 && (
           <div className="p-6 text-center text-text-secondary text-xs">
-            {filterStatus ? t('batch.noBatchesStatus', { status: t(`common.status.${filterStatus}`) }) : t('batch.noBatches')}
+            {t('batch.noBatches')}
           </div>
         )}
       </div>
@@ -362,6 +304,19 @@ export default function BatchManager({ currencySymbol = '$' }: { currencySymbol?
                 <input value={formCostPrice} onChange={(e) => setFormCostPrice(e.target.value)} type="number" step="0.01" placeholder={t('batch.ph.unitCost')} className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
                 <input value={formPurchaseDate} onChange={(e) => setFormPurchaseDate(e.target.value)} type="date" className="px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent" />
               </div>
+              {editingBatch && (
+                <input
+                  value={formQuantity}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '' || /^-?\d*\.?\d*$/.test(v)) setFormQuantity(v);
+                  }}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={t('batch.quantity')}
+                  className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent"
+                />
+              )}
               <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder={t('batch.ph.notes')} rows={2} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent resize-none" />
             </div>
             <div className="flex justify-end gap-2 mt-4">

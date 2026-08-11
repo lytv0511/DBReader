@@ -5,21 +5,12 @@
   "identifier": "com.vincentleong.dbreader",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://192.168.1.161:5173",
     "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "DBReader",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 800,
-        "minHeight": 600
-      }
-    ],
     "security": {
       "csp": null
     }

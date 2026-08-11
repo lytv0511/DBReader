@@ -1,0 +1,19 @@
+[package]
+name = "dbreader-cloud"
+version = "0.1.0"
+edition = "2021"
+description = "DBReader cloud backend (Lambda): accounts, teams, files, sync relay"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+argon2 = "0.5"
+rand = "0.8"
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+urlencoding = "2"

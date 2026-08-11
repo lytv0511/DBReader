@@ -44,6 +44,7 @@ pub struct SyncStatus {
     pub transport: String,
     pub endpoint: String,
     pub token: String,
+    pub cloud_email: String,
     pub schema_key: String,
     pub push_pending: i64,
     pub cursor: String,
@@ -135,6 +136,17 @@ fn ensure_schema(conn: &Connection) -> Result<(), String> {
         LOG_TABLE, META_TABLE, LOG_TABLE
     ))
     .map_err(|e| format!("Failed to create sync tables: {}", e))?;
+    if table_exists(conn, "batches")? {
+        let cols: Vec<String> = table_columns(conn, "batches")?.into_iter().map(|(c, _)| c).collect();
+        if !cols.iter().any(|c| c == "is_removed") {
+            conn.execute_batch("ALTER TABLE batches ADD COLUMN is_removed INTEGER DEFAULT 0")
+                .map_err(|e| format!("Failed to migrate batches table: {}", e))?;
+        }
+    }
+    let key = compute_schema_key(conn)?;
+    if meta_get(conn, "schema_key")?.as_deref() != Some(key.as_str()) {
+        meta_set(conn, "schema_key", &key)?;
+    }
     Ok(())
 }
 
@@ -218,22 +230,20 @@ fn json_expr(cols: &[String], scope: &str) -> String {
 
 pub fn compute_schema_key(conn: &Connection) -> Result<String, String> {
     use sha2::{Digest, Sha256};
-    let mut stmt = conn
-        .prepare(
-            "SELECT sql FROM sqlite_master
-             WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_dbsync_%'
-             ORDER BY name",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows: Vec<String> = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+    let tables = user_tables(conn)?;
     let mut hasher = Sha256::new();
-    for sql in rows {
-        hasher.update(sql.as_bytes());
+    for table in &tables {
+        hasher.update(table.as_bytes());
         hasher.update(b"\n");
+        let mut cols: Vec<String> = table_columns(conn, table)?
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect();
+        cols.sort();
+        for c in cols {
+            hasher.update(c.as_bytes());
+            hasher.update(b"\n");
+        }
     }
     let digest = hasher.finalize();
     let mut hex = String::with_capacity(64);
@@ -630,7 +640,7 @@ fn cursor_from(hlc: &str, site: &str, seq: i64) -> String {
 
 // ---------- transports ----------
 
-trait Transport: Send {
+pub(crate) trait Transport: Send {
     fn push(
         &self,
         db_id: &str,
@@ -644,6 +654,8 @@ trait Transport: Send {
 struct RelayTransport {
     endpoint: String,
     token: String,
+    team_id: String,
+    file_id: String,
 }
 
 fn user_agent() -> &'static ureq::Agent {
@@ -665,12 +677,17 @@ impl Transport for RelayTransport {
         ops: &[SyncOp],
     ) -> Result<(), String> {
         let url = format!("{}/api/v1/push", self.endpoint.trim_end_matches('/'));
-        let body = serde_json::json!({
-            "db": db_id,
+        let mut body = serde_json::json!({
             "site": site_id,
             "schema": schema_key,
             "ops": ops,
         });
+        if !self.team_id.is_empty() {
+            body["team_id"] = self.team_id.clone().into();
+            body["file_id"] = self.file_id.clone().into();
+        } else {
+            body["db"] = db_id.into();
+        }
         let mut req = user_agent().post(&url);
         if !self.token.is_empty() {
             req = req.header("Authorization", format!("Bearer {}", self.token));
@@ -686,15 +703,20 @@ impl Transport for RelayTransport {
 
     fn pull(&self, db_id: &str, after: &str, wait_ms: u32) -> Result<(Vec<SyncOp>, Vec<String>, String), String> {
         let (h, site, seq) = cursor_after(after);
-        let url = format!(
-            "{}/api/v1/pull?db={}&h={}&site={}&seq={}&wait={}",
-            self.endpoint.trim_end_matches('/'),
-            db_id,
-            h,
-            site,
-            seq,
-            wait_ms
-        );
+        // Keep the server-side wait under the client's 15s global timeout.
+        let wait_ms = wait_ms.min(12_000);
+        let base = self.endpoint.trim_end_matches('/');
+        let url = if !self.team_id.is_empty() {
+            format!(
+                "{}/api/v1/pull?team_id={}&file_id={}&site={}&h={}&seq={}&wait={}",
+                base, self.team_id, self.file_id, site, h, seq, wait_ms
+            )
+        } else {
+            format!(
+                "{}/api/v1/pull?db={}&h={}&site={}&seq={}&wait={}",
+                base, db_id, h, site, seq, wait_ms
+            )
+        };
         let mut req = user_agent().get(&url);
         if !self.token.is_empty() {
             req = req.header("Authorization", format!("Bearer {}", self.token));
@@ -842,6 +864,8 @@ fn make_transport(
     kind: &str,
     endpoint: &str,
     token: &str,
+    team_id: &str,
+    file_id: &str,
 ) -> Result<Box<dyn Transport>, String> {
     match kind {
         "relay" => {
@@ -851,6 +875,8 @@ fn make_transport(
             Ok(Box::new(RelayTransport {
                 endpoint: endpoint.trim().to_string(),
                 token: token.trim().to_string(),
+                team_id: team_id.trim().to_string(),
+                file_id: file_id.trim().to_string(),
             }))
         }
         "folder" => {
@@ -863,6 +889,246 @@ fn make_transport(
         }
         _ => Err(format!("Unknown sync transport: {}", kind)),
     }
+}
+
+// ---------- cloud bootstrap ----------
+
+/// Minimal client for the DBReader cloud API (deploy/cloud-relay). Used to
+/// provision the device account, team and published file the sync engine
+/// needs before the regular push/pull flow can run.
+struct CloudApi {
+    endpoint: String,
+}
+
+impl CloudApi {
+    fn new(endpoint: &str) -> Result<CloudApi, String> {
+        if endpoint.trim().is_empty() {
+            return Err("Relay endpoint is not set".into());
+        }
+        Ok(CloudApi {
+            endpoint: endpoint.trim_end_matches('/').to_string(),
+        })
+    }
+
+    fn post_json(&self, path: &str, body: serde_json::Value, token: &str) -> Result<serde_json::Value, String> {
+        let mut req = user_agent().post(&format!("{}{}", self.endpoint, path));
+        if !token.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+        let resp = req.send_json(&body).map_err(|e| format!("cloud {} failed: {}", path, e))?;
+        if resp.status() != 200 {
+            return Err(format!("cloud {} returned status {}", path, resp.status()));
+        }
+        resp.into_body()
+            .read_json()
+            .map_err(|e| format!("cloud {} returned invalid JSON: {}", path, e))
+    }
+
+    fn get_json(&self, path: &str, token: &str) -> Result<serde_json::Value, String> {
+        let mut req = user_agent().get(&format!("{}{}", self.endpoint, path));
+        if !token.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+        let resp = req.call().map_err(|e| format!("cloud {} failed: {}", path, e))?;
+        if resp.status() != 200 {
+            return Err(format!("cloud {} returned status {}", path, resp.status()));
+        }
+        resp.into_body()
+            .read_json()
+            .map_err(|e| format!("cloud {} returned invalid JSON: {}", path, e))
+    }
+
+    /// Registers a device account, or logs in when the account already exists.
+    fn ensure_account(&self, email: &str, password: &str) -> Result<String, String> {
+        let token = self
+            .post_json(
+                "/api/v1/register",
+                serde_json::json!({ "email": email, "name": "Device", "password": password }),
+                "",
+            )
+            .and_then(|v| {
+                v.get("token")
+                    .and_then(|t| t.as_str())
+                    .map(String::from)
+                    .ok_or_else(|| "register response missing token".to_string())
+            });
+        match token {
+            Ok(t) => Ok(t),
+            Err(e) if e.contains("409") => {
+                let v = self.post_json(
+                    "/api/v1/login",
+                    serde_json::json!({ "email": email, "password": password }),
+                    "",
+                )?;
+                v.get("token")
+                    .and_then(|t| t.as_str())
+                    .map(String::from)
+                    .ok_or_else(|| "login response missing token".to_string())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn create_team(&self, token: &str, name: &str) -> Result<String, String> {
+        let v = self.post_json(
+            "/api/v1/team/create",
+            serde_json::json!({ "name": name }),
+            token,
+        )?;
+        v.get("team_id")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "team create response missing team_id".to_string())
+    }
+
+    fn join_team(&self, token: &str, code: &str) -> Result<String, String> {
+        let v = self.post_json(
+            "/api/v1/team/join",
+            serde_json::json!({ "code": code }),
+            token,
+        )?;
+        v.get("team_id")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "team join response missing team_id".to_string())
+    }
+
+    /// Picks the most recently published file in the team. A team created by
+    /// the app holds exactly one database, so this is unambiguous in practice.
+    fn latest_file(&self, token: &str, team_id: &str) -> Result<String, String> {
+        let v = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
+        let files = v.get("files").and_then(|f| f.as_array()).ok_or_else(|| "files response missing list".to_string())?;
+        files
+            .iter()
+            .filter_map(|f| {
+                let id = f.get("file_id").and_then(|x| x.as_str())?.to_string();
+                let ts = f.get("created_ts").and_then(|x| x.as_i64()).unwrap_or(0);
+                Some((id, ts))
+            })
+            .max_by_key(|(_, ts)| *ts)
+            .map(|(id, _)| id)
+            .ok_or_else(|| {
+                "No database file in this team yet — publish it from the owning device first".into()
+            })
+    }
+
+    /// Looks up every team of the signed-in account and returns the team + file
+    /// pair for this database (matched by its auto-generated file name). Lets
+    /// the same account reconnect to its own databases on other devices without
+    /// an invite code.
+    fn find_file_for_db(&self, token: &str, db_id: &str) -> Result<Option<(String, String)>, String> {
+        let v = self.get_json("/api/v1/me", token)?;
+        let teams = v
+            .get("teams")
+            .and_then(|t| t.as_array())
+            .ok_or_else(|| "me response missing teams".to_string())?;
+        let target = format!("{}.db", db_id);
+        let mut best: Option<(String, String, i64)> = None;
+        for t in teams {
+            let Some(team_id) = t.get("team_id").and_then(|x| x.as_str()) else {
+                continue;
+            };
+            let files_v = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
+            let files: Vec<serde_json::Value> = files_v
+                .get("files")
+                .and_then(|f| f.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for f in &files {
+                let Some(file_id) = f.get("file_id").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                let name = f.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                let ts = f.get("created_ts").and_then(|x| x.as_i64()).unwrap_or(0);
+                if name == target && best.as_ref().map_or(true, |(_, _, b)| ts > *b) {
+                    best = Some((team_id.to_string(), file_id.to_string(), ts));
+                }
+            }
+        }
+        Ok(best.map(|(t, f, _)| (t, f)))
+    }
+
+    /// Returns the invite code for this team (owners only; refreshes the code
+    /// server-side when the previous one expired).
+    fn invite_code(&self, token: &str, team_id: &str) -> Result<String, String> {
+        let v = self.get_json("/api/v1/me", token)?;
+        let teams = v.get("teams").and_then(|t| t.as_array()).ok_or_else(|| "me response missing teams".to_string())?;
+        for t in teams {
+            if t.get("team_id").and_then(|x| x.as_str()) == Some(team_id) {
+                if let Some(c) = t.get("code").and_then(|x| x.as_str()) {
+                    return Ok(c.to_string());
+                }
+            }
+        }
+        Err("Invite code unavailable — only the team creator can get it".into())
+    }
+
+    /// Publishes a new (empty) database file and returns its file_id.
+    fn publish_file(&self, token: &str, team_id: &str, name: &str) -> Result<String, String> {
+        let v = self.post_json(
+            "/api/v1/files/upload-url",
+            serde_json::json!({ "team_id": team_id, "name": name }),
+            token,
+        )?;
+        let file_id = v
+            .get("file_id")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "upload-url response missing file_id".to_string())?;
+        let upload_url = v
+            .get("upload_url")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "upload-url response missing upload_url".to_string())?;
+        let put = user_agent()
+            .put(&upload_url)
+            .send("x")
+            .map_err(|e| format!("S3 upload failed: {}", e))?;
+        if put.status() != 200 {
+            return Err(format!("S3 upload returned status {}", put.status()));
+        }
+        self.post_json(
+            "/api/v1/files/confirm",
+            serde_json::json!({ "team_id": team_id, "file_id": file_id, "size": 1 }),
+            token,
+        )?;
+        Ok(file_id)
+    }
+}
+
+/// Provisions (or reuses) the cloud session/team/file for the current database
+/// and persists the resulting ids into sync meta. Returns an error message the
+/// UI can display when the cloud is unreachable or misconfigured.
+fn ensure_cloud_session(conn: &Connection, endpoint: &str, db_id: &str, site_id: &str, token: &str) -> Result<(), String> {
+    let api = CloudApi::new(endpoint)?;
+    let email = meta_get(conn, "cloud_email")?
+        .filter(|e| !e.trim().is_empty())
+        .unwrap_or_else(|| format!("device-{}@dbreader.dev", site_id));
+    let password = meta_get(conn, "cloud_pass")?.unwrap_or_default();
+    if password.len() < 8 {
+        return Err("Cloud provisioning needs a stored device password".into());
+    }
+    let session_token = if token.trim().is_empty() {
+        api.ensure_account(&email, &password)?
+    } else {
+        token.trim().to_string()
+    };
+    let team_id = meta_get(conn, "cloud_team_id")?.unwrap_or_default();
+    let file_id = meta_get(conn, "cloud_file_id")?.unwrap_or_default();
+    let team_id = if team_id.is_empty() {
+        api.create_team(&session_token, db_id)?
+    } else {
+        team_id
+    };
+    let file_id = if file_id.is_empty() {
+        api.publish_file(&session_token, &team_id, &format!("{}.db", db_id))?
+    } else {
+        file_id
+    };
+    meta_set(conn, "token", &session_token)?;
+    meta_set(conn, "cloud_team_id", &team_id)?;
+    meta_set(conn, "cloud_file_id", &file_id)?;
+    Ok(())
 }
 
 // ---------- status ----------
@@ -886,6 +1152,7 @@ fn status_from_conn(conn: &Connection, db_open: bool) -> Result<SyncStatus, Stri
         transport: meta_get(conn, "transport")?.unwrap_or_default(),
         endpoint: meta_get(conn, "endpoint")?.unwrap_or_default(),
         token: meta_get(conn, "token")?.unwrap_or_default(),
+        cloud_email: meta_get(conn, "cloud_email")?.unwrap_or_default(),
         schema_key: meta_get(conn, "schema_key")?.unwrap_or_default(),
         push_pending: pending,
         cursor: meta_get(conn, "cursor")?.unwrap_or_default(),
@@ -898,6 +1165,26 @@ fn status_from_conn(conn: &Connection, db_open: bool) -> Result<SyncStatus, Stri
 }
 
 // ---------- sync flow ----------
+
+/// The DBReader cloud backend. The app connects to it automatically; users
+/// never see or configure this. Override with DBREADER_CLOUD_ENDPOINT for
+/// development or a self-hosted backend.
+pub const CLOUD_ENDPOINT: &str = "https://y0nzvgypjb.execute-api.ap-southeast-2.amazonaws.com";
+
+fn cloud_endpoint() -> String {
+    std::env::var("DBREADER_CLOUD_ENDPOINT").unwrap_or_else(|_| CLOUD_ENDPOINT.to_string())
+}
+
+/// The logical sync id for this database. Auto-generated once per database and
+/// stored in its sync meta; used as the team name and published file name.
+fn db_id_or_create(conn: &Connection) -> Result<String, String> {
+    if let Some(s) = meta_get(conn, "db_id")? {
+        return Ok(s);
+    }
+    let id = format!("db-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    meta_set(conn, "db_id", &id)?;
+    Ok(id)
+}
 
 /// Applies remote ops under a single transaction. The caller must hold the
 /// DbState lock for the connection.
@@ -930,8 +1217,8 @@ fn apply_batch(conn: &Connection, ops: &[SyncOp], after: &str) -> Result<i64, St
     Ok(applied)
 }
 
-fn config_and_transport(app: &AppHandle) -> Result<Option<(String, String, Box<dyn Transport>)>, String> {
-    let (db_id, site_id, kind, endpoint, token) = {
+pub(crate) fn config_and_transport(app: &AppHandle) -> Result<Option<(String, String, Box<dyn Transport>)>, String> {
+    let (db_id, site_id, kind, endpoint, token, cloud_team_id, cloud_file_id) = {
         let db_state = app.state::<DbState>();
         let inner = db_state.inner.lock().map_err(|e| e.to_string())?;
         let conn = match inner.conn.as_ref() {
@@ -953,14 +1240,16 @@ fn config_and_transport(app: &AppHandle) -> Result<Option<(String, String, Box<d
             meta_get(conn, "transport")?.unwrap_or_default(),
             meta_get(conn, "endpoint")?.unwrap_or_default(),
             meta_get(conn, "token")?.unwrap_or_default(),
+            meta_get(conn, "cloud_team_id")?.unwrap_or_default(),
+            meta_get(conn, "cloud_file_id")?.unwrap_or_default(),
         )
     };
-    let transport = make_transport(app, &kind, &endpoint, &token)?;
+    let transport = make_transport(app, &kind, &endpoint, &token, &cloud_team_id, &cloud_file_id)?;
     Ok(Some((db_id, site_id, transport)))
 }
 
 /// Pushes pending local ops. The caller must not hold the SyncGate.
-fn push_pending(
+pub(crate) fn push_pending(
     app: &AppHandle,
     db_id: &str,
     site_id: &str,
@@ -992,22 +1281,35 @@ fn push_pending(
     Ok(pending.len() as i64)
 }
 
-/// Pulls remote ops (long-polling when `wait_ms > 0`) and applies them.
-/// The caller must not hold the SyncGate.
-fn pull_and_apply(
+/// A batch of remote ops fetched by [`pull_remote`].
+pub(crate) struct Pulled {
+    pub after: String,
+    pub ops: Vec<SyncOp>,
+    pub peers: Vec<String>,
+    pub schema: String,
+}
+
+/// Fetches remote ops (long-polling when `wait_ms > 0`). Does not touch the DB
+/// beyond reading the cursor, so it must not hold the SyncGate.
+pub(crate) fn pull_remote(
     app: &AppHandle,
     db_id: &str,
     transport: &dyn Transport,
     wait_ms: u32,
-) -> Result<i64, String> {
+) -> Result<Pulled, String> {
     let after = {
         let db_state = app.state::<DbState>();
         let inner = db_state.inner.lock().map_err(|e| e.to_string())?;
         let conn = inner.conn.as_ref().ok_or("No database connected")?;
         meta_get(conn, "cursor")?.unwrap_or_default()
     };
-    let (remote_ops, peers, server_schema) = transport.pull(db_id, &after, wait_ms)?;
-    let server_schema = server_schema.trim();
+    let (ops, peers, schema) = transport.pull(db_id, &after, wait_ms)?;
+    Ok(Pulled { after, ops, peers, schema })
+}
+
+/// Applies a batch of remote ops. The caller must hold the SyncGate.
+pub(crate) fn apply_remote(app: &AppHandle, pulled: Pulled) -> Result<i64, String> {
+    let server_schema = pulled.schema.trim().to_string();
     let applied = {
         let db_state = app.state::<DbState>();
         let inner = db_state.inner.lock().map_err(|e| e.to_string())?;
@@ -1020,12 +1322,16 @@ fn pull_and_apply(
                     .into(),
             );
         }
-        let applied = if remote_ops.is_empty() {
-            0
+        let live = app.state::<std::sync::Arc<crate::sync_live::LiveSync>>();
+        live.applying.store(true, std::sync::atomic::Ordering::Relaxed);
+        let result = if pulled.ops.is_empty() {
+            Ok(0)
         } else {
-            apply_batch(conn, &remote_ops, &after)?
+            apply_batch(conn, &pulled.ops, &pulled.after)
         };
-        meta_set(conn, "peers", &serde_json::to_string(&peers).unwrap_or_default())?;
+        live.applying.store(false, std::sync::atomic::Ordering::Relaxed);
+        let applied = result?;
+        meta_set(conn, "peers", &serde_json::to_string(&pulled.peers).unwrap_or_default())?;
         meta_set(conn, "last_error", "")?;
         meta_set(conn, "last_sync", &now_iso())?;
         applied
@@ -1034,6 +1340,29 @@ fn pull_and_apply(
         let _ = app.emit("dbreader:synced", applied);
     }
     Ok(applied)
+}
+
+/// Pulls remote ops (long-polling when `wait_ms > 0`) and applies them.
+/// The caller must hold the SyncGate.
+fn pull_and_apply(
+    app: &AppHandle,
+    db_id: &str,
+    transport: &dyn Transport,
+    wait_ms: u32,
+) -> Result<i64, String> {
+    let pulled = pull_remote(app, db_id, transport, wait_ms)?;
+    apply_remote(app, pulled)
+}
+
+/// Records a sync error into the database meta so the UI can display it.
+pub(crate) fn record_last_error(app: &AppHandle, err: &str) {
+    let db_state = app.state::<DbState>();
+    let lock = db_state.inner.lock();
+    if let Ok(inner) = lock {
+        if let Some(conn) = inner.conn.as_ref() {
+            let _ = meta_set(conn, "last_error", err);
+        }
+    }
 }
 
 pub fn run_sync(app: &AppHandle) -> Result<SyncOutcome, String> {
@@ -1050,18 +1379,6 @@ pub fn run_sync(app: &AppHandle) -> Result<SyncOutcome, String> {
     Ok(outcome)
 }
 
-pub fn background_sync(app: &AppHandle) {
-    if let Err(e) = run_sync(app) {
-        let db_state = app.state::<DbState>();
-        let lock = db_state.inner.lock();
-        if let Ok(inner) = lock {
-            if let Some(conn) = inner.conn.as_ref() {
-                let _ = meta_set(conn, "last_error", &e);
-            }
-        }
-    }
-}
-
 // ---------- tauri commands ----------
 
 fn no_db_status() -> SyncStatus {
@@ -1073,6 +1390,7 @@ fn no_db_status() -> SyncStatus {
         transport: String::new(),
         endpoint: String::new(),
         token: String::new(),
+        cloud_email: String::new(),
         schema_key: String::new(),
         push_pending: 0,
         cursor: String::new(),
@@ -1103,36 +1421,23 @@ pub fn sync_status(app: AppHandle) -> Result<SyncStatus, String> {
     .or_else(|_| Ok(no_db_status()))
 }
 
-#[tauri::command]
-pub fn sync_configure(
-    transport: String,
-    endpoint: String,
-    token: String,
-    db_id: String,
-    app: AppHandle,
-) -> Result<SyncStatus, String> {
-    let db_id = db_id.trim().to_string();
-    if db_id.is_empty() {
-        return Err("Database sync ID is required".into());
+/// Provisions the cloud connection for the open database (device account,
+/// team, published file) when needed. Idempotent — reuses stored ids.
+fn ensure_cloud_connected(conn: &Connection) -> Result<(), String> {
+    ensure_schema(conn)?;
+    let site_id = site_id_or_create(conn)?;
+    let db_id = db_id_or_create(conn)?;
+    if meta_get(conn, "cloud_pass")?.is_none() {
+        let pass = format!("{:x}", uuid::Uuid::new_v4().simple());
+        meta_set(conn, "cloud_pass", &pass)?;
     }
-    if !is_plain_name(&db_id) {
-        return Err("Sync ID may only contain letters, numbers and underscores".into());
-    }
-    if transport != "relay" && transport != "folder" {
-        return Err("Unknown transport".into());
-    }
-    with_open_conn(&app, |conn| {
-        ensure_schema(conn)?;
-        let _site_id = site_id_or_create(conn)?;
-        let schema_key = compute_schema_key(conn)?;
-        meta_set(conn, "transport", &transport)?;
-        meta_set(conn, "endpoint", &endpoint)?;
-        meta_set(conn, "token", &token)?;
-        meta_set(conn, "db_id", &db_id)?;
-        meta_set(conn, "schema_key", &schema_key)?;
-        meta_set(conn, "enabled", "1")?;
-        status_from_conn(conn, true)
-    })
+    let endpoint = cloud_endpoint();
+    ensure_cloud_session(conn, &endpoint, &db_id, &site_id, "")?;
+    let schema_key = compute_schema_key(conn)?;
+    meta_set(conn, "transport", "relay")?;
+    meta_set(conn, "endpoint", &endpoint)?;
+    meta_set(conn, "schema_key", &schema_key)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1144,13 +1449,12 @@ pub fn sync_disable(app: AppHandle) -> Result<SyncStatus, String> {
     })
 }
 
+/// Enables cloud sync for the open database, provisioning the device account,
+/// team and published file automatically on first use.
 #[tauri::command]
 pub fn sync_enable(app: AppHandle) -> Result<SyncStatus, String> {
     with_open_conn(&app, |conn| {
-        ensure_schema(conn)?;
-        if meta_get(conn, "db_id")?.unwrap_or_default().is_empty() {
-            return Err("Configure a database sync ID first".into());
-        }
+        ensure_cloud_connected(conn)?;
         meta_set(conn, "enabled", "1")?;
         let mut status = status_from_conn(conn, true)?;
         status.enabled = true;
@@ -1174,6 +1478,238 @@ pub fn sync_now(app: AppHandle) -> Result<SyncStatus, String> {
         ensure_schema(conn)?;
         status_from_conn(conn, true)
     })
+}
+
+/// Joins an existing cloud team with the owner's 8-character invite code and
+/// links this device to the database file the owner published.
+#[tauri::command]
+pub fn sync_join(code: String, app: AppHandle) -> Result<SyncStatus, String> {
+    with_open_conn(&app, |conn| {
+        ensure_schema(conn)?;
+        let _db_id = db_id_or_create(conn)?;
+        let site_id = site_id_or_create(conn)?;
+        if meta_get(conn, "cloud_pass")?.is_none() {
+            let pass = format!("{:x}", uuid::Uuid::new_v4().simple());
+            meta_set(conn, "cloud_pass", &pass)?;
+        }
+        let endpoint = cloud_endpoint();
+        let api = CloudApi::new(&endpoint)?;
+        let email = meta_get(conn, "cloud_email")?
+            .filter(|e| !e.trim().is_empty())
+            .unwrap_or_else(|| format!("device-{}@dbreader.dev", site_id));
+        let password = meta_get(conn, "cloud_pass")?.unwrap_or_default();
+        if password.len() < 8 {
+            return Err("No account configured — enable sync or sign in first".into());
+        }
+        let token = api.ensure_account(&email, &password)?;
+        let team_id = api.join_team(&token, code.trim())?;
+        let file_id = api.latest_file(&token, &team_id)?;
+        meta_set(conn, "token", &token)?;
+        meta_set(conn, "cloud_team_id", &team_id)?;
+        meta_set(conn, "cloud_file_id", &file_id)?;
+        meta_set(conn, "transport", "relay")?;
+        meta_set(conn, "endpoint", &endpoint)?;
+        meta_set(conn, "enabled", "1")?;
+        status_from_conn(conn, true)
+    })
+}
+
+/// Returns the current invite code (owners only) so the UI can display it to
+/// another device.
+#[tauri::command]
+pub fn sync_invite_code(app: AppHandle) -> Result<String, String> {
+    with_open_conn(&app, |conn| {
+        ensure_schema(conn)?;
+        let endpoint = cloud_endpoint();
+        let team_id = meta_get(conn, "cloud_team_id")?.unwrap_or_default();
+        let token = meta_get(conn, "token")?.unwrap_or_default();
+        if team_id.is_empty() || token.is_empty() {
+            return Err("No cloud team configured yet".into());
+        }
+        CloudApi::new(&endpoint)?.invite_code(&token, &team_id)
+    })
+}
+
+/// Links an open database to a personal account: creates the team + published
+/// file under the account on first use, or reconnects to the existing one.
+fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Result<(), String> {
+    ensure_schema(conn)?;
+    let db_id = db_id_or_create(conn)?;
+    let endpoint = cloud_endpoint();
+    let already_linked = meta_get(conn, "cloud_email")?.map(|e| e == email).unwrap_or(false)
+        && meta_get(conn, "endpoint")?.map(|e| e == endpoint).unwrap_or(false)
+        && meta_get(conn, "cloud_team_id")?.map(|t| !t.is_empty()).unwrap_or(false)
+        && meta_get(conn, "cloud_file_id")?.map(|f| !f.is_empty()).unwrap_or(false)
+        && meta_get(conn, "token")?.map(|t| !t.is_empty()).unwrap_or(false);
+    if already_linked {
+        return Ok(());
+    }
+    let api = CloudApi::new(&endpoint)?;
+    let token = api.ensure_account(email, password)?;
+    meta_set(conn, "cloud_email", email)?;
+    meta_set(conn, "cloud_pass", password)?;
+    meta_set(conn, "token", &token)?;
+    match api.find_file_for_db(&token, &db_id)? {
+        Some((team_id, file_id)) => {
+            meta_set(conn, "cloud_team_id", &team_id)?;
+            meta_set(conn, "cloud_file_id", &file_id)?;
+        }
+        None => {
+            let team_id = api.create_team(&token, &db_id)?;
+            let file_id = api.publish_file(&token, &team_id, &format!("{}.db", db_id))?;
+            meta_set(conn, "cloud_team_id", &team_id)?;
+            meta_set(conn, "cloud_file_id", &file_id)?;
+        }
+    }
+    meta_set(conn, "transport", "relay")?;
+    meta_set(conn, "endpoint", &endpoint)?;
+    meta_set(conn, "enabled", "1")?;
+    Ok(())
+}
+
+/// Signs in with a personal account. The account is created automatically on
+/// first use; on later devices it reconnects to this database directly (via
+/// the shared file name) without an invite code.
+#[tauri::command]
+pub fn sync_signin(email: String, password: String, app: AppHandle) -> Result<SyncStatus, String> {
+    let email = email.trim().to_string();
+    if email.len() < 3 || !email.contains('@') {
+        return Err("Enter a valid email address".into());
+    }
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters".into());
+    }
+    with_open_conn(&app, |conn| {
+        connect_db_to_account(conn, &email, &password)?;
+        status_from_conn(conn, true)
+    })
+}
+
+/// Signs out of the personal account: drops the stored credentials and the
+/// cloud link, leaving the database ready for a fresh connect or join.
+#[tauri::command]
+pub fn sync_signout(app: AppHandle) -> Result<SyncStatus, String> {
+    with_open_conn(&app, |conn| {
+        ensure_schema(conn)?;
+        meta_set(conn, "cloud_email", "")?;
+        meta_set(conn, "cloud_pass", "")?;
+        meta_set(conn, "token", "")?;
+        meta_set(conn, "cloud_team_id", "")?;
+        meta_set(conn, "cloud_file_id", "")?;
+        meta_set(conn, "enabled", "0")?;
+        status_from_conn(conn, true)
+    })
+}
+
+// ---------- personal account (app-level) ----------
+
+/// The app-level personal account. Stored once per device in the app config
+/// directory (outside any database) so the app can require a sign-in before
+/// databases are opened and connect every database to the same account.
+#[derive(Serialize, Deserialize)]
+struct StoredAccount {
+    email: String,
+    password: String,
+    token: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountStatus {
+    pub email: String,
+}
+
+const ACCOUNT_FILE: &str = "account.json";
+
+fn account_path(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_config_dir()
+        .map(|d| d.join(ACCOUNT_FILE))
+        .unwrap_or_else(|_| PathBuf::from(ACCOUNT_FILE))
+}
+
+fn account_load(app: &AppHandle) -> Option<StoredAccount> {
+    let s = std::fs::read_to_string(account_path(app)).ok()?;
+    serde_json::from_str(&s).ok()
+}
+
+fn account_save(app: &AppHandle, account: &StoredAccount) -> Result<(), String> {
+    let path = account_path(app);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, serde_json::to_string(account).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+/// Returns the signed-in account email, or an empty string when the app is not
+/// signed in. Works without an open database.
+#[tauri::command]
+pub fn account_status(app: AppHandle) -> Result<AccountStatus, String> {
+    Ok(AccountStatus {
+        email: account_load(&app).map(|a| a.email).unwrap_or_default(),
+    })
+}
+
+/// Signs in to (or registers) the personal account and stores it for this
+/// device. The account is created automatically on first use.
+#[tauri::command]
+pub fn account_signin(
+    email: String,
+    password: String,
+    app: AppHandle,
+) -> Result<AccountStatus, String> {
+    let email = email.trim().to_string();
+    if email.len() < 3 || !email.contains('@') {
+        return Err("Enter a valid email address".into());
+    }
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters".into());
+    }
+    let api = CloudApi::new(&cloud_endpoint())?;
+    let token = api.ensure_account(&email, &password)?;
+    account_save(
+        &app,
+        &StoredAccount {
+            email: email.clone(),
+            password,
+            token,
+        },
+    )?;
+    if let Ok(status) = sync_status(app.clone()) {
+        if status.db_open {
+            auto_connect_account(&app);
+        }
+    }
+    Ok(AccountStatus { email })
+}
+
+/// Signs out of the personal account on this device. Databases keep their
+/// local data; signing in again on another account reconnects them there.
+#[tauri::command]
+pub fn account_signout(app: AppHandle) -> Result<(), String> {
+    let _ = std::fs::remove_file(account_path(&app));
+    Ok(())
+}
+
+/// Connects the open database to the app's personal account in the background.
+/// Best-effort: the database still opens normally when the cloud is
+/// unreachable (the error is recorded in the sync status for later).
+pub fn auto_connect_account(app: &AppHandle) {
+    let Some(account) = account_load(app) else { return };
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let email = account.email.clone();
+        let password = account.password.clone();
+        if let Err(e) = with_open_conn(&handle, |conn| {
+            connect_db_to_account(conn, &email, &password)
+        }) {
+            let _ = with_open_conn(&handle, |conn| {
+                meta_set(conn, "last_error", &e)?;
+                Ok(())
+            });
+        }
+    });
 }
 
 #[cfg(test)]
@@ -1247,6 +1783,43 @@ mod tests {
         conn.execute_batch(crate::INVENTORY_SCHEMA).unwrap();
         conn.execute_batch(crate::SEED_DATA).unwrap();
         conn
+    }
+
+    #[test]
+    fn test_old_template_migrates_to_equal_key() {
+        let fresh = setup_db();
+        ensure_schema(&fresh).unwrap();
+        let mut old = Connection::open_in_memory().unwrap();
+        old.execute_batch(crate::INVENTORY_SCHEMA).unwrap();
+        old.execute_batch(
+            "DROP TABLE batches;
+             CREATE TABLE batches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL REFERENCES products(id),
+                batch_number VARCHAR(100),
+                supplier_name VARCHAR(255),
+                unit_cost_price NUMERIC(12, 2) NOT NULL,
+                purchase_date DATE NOT NULL,
+                status VARCHAR(30) DEFAULT 'in_inventory'
+                    CHECK (status IN ('ordered','shipping','arrived','in_inventory','used','reserved')),
+                notes TEXT
+             );",
+        )
+        .unwrap();
+        let before = compute_schema_key(&old).unwrap();
+        ensure_schema(&old).unwrap();
+        let cols: Vec<String> = old
+            .prepare("PRAGMA table_info(batches)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(cols.contains(&"is_removed".to_string()), "old batches should gain is_removed");
+        let after = compute_schema_key(&old).unwrap();
+        let fresh_key = compute_schema_key(&fresh).unwrap();
+        assert_ne!(before, after);
+        assert_eq!(after, fresh_key, "migrated DB must match fresh template key");
     }
 
     fn pull_loop(conn: &Connection, _site: &str, mem: &MemTransport) -> i64 {
@@ -1438,7 +2011,7 @@ mod tests {
         let relay2 = relay.clone();
         let port: u16 = 18_991;
         let server = std::thread::spawn(move || {
-            let _ = dbreader_relay::serve(&relay2, port);
+            let _ = dbreader_relay::serve(relay2, port);
         });
 
         let endpoint = format!("http://127.0.0.1:{port}");
@@ -1473,7 +2046,7 @@ mod tests {
         meta_set(&conn, "schema_key", &schema).unwrap();
         assert!(!schema.is_empty());
 
-        let transport = RelayTransport { endpoint: endpoint.clone(), token: "secret".into() };
+        let transport = RelayTransport { endpoint: endpoint.clone(), token: "secret".into(), team_id: String::new(), file_id: String::new() };
         transport.push("dbtest", &site, &schema, &ops).unwrap();
 
         let (pulled, peers, schema_out) = transport.pull("dbtest", "", 0).unwrap();
@@ -1494,11 +2067,270 @@ mod tests {
             assert_eq!(e.seq, a.seq);
         }
 
-        let bad = RelayTransport { endpoint: endpoint.clone(), token: "nope".into() };
+        let bad = RelayTransport { endpoint: endpoint.clone(), token: "nope".into(), team_id: String::new(), file_id: String::new() };
         assert!(bad.push("dbtest", &site, &schema, &ops).is_err());
         assert!(bad.pull("dbtest", "", 0).is_err());
 
         drop(server);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_relay_long_poll_live() {
+        let root = std::env::temp_dir().join(format!("dbreader-relay-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let relay = Arc::new(dbreader_relay::Relay::new(root.clone(), None).unwrap());
+        let relay2 = relay.clone();
+        let port: u16 = 18_992;
+        let server = std::thread::spawn(move || {
+            let _ = dbreader_relay::serve(relay2, port);
+        });
+        let endpoint = format!("http://127.0.0.1:{port}");
+
+        let transport = RelayTransport { endpoint: endpoint.clone(), token: String::new(), team_id: String::new(), file_id: String::new() };
+        let transport2 = RelayTransport { endpoint, token: String::new(), team_id: String::new(), file_id: String::new() };
+        let conn = setup_db();
+        ensure_schema(&conn).unwrap();
+        ensure_triggers(&conn).unwrap();
+        let site = site_id_or_create(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Chardonnay', 'CHR-001', 'bottle', 3)",
+            [],
+        )
+        .unwrap();
+        let ops = local_ops(&conn, &site, 0).unwrap();
+        assert!(!ops.is_empty());
+
+        let waiter = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            let result = transport2.pull("dbtest", "", 30_000).unwrap();
+            (start.elapsed(), result)
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        transport.push("dbtest", &site, "", &ops).unwrap();
+        let (elapsed, (pulled, _peers, _schema)) = waiter.join().unwrap();
+        assert!(elapsed < Duration::from_secs(5), "live pull took {:?}", elapsed);
+        assert_eq!(pulled.len(), ops.len());
+
+        drop(server);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Full client-side wiring test against the live cloud API. Gated behind
+    /// DBREADER_LIVE_TEST=1 since it needs the deployed backend and network.
+    /// Proves: device account bootstrap, team create, file publish (S3 PUT +
+    /// confirm), then a real push + pull through RelayTransport.
+    #[test]
+    fn test_cloud_relay_live() {
+        if std::env::var("DBREADER_LIVE_TEST").unwrap_or_default() != "1" {
+            return;
+        }
+        let endpoint = std::env::var("DBREADER_CLOUD_ENDPOINT").unwrap_or_else(|_| {
+            "https://y0nzvgypjb.execute-api.ap-southeast-2.amazonaws.com".to_string()
+        });
+        let site_id = format!("{:x}", uuid::Uuid::new_v4().simple());
+        let email = format!("device-{}@dbreader.dev", site_id);
+        let password = format!("{:x}", uuid::Uuid::new_v4().simple());
+
+        let api = CloudApi::new(&endpoint).unwrap();
+        let token = api.ensure_account(&email, &password).unwrap();
+        assert!(!token.is_empty(), "bootstrap account failed");
+        let team_id = api
+            .create_team(&token, &format!("dbtest-{}", &site_id[..8]))
+            .unwrap();
+        let file_id = api.publish_file(&token, &team_id, "dbtest.db").unwrap();
+
+        let conn = setup_db();
+        ensure_schema(&conn).unwrap();
+        ensure_triggers(&conn).unwrap();
+        let site = site_id_or_create(&conn).unwrap();
+        let schema = compute_schema_key(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Cloud Pinot', 'CLD-001', 'bottle', 2)",
+            [],
+        )
+        .unwrap();
+        let ops = local_ops(&conn, &site, 0).unwrap();
+        assert!(!ops.is_empty());
+
+        let transport = RelayTransport {
+            endpoint: endpoint.clone(),
+            token: token.clone(),
+            team_id: team_id.clone(),
+            file_id: file_id.clone(),
+        };
+        transport.push(&team_id, &site, &schema, &ops).unwrap();
+
+        let (pulled, peers, schema_out) = transport.pull(&team_id, "", 0).unwrap();
+        assert_eq!(schema_out, schema);
+        assert!(peers.contains(&site));
+        assert_eq!(
+            pulled.len(),
+            ops.len(),
+            "pulled {} ops, expected {}",
+            pulled.len(),
+            ops.len()
+        );
+        let mut expected: Vec<&SyncOp> = ops.iter().collect();
+        let mut actual: Vec<&SyncOp> = pulled.iter().collect();
+        expected.sort_by_key(|o| (o.hlc.clone(), o.site.clone(), o.seq));
+        actual.sort_by_key(|o| (o.hlc.clone(), o.site.clone(), o.seq));
+        for (e, a) in expected.iter().zip(actual.iter()) {
+            assert_eq!(e.table, a.table);
+            assert_eq!(e.op, a.op);
+            assert_eq!(e.pk, a.pk);
+            assert_eq!(e.row, a.row);
+            assert_eq!(e.hlc, a.hlc);
+            assert_eq!(e.seq, a.seq);
+        }
+
+        let bad = RelayTransport {
+            endpoint: endpoint.clone(),
+            token: "nope".into(),
+            team_id: team_id.clone(),
+            file_id: file_id.clone(),
+        };
+        assert!(bad.push(&team_id, &site, &schema, &ops).is_err());
+    }
+
+    /// Two-device flow against the live cloud API (DBREADER_LIVE_TEST=1):
+    /// device A creates the team + publishes the file, device B registers,
+    /// joins with the invite code, finds the file, then both exchange ops.
+    #[test]
+    fn test_cloud_join_live() {
+        if std::env::var("DBREADER_LIVE_TEST").unwrap_or_default() != "1" {
+            return;
+        }
+        let endpoint = std::env::var("DBREADER_CLOUD_ENDPOINT").unwrap_or_else(|_| {
+            "https://y0nzvgypjb.execute-api.ap-southeast-2.amazonaws.com".to_string()
+        });
+        let api = CloudApi::new(&endpoint).unwrap();
+
+        let site_a = format!("{:x}", uuid::Uuid::new_v4().simple());
+        let token_a = api
+            .ensure_account(&format!("device-{}@dbreader.dev", site_a), &format!("{:x}", uuid::Uuid::new_v4().simple()))
+            .unwrap();
+        let team_id = api
+            .create_team(&token_a, &format!("dbtest-{}", &site_a[..8]))
+            .unwrap();
+        let file_id = api.publish_file(&token_a, &team_id, "dbtest.db").unwrap();
+        let code = api.invite_code(&token_a, &team_id).unwrap();
+        assert_eq!(code.len(), 8, "invite code should be 8 characters");
+
+        let site_b = format!("{:x}", uuid::Uuid::new_v4().simple());
+        let token_b = api
+            .ensure_account(&format!("device-{}@dbreader.dev", site_b), &format!("{:x}", uuid::Uuid::new_v4().simple()))
+            .unwrap();
+        let joined = api.join_team(&token_b, &code).unwrap();
+        assert_eq!(joined, team_id, "device B should land in the same team");
+        let found_id = api.latest_file(&token_b, &team_id).unwrap();
+        assert_eq!(found_id, file_id);
+
+        let ta = RelayTransport { endpoint: endpoint.clone(), token: token_a.clone(), team_id: team_id.clone(), file_id: file_id.clone() };
+        let tb = RelayTransport { endpoint: endpoint.clone(), token: token_b.clone(), team_id: team_id.clone(), file_id: file_id.clone() };
+
+        let conn_a = setup_db();
+        ensure_schema(&conn_a).unwrap();
+        ensure_triggers(&conn_a).unwrap();
+        let site_a_db = site_id_or_create(&conn_a).unwrap();
+        let schema = compute_schema_key(&conn_a).unwrap();
+        conn_a
+            .execute(
+                "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Device A Wine', 'A-001', 'bottle', 2)",
+                [],
+            )
+            .unwrap();
+        let ops_a = local_ops(&conn_a, &site_a_db, 0).unwrap();
+        assert!(!ops_a.is_empty());
+        ta.push(&team_id, &site_a_db, &schema, &ops_a).unwrap();
+
+        let conn_b = setup_db();
+        ensure_schema(&conn_b).unwrap();
+        ensure_triggers(&conn_b).unwrap();
+        let site_b_db = site_id_or_create(&conn_b).unwrap();
+        let (pulled, peers, schema_out) = tb.pull(&team_id, "", 0).unwrap();
+        assert_eq!(schema_out, schema);
+        assert!(peers.contains(&site_a_db));
+        assert_eq!(pulled.len(), ops_a.len(), "device B should receive device A's ops");
+        let applied = apply_batch(&conn_b, &pulled, "").unwrap();
+        assert_eq!(applied, ops_a.len() as i64);
+        let count: i64 = conn_b
+            .query_row("SELECT COUNT(*) FROM products WHERE name = 'Device A Wine'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "device B should have applied device A's insert");
+
+        conn_b
+            .execute(
+                "UPDATE products SET name = 'Renamed on B' WHERE name = 'Device A Wine'",
+                [],
+            )
+            .unwrap();
+        let ops_b = local_ops(&conn_b, &site_b_db, 0).unwrap();
+        assert!(!ops_b.is_empty());
+        tb.push(&team_id, &site_b_db, &schema, &ops_b).unwrap();
+        let (pulled_back, _peers, _schema) = ta.pull(&team_id, "", 0).unwrap();
+        assert!(
+            pulled_back.iter().any(|o| o.table == "products"),
+            "device A should receive device B's ops back"
+        );
+    }
+
+    /// Personal-account flow against the live cloud API (DBREADER_LIVE_TEST=1):
+    /// the same account signs in on two devices; the second device reconnects
+    /// to the database via the account (no invite code), then syncs both ways.
+    #[test]
+    fn test_cloud_personal_account_live() {
+        if std::env::var("DBREADER_LIVE_TEST").unwrap_or_default() != "1" {
+            return;
+        }
+        let endpoint = std::env::var("DBREADER_CLOUD_ENDPOINT").unwrap_or_else(|_| {
+            "https://y0nzvgypjb.execute-api.ap-southeast-2.amazonaws.com".to_string()
+        });
+        let api = CloudApi::new(&endpoint).unwrap();
+        let email = format!("personal-{}@dbreader.dev", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        let password = format!("{:x}", uuid::Uuid::new_v4().simple());
+        let db_id = format!("db-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+
+        let token_a = api.ensure_account(&email, &password).unwrap();
+        let team_id = api.create_team(&token_a, &db_id).unwrap();
+        let file_id = api.publish_file(&token_a, &team_id, &format!("{}.db", db_id)).unwrap();
+
+        let token_b = api.ensure_account(&email, &password).unwrap();
+        assert!(!token_b.is_empty(), "second device should get a valid session");
+        let found = api.find_file_for_db(&token_b, &db_id).unwrap();
+        let (found_team, found_file) = found.expect("second device should find the database via the account");
+        assert_eq!(found_team, team_id);
+        assert_eq!(found_file, file_id);
+
+        let ta = RelayTransport { endpoint: endpoint.clone(), token: token_a.clone(), team_id: team_id.clone(), file_id: file_id.clone() };
+        let tb = RelayTransport { endpoint: endpoint.clone(), token: token_b, team_id: found_team, file_id: found_file };
+
+        let conn_a = setup_db();
+        ensure_schema(&conn_a).unwrap();
+        ensure_triggers(&conn_a).unwrap();
+        let site_a = site_id_or_create(&conn_a).unwrap();
+        let schema = compute_schema_key(&conn_a).unwrap();
+        conn_a
+            .execute(
+                "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Account Wine', 'ACC-1', 'bottle', 5)",
+                [],
+            )
+            .unwrap();
+        let ops_a = local_ops(&conn_a, &site_a, 0).unwrap();
+        assert!(!ops_a.is_empty());
+        ta.push(&team_id, &site_a, &schema, &ops_a).unwrap();
+
+        let conn_b = setup_db();
+        ensure_schema(&conn_b).unwrap();
+        ensure_triggers(&conn_b).unwrap();
+        let (pulled, _peers, schema_out) = tb.pull(&team_id, "", 0).unwrap();
+        assert_eq!(schema_out, schema);
+        assert_eq!(pulled.len(), ops_a.len(), "second device should get the ops");
+        let applied = apply_batch(&conn_b, &pulled, "").unwrap();
+        assert_eq!(applied, ops_a.len() as i64);
+        let count: i64 = conn_b
+            .query_row("SELECT COUNT(*) FROM products WHERE name = 'Account Wine'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "second device should have the account device's insert");
     }
 }
