@@ -45,17 +45,20 @@ android {
             )
         }
     }
-    signingConfigs {
-        create("release") {
-            storeFile = file("release.keystore")
-            storePassword = "dbreader2026"
-            keyAlias = "dbreader"
-            keyPassword = "dbreader2026"
+    val releaseKeystore = file("release.keystore")
+    if (releaseKeystore.exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = "dbreader2026"
+                keyAlias = "dbreader"
+                keyPassword = "dbreader2026"
+            }
         }
-    }
-    buildTypes {
-        getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+        buildTypes {
+            getByName("release") {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     kotlinOptions {
