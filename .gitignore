@@ -48,3 +48,6 @@ relay/sync-data
 
 # Tauri plugin build outputs
 src-tauri/plugins/*/target
+
+*.apk
+xwin-runner
