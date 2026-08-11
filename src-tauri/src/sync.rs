@@ -692,11 +692,22 @@ impl Transport for RelayTransport {
         if !self.token.is_empty() {
             req = req.header("Authorization", format!("Bearer {}", self.token));
         }
-        let resp = req
+        let mut resp = req
             .send_json(&body)
             .map_err(|e| format!("Relay push failed: {}", e))?;
         if resp.status() != 200 {
-            return Err(format!("Relay push returned status {}", resp.status()));
+            let detail = resp
+                .body_mut()
+                .read_to_string()
+                .unwrap_or_default()
+                .chars()
+                .take(300)
+                .collect::<String>();
+            return Err(format!(
+                "Relay push returned status {}: {}",
+                resp.status(),
+                detail
+            ));
         }
         Ok(())
     }
@@ -1249,6 +1260,11 @@ pub(crate) fn config_and_transport(app: &AppHandle) -> Result<Option<(String, St
 }
 
 /// Pushes pending local ops. The caller must not hold the SyncGate.
+///
+/// Tries the full pending batch first; if the transport rejects it, retries
+/// one op at a time so a single bad batch does not stall every later op.
+/// `push_after` advances only past ops the transport accepted, and
+/// `last_error` is cleared only when at least one op was pushed.
 pub(crate) fn push_pending(
     app: &AppHandle,
     db_id: &str,
@@ -1270,15 +1286,63 @@ pub(crate) fn push_pending(
     if pending.is_empty() {
         return Ok(0);
     }
-    transport.push(db_id, site_id, &schema_key, &pending)?;
-    if let Some(last) = pending.iter().map(|o| o.seq).max() {
-        let db_state = app.state::<DbState>();
-        let inner = db_state.inner.lock().map_err(|e| e.to_string())?;
-        if let Some(conn) = inner.conn.as_ref() {
-            meta_set(conn, "push_after", &last.to_string())?;
-        }
+
+    let (pushed, last_seq) =
+        push_ops_with_fallback(transport, db_id, site_id, &schema_key, &pending)?;
+    if pushed > 0 {
+        advance_push_state(app, last_seq)?;
     }
-    Ok(pending.len() as i64)
+    Ok(pushed)
+}
+
+/// Tries the full pending batch first; if the transport rejects a multi-op
+/// batch, retries one op at a time so a single bad op does not stall later
+/// ones. Returns `(pushed_count, highest_seq_accepted)` or the original
+/// batch error when nothing could be pushed.
+fn push_ops_with_fallback(
+    transport: &dyn Transport,
+    db_id: &str,
+    site_id: &str,
+    schema_key: &str,
+    pending: &[SyncOp],
+) -> Result<(i64, i64), String> {
+    match transport.push(db_id, site_id, schema_key, pending) {
+        Ok(()) => {
+            let last = pending.iter().map(|o| o.seq).max().unwrap_or(0);
+            Ok((pending.len() as i64, last))
+        }
+        Err(first) if pending.len() > 1 => {
+            let mut pushed = 0i64;
+            let mut last_seq = 0i64;
+            for op in pending {
+                match transport.push(db_id, site_id, schema_key, std::slice::from_ref(op)) {
+                    Ok(()) => {
+                        pushed += 1;
+                        last_seq = op.seq;
+                    }
+                    Err(_) => break,
+                }
+            }
+            if pushed == 0 {
+                Err(first)
+            } else {
+                Ok((pushed, last_seq))
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Records the highest accepted seq into `push_after` and clears the stored
+/// sync error, since at least the ops up to `seq` have left this device.
+fn advance_push_state(app: &AppHandle, seq: i64) -> Result<(), String> {
+    let db_state = app.state::<DbState>();
+    let inner = db_state.inner.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = inner.conn.as_ref() {
+        meta_set(conn, "push_after", &seq.to_string())?;
+        meta_set(conn, "last_error", "")?;
+    }
+    Ok(())
 }
 
 /// A batch of remote ops fetched by [`pull_remote`].
@@ -1332,7 +1396,11 @@ pub(crate) fn apply_remote(app: &AppHandle, pulled: Pulled) -> Result<i64, Strin
         live.applying.store(false, std::sync::atomic::Ordering::Relaxed);
         let applied = result?;
         meta_set(conn, "peers", &serde_json::to_string(&pulled.peers).unwrap_or_default())?;
-        meta_set(conn, "last_error", "")?;
+        // Only a successful apply (or a successful push elsewhere) clears the
+        // stored error; an empty pull must not hide a failing push.
+        if applied > 0 {
+            meta_set(conn, "last_error", "")?;
+        }
         meta_set(conn, "last_sync", &now_iso())?;
         applied
     };
@@ -1718,12 +1786,48 @@ pub fn auto_connect_account(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::sync::{Arc, Mutex as StdMutex};
 
     struct MemTransport {
         store: Arc<StdMutex<Vec<SyncOp>>>,
         schema: Arc<StdMutex<String>>,
         peers: Arc<StdMutex<Vec<String>>>,
+    }
+
+    /// A transport that rejects multi-op batches the way the deployed relay
+    /// did, to exercise the single-op fallback in push_ops_with_fallback.
+    struct MultiOpRejectingTransport {
+        inner: MemTransport,
+        reject_multi: bool,
+        fail_single_seq: i64,
+    }
+
+    impl Transport for MultiOpRejectingTransport {
+        fn push(
+            &self,
+            db_id: &str,
+            site_id: &str,
+            schema_key: &str,
+            ops: &[SyncOp],
+        ) -> Result<(), String> {
+            if self.reject_multi && ops.len() > 1 {
+                return Err("Relay push returned status 500".into());
+            }
+            if ops.len() == 1 && ops[0].seq == self.fail_single_seq {
+                return Err("Relay push returned status 500".into());
+            }
+            self.inner.push(db_id, site_id, schema_key, ops)
+        }
+
+        fn pull(
+            &self,
+            db_id: &str,
+            after: &str,
+            wait_ms: u32,
+        ) -> Result<(Vec<SyncOp>, Vec<String>, String), String> {
+            self.inner.pull(db_id, after, wait_ms)
+        }
     }
 
     impl Transport for MemTransport {
@@ -1786,6 +1890,62 @@ mod tests {
         conn.execute_batch(crate::INVENTORY_SCHEMA).unwrap();
         conn.execute_batch(crate::SEED_DATA).unwrap();
         conn
+    }
+
+    fn test_op(site: &str, seq: i64, hlc: &str, table: &str) -> SyncOp {
+        SyncOp {
+            site: site.into(),
+            seq,
+            hlc: hlc.into(),
+            table: table.into(),
+            pk: json!({"id": seq}),
+            row: json!({"id": seq}).into(),
+            op: "upsert".into(),
+            pk_json_raw: "".into(),
+        }
+    }
+
+    #[test]
+    fn test_push_fallback_pushes_batch_one_at_a_time() {
+        let t = MultiOpRejectingTransport {
+            inner: MemTransport {
+                store: Arc::new(StdMutex::new(Vec::new())),
+                schema: Arc::new(StdMutex::new(String::new())),
+                peers: Arc::new(StdMutex::new(Vec::new())),
+            },
+            reject_multi: true,
+            fail_single_seq: 0,
+        };
+        let ops = vec![
+            test_op("a", 14, "20260811045336.382", "inventory_logs"),
+            test_op("a", 15, "20260811045336.529", "inventory_logs"),
+        ];
+        let (pushed, last) = push_ops_with_fallback(&t, "db", "a", "k", &ops).unwrap();
+        assert_eq!(pushed, 2);
+        assert_eq!(last, 15);
+        let store = t.inner.store.lock().unwrap();
+        assert_eq!(store.len(), 2);
+    }
+
+    #[test]
+    fn test_push_fallback_reports_error_when_all_single_ops_fail() {
+        let t = MultiOpRejectingTransport {
+            inner: MemTransport {
+                store: Arc::new(StdMutex::new(Vec::new())),
+                schema: Arc::new(StdMutex::new(String::new())),
+                peers: Arc::new(StdMutex::new(Vec::new())),
+            },
+            reject_multi: true,
+            fail_single_seq: 14,
+        };
+        let ops = vec![
+            test_op("a", 14, "20260811045336.382", "inventory_logs"),
+            test_op("a", 15, "20260811045336.529", "inventory_logs"),
+        ];
+        let err = push_ops_with_fallback(&t, "db", "a", "k", &ops).unwrap_err();
+        assert!(err.contains("500"), "expected the batched error: {err}");
+        let store = t.inner.store.lock().unwrap();
+        assert!(store.is_empty(), "nothing may be recorded as pushed");
     }
 
     #[test]

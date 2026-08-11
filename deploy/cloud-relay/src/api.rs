@@ -869,6 +869,36 @@ mod tests {
     }
 
     #[test]
+    fn multi_op_push_batch() {
+        let s = MemoryStore::new();
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"owner@x.com","password":"secret123"}));
+        let owner_token = r.body["token"].as_str().unwrap().to_string();
+        let r = req(&s, "POST", "/api/v1/team/create", Some(&owner_token), json!({"name":"Wine Shop"}));
+        assert_eq!(r.status, 200);
+        let team_id = r.body["team_id"].as_str().unwrap().to_string();
+        let r = req(&s, "POST", "/api/v1/files/upload-url", Some(&owner_token), json!({"team_id": team_id, "name": "inventory.db"}));
+        assert_eq!(r.status, 200);
+        let file_id = r.body["file_id"].as_str().unwrap().to_string();
+        let r = req(&s, "POST", "/api/v1/files/confirm", Some(&owner_token), json!({"team_id": team_id, "file_id": file_id, "size": 1234}));
+        assert_eq!(r.status, 200);
+
+        let r = req(&s, "POST", "/api/v1/push", Some(&owner_token), json!({
+            "team_id": team_id, "file_id": file_id, "site": "mac-a", "schema": "",
+            "ops": [
+                json!({"site":"mac-a","seq":14,"hlc":"20260811045336.382","table_name":"inventory_logs","pk":{"id":10},"row":{"id":10,"batch_id":4,"provider_id":null,"quantity_change":1,"transaction_type":"PURCHASE","notes":null,"created_at":"2026-08-11 12:53:36","log_date":"2026-08-11"},"op":"upsert"}),
+                json!({"site":"mac-a","seq":15,"hlc":"20260811045336.529","table_name":"inventory_logs","pk":{"id":11},"row":{"id":11,"batch_id":4,"provider_id":null,"quantity_change":1,"transaction_type":"PURCHASE","notes":null,"created_at":"2026-08-11 12:53:36","log_date":"2026-08-11"},"op":"upsert"}),
+            ]
+        }));
+        assert_eq!(r.status, 200, "multi-op push must succeed: {:?}", r.body);
+
+        let r = req(&s, "GET", "/api/v1/pull", Some(&owner_token), json!({
+            "team_id": team_id, "file_id": file_id, "site": "", "h": "", "seq": 0, "wait": 0
+        }));
+        assert_eq!(r.status, 200);
+        assert_eq!(r.body["ops"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
     fn auth_flows() {
         let s = MemoryStore::new();
         let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"a@x.com","name":"Alice","password":"secret123"}));
