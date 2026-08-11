@@ -303,3 +303,34 @@ html[data-form-factor='tablet'] ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
+
+html[data-form-factor='mobile'] .report-page {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 8mm 7mm 14mm;
+  margin: 0 auto 12px;
+  overflow: visible;
+  box-shadow: none;
+}
+
+html[data-form-factor='mobile'] .report-scroll {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+/* -------- Mobile safe-area: app fills the whole screen (iOS/Android) -------- */
+html[data-form-factor='mobile'] .mobile-topbar,
+html[data-form-factor='tablet'] .mobile-topbar {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+}
+
+html[data-form-factor='mobile'] .overflow-y-auto,
+html[data-form-factor='tablet'] .overflow-y-auto {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+}
+
+html[data-form-factor='mobile'] .chat-input,
+html[data-form-factor='tablet'] .chat-input {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.625rem);
+}

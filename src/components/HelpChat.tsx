@@ -311,7 +311,7 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
           </div>
 
           {/* Input */}
-          <div className="flex items-center gap-2 px-3 py-2.5 border-t border-border bg-bg-secondary shrink-0">
+          <div className="chat-input flex items-center gap-2 px-3 py-2.5 border-t border-border bg-bg-secondary shrink-0">
             <input
               type="text"
               value={input}

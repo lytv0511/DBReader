@@ -198,7 +198,7 @@ useEffect(() => {
   }, [isMobile, goBack]);
 
   const isTabEnabled = (mode: string) => {
-    if (isMobile) return true;
+    if (isMobile) return mode !== 'dashboard';
     if (mode === 'settings') return true;
     if (prefs.useDefaultTaskbar) {
       return DEFAULT_TABS.includes(mode);
@@ -297,8 +297,8 @@ useEffect(() => {
         enabled: isTabEnabled(tb.mode),
       })
     );
-    return all;
-  }, [prefs.enabledTabs, lang]);
+    return all.filter((tb) => !(isMobile && tb.mode === 'dashboard'));
+  }, [prefs.enabledTabs, lang, isMobile]);
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -625,7 +625,7 @@ useEffect(() => {
         {/* Center area */}
         <div className="flex-1 flex flex-col overflow-hidden relative">
           {isMobile && (
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-secondary shrink-0">
+            <div className="mobile-topbar flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-secondary shrink-0">
               {viewMode !== 'workspace' ? (
                 <button
                   onClick={goBack}
@@ -637,7 +637,7 @@ useEffect(() => {
               ) : (
                 <div className="flex items-center gap-1.5 shrink-0">
                   <Database size={15} className="text-accent" />
-                  <h1 className="text-sm font-bold tracking-tight">DBReader</h1>
+                  <h1 className="text-sm font-bold tracking-tight">DBReader Lite</h1>
                 </div>
               )}
               <div className="flex-1 min-w-0 text-right">
@@ -698,6 +698,7 @@ useEffect(() => {
             <Workspace
               tabs={launcherTabs}
               theme={prefs.theme}
+              isMobile={isMobile}
               onNavigate={(mode) => {
                 if (prefs.useDefaultTaskbar) {
                   if (!DEFAULT_TABS.includes(mode)) {
@@ -722,7 +723,7 @@ useEffect(() => {
                     <div className="w-20 h-20 rounded-2xl bg-accent/15 border border-accent/30 flex items-center justify-center mb-5">
                       <Database size={36} className="text-accent" />
                     </div>
-                    <h2 className="text-lg font-bold text-text-primary mb-1">DBReader</h2>
+                    <h2 className="text-lg font-bold text-text-primary mb-1">DBReader Lite</h2>
                     <p className="text-sm text-text-secondary mb-8 leading-relaxed">
                       {t('welcome.tagline')}
                     </p>
@@ -762,6 +763,7 @@ useEffect(() => {
                   <Workspace
                     tabs={launcherTabs}
                     theme={prefs.theme}
+                    isMobile={isMobile}
                     onNavigate={(mode) => {
                       if (!isTabEnabled(mode)) {
                         const all = ALL_TABS.map((x) => x.mode);
