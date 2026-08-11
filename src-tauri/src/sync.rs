@@ -1536,12 +1536,15 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
     ensure_schema(conn)?;
     let db_id = db_id_or_create(conn)?;
     let endpoint = cloud_endpoint();
-    let already_linked = meta_get(conn, "cloud_email")?.map(|e| e == email).unwrap_or(false)
-        && meta_get(conn, "endpoint")?.map(|e| e == endpoint).unwrap_or(false)
-        && meta_get(conn, "cloud_team_id")?.map(|t| !t.is_empty()).unwrap_or(false)
+    let has_link = meta_get(conn, "cloud_team_id")?.map(|t| !t.is_empty()).unwrap_or(false)
         && meta_get(conn, "cloud_file_id")?.map(|f| !f.is_empty()).unwrap_or(false)
         && meta_get(conn, "token")?.map(|t| !t.is_empty()).unwrap_or(false);
-    if already_linked {
+    if has_link && meta_get(conn, "endpoint")?.map(|e| e == endpoint).unwrap_or(false) {
+        let api = CloudApi::new(&endpoint)?;
+        let token = api.ensure_account(email, password)?;
+        meta_set(conn, "cloud_email", email)?;
+        meta_set(conn, "cloud_pass", password)?;
+        meta_set(conn, "token", &token)?;
         return Ok(());
     }
     let api = CloudApi::new(&endpoint)?;
