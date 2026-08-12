@@ -1826,6 +1826,12 @@ pub fn sync_signout(app: AppHandle) -> Result<SyncStatus, String> {
 /// The app-level personal account. Stored once per device in the app config
 /// directory (outside any database) so the app can require a sign-in before
 /// databases are opened and connect every database to the same account.
+///
+/// Sessions last `SESSION_TTL_SECS` (3 days) unless the user signs out
+/// manually; after the TTL elapses the stored session is discarded and a
+/// fresh sign-in is required.
+const SESSION_TTL_SECS: u64 = 3 * 24 * 60 * 60;
+
 #[derive(Serialize, Deserialize)]
 struct StoredAccount {
     email: String,
@@ -1833,6 +1839,17 @@ struct StoredAccount {
     token: String,
     #[serde(default)]
     name: String,
+    /// Unix seconds at which the session expires. `None` (legacy files) is
+    /// treated as already expired.
+    #[serde(default)]
+    expires_at: Option<u64>,
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 #[derive(Serialize)]
@@ -1853,7 +1870,13 @@ fn account_path(app: &AppHandle) -> PathBuf {
 
 fn account_load(app: &AppHandle) -> Option<StoredAccount> {
     let s = std::fs::read_to_string(account_path(app)).ok()?;
-    serde_json::from_str(&s).ok()
+    let account: StoredAccount = serde_json::from_str(&s).ok()?;
+    let expired = account.expires_at.map(|e| unix_now() >= e).unwrap_or(true);
+    if expired {
+        let _ = std::fs::remove_file(account_path(app));
+        return None;
+    }
+    Some(account)
 }
 
 fn account_save(app: &AppHandle, account: &StoredAccount) -> Result<(), String> {
@@ -1884,6 +1907,7 @@ fn store_account(app: &AppHandle, email: String, password: String, token: String
             password,
             token,
             name: name.clone(),
+            expires_at: Some(unix_now() + SESSION_TTL_SECS),
         },
     )?;
     if let Ok(status) = sync_status(app.clone()) {

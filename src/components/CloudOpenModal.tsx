@@ -188,7 +188,7 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
             <div className="py-10 text-center text-xs text-text-secondary">{t('openFrom.noCloud')}</div>
           ) : (
             <>
-              <div className="rounded-xl border border-border bg-bg-tertiary/50 overflow-hidden">
+              <div className="rounded-xl border border-border bg-bg-tertiary/50 overflow-hidden shrink-0">
                 <div className="flex items-center gap-2 px-3 py-2 bg-bg-tertiary border-b border-border">
                   <Database size={13} className="text-text-secondary" />
                   <span className="flex-1 text-sm font-semibold text-text-primary truncate">
@@ -272,7 +272,7 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
               </div>
 
               {teams?.map((team) => (
-                <div key={team.team_id} className="rounded-xl border border-border bg-bg-tertiary/50 overflow-hidden">
+                <div key={team.team_id} className="rounded-xl border border-border bg-bg-tertiary/50 overflow-hidden shrink-0">
                   <div className="flex items-center gap-2 px-3 py-2 bg-bg-tertiary border-b border-border">
                     <Users size={13} className="text-text-secondary" />
                     <span className="flex-1 text-sm font-semibold text-text-primary truncate">{team.name}</span>

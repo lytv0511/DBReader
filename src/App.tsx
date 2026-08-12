@@ -127,7 +127,11 @@ export default function App() {
     let disposed = false;
     accountStatus()
       .then((s) => {
-        if (!disposed) setAccount(s.email ? { email: s.email, name: s.name } : null);
+        if (disposed) return;
+        if (s.email) {
+          setAccount({ email: s.email, name: s.name });
+          setSessionStarted(true);
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -716,7 +720,7 @@ useEffect(() => {
               )}
             </div>
           )}
-          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' || viewMode === 'teams' ? 'hidden' : 'flex-1'} flex flex-col overflow-hidden`}>
+          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' || viewMode === 'teams' ? 'hidden' : 'flex-1 flex flex-col overflow-hidden'}`}>
           {viewMode === 'dashboard' && (
             <Dashboard refreshKey={syncTick} onNavigate={(stockFilter) => {
               setGalleryStockFilter(stockFilter);
@@ -903,7 +907,7 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Welcome overlay */}      {!isMobile && !initializing && !isConnected && (
+      {/* Welcome overlay */}      {!isMobile && viewMode === 'workspace' && !initializing && !isConnected && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="text-center pointer-events-auto">
             <Database size={64} className="mx-auto mb-4 text-text-secondary/30" />
