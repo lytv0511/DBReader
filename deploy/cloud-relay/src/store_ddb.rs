@@ -3,6 +3,11 @@ use crate::ddb::Ddb;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+/// Per-partition ops log chunk size. The whole per-site log is appended to
+/// forever, so it is stored in multiple DynamoDB items (each item is capped
+/// at 400KB) instead of one unbounded attribute.
+const OPS_CHUNK: usize = 350_000;
+
 pub struct DdbStore {
     ddb: Ddb,
     users_table: String,
@@ -10,6 +15,25 @@ pub struct DdbStore {
     teams_table: String,
     files_table: String,
     ops_table: String,
+}
+
+/// Splits `data` into byte-sized chunks that never split a UTF-8 codepoint.
+fn split_chunks(data: &str, max_bytes: usize) -> Vec<String> {
+    let bytes = data.as_bytes();
+    if bytes.len() <= max_bytes {
+        return vec![data.to_string()];
+    }
+    let mut chunks = Vec::new();
+    let mut start = 0usize;
+    while start < bytes.len() {
+        let mut end = (start + max_bytes).min(bytes.len());
+        while end > start && !data.is_char_boundary(end) {
+            end -= 1;
+        }
+        chunks.push(data[start..end].to_string());
+        start = end;
+    }
+    chunks
 }
 
 impl DdbStore {
@@ -115,6 +139,39 @@ fn s(v: &Value, k: &str) -> Option<String> {
         .and_then(|x| x.get("S"))
         .and_then(|x| x.as_str())
         .map(|x| x.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_chunks_small_data_is_single_chunk() {
+        let chunks = split_chunks("abc\n", OPS_CHUNK);
+        assert_eq!(chunks, vec!["abc\n"]);
+    }
+
+    #[test]
+    fn split_chunks_never_splits_utf8() {
+        let data = "héllo ".repeat(100_000);
+        let chunks = split_chunks(&data, 350_000);
+        assert!(chunks.len() > 1);
+        let joined = chunks.join("");
+        assert_eq!(joined, data, "chunks must reassemble the original data");
+        for c in &chunks {
+            assert!(c.len() <= OPS_CHUNK);
+            assert!(data.is_char_boundary(c.len()), "chunk must end on a char boundary");
+        }
+    }
+
+    #[test]
+    fn split_chunks_ascii_roundtrip() {
+        let line = "{\"site\":\"x\",\"seq\":1,\"hlc\":\"20260811045336.382\"}\n";
+        let data = line.repeat(10_000);
+        let chunks = split_chunks(&data, 350_000);
+        assert!(chunks.len() > 1);
+        assert_eq!(chunks.join(""), data);
+    }
 }
 
 fn item_to_value(item: crate::ddb::Item) -> Value {
@@ -299,21 +356,90 @@ impl Store for DdbStore {
     }
 
     fn ops_get(&self, site_key: &str) -> Option<String> {
-        let v = self
+        let head = self
             .ddb
             .get_item(&self.ops_table, &[("site_key", json!({"S": site_key}))])
             .ok()
             .flatten()
             .map(item_to_value)?;
-        s(&v, "data")
+        let parts: i64 = head
+            .get("parts")
+            .and_then(|x| x.get("N"))
+            .and_then(|x| x.as_str())
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(0);
+        if parts <= 1 {
+            // Legacy (or single-chunk) layout: data lives on the head item.
+            return s(&head, "data");
+        }
+        let mut out = String::new();
+        for i in 0..parts {
+            if let Some(v) = self
+                .ddb
+                .get_item(
+                    &self.ops_table,
+                    &[("site_key", json!({"S": format!("{}#{}", site_key, i)}))],
+                )
+                .ok()
+                .flatten()
+                .map(item_to_value)
+            {
+                if let Some(d) = s(&v, "data") {
+                    out.push_str(&d);
+                }
+            }
+        }
+        Some(out)
     }
 
     fn ops_put(&self, site_key: &str, data: &str) {
+        // Remove any previously stored part items (the log is rewritten whole).
+        if let Some(head) = self
+            .ddb
+            .get_item(&self.ops_table, &[("site_key", json!({"S": site_key}))])
+            .ok()
+            .flatten()
+            .map(item_to_value)
+        {
+            let old_parts: i64 = head
+                .get("parts")
+                .and_then(|x| x.get("N"))
+                .and_then(|x| x.as_str())
+                .and_then(|x| x.parse().ok())
+                .unwrap_or(0);
+            for i in 0..old_parts {
+                let _ = self.ddb.delete_item(
+                    &self.ops_table,
+                    &[("site_key", json!({"S": format!("{}#{}", site_key, i)}))],
+                );
+            }
+        }
+        let chunks = split_chunks(data, OPS_CHUNK);
+        if chunks.len() == 1 {
+            let _ = self.ddb.put_item(
+                &self.ops_table,
+                &[
+                    ("site_key".into(), json!({"S": site_key})),
+                    ("parts".into(), json!({"N": "1"})),
+                    ("data".into(), json!({"S": chunks[0]})),
+                ],
+            );
+            return;
+        }
+        for (i, chunk) in chunks.iter().enumerate() {
+            let _ = self.ddb.put_item(
+                &self.ops_table,
+                &[
+                    ("site_key".into(), json!({"S": format!("{}#{}", site_key, i)})),
+                    ("data".into(), json!({"S": chunk})),
+                ],
+            );
+        }
         let _ = self.ddb.put_item(
             &self.ops_table,
             &[
                 ("site_key".into(), json!({"S": site_key})),
-                ("data".into(), json!({"S": data})),
+                ("parts".into(), json!({"N": chunks.len().to_string()})),
             ],
         );
     }

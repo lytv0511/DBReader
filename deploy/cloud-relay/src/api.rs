@@ -11,7 +11,6 @@ pub const ROLE_VIEWER: &str = "viewer";
 
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const PULL_LIMIT: usize = 2000;
-const OPS_MAX_CHARS: usize = 380_000;
 const SESSION_SECS: i64 = 30 * 86400;
 
 // ---------- data model ----------
@@ -662,9 +661,8 @@ fn h_push(
         }
     }
     if !added.is_empty() {
-        if data.len() + added.len() > OPS_MAX_CHARS {
-            return Resp::err(507, "ops log full; contact your team creator");
-        }
+        // The per-site log is stored in chunked DynamoDB items, so it can grow
+        // without hitting the single-item size limit.
         data.push_str(&added);
         store.ops_put(&key, &data);
     }

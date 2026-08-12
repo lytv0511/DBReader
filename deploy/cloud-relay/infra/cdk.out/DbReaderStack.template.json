@@ -482,7 +482,7 @@
     ],
     "Code": {
      "S3Bucket": "cdk-hnb659fds-assets-806938668256-ap-southeast-2",
-     "S3Key": "582b3bf583c8bde1dcd8794d58c81ea80e7c50cc609b501f6e85ca10ecd733af.zip"
+     "S3Key": "894ffc0c428803075e27bba8067baa31dd9090e4bfb12061d04f2471df222c82.zip"
     },
     "Environment": {
      "Variables": {
@@ -524,7 +524,7 @@
    ],
    "Metadata": {
     "aws:cdk:path": "DbReaderStack/RelayFn/Resource",
-    "aws:asset:path": "asset.582b3bf583c8bde1dcd8794d58c81ea80e7c50cc609b501f6e85ca10ecd733af.zip",
+    "aws:asset:path": "asset.894ffc0c428803075e27bba8067baa31dd9090e4bfb12061d04f2471df222c82.zip",
     "aws:asset:is-bundled": false,
     "aws:asset:property": "Code"
    }

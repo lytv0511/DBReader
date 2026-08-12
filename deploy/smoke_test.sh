@@ -14,7 +14,7 @@ check_status() { # check_status <expected> <actual> <label>
   [[ "$2" == "$1" ]] || fail "$3 (expected $1, got $2)"
 }
 
-ts() { date +%s%3N; }
+ts() { date +%s; }
 
 JQ() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval('d'+sys.argv[1]))" "$1"; }
 
@@ -26,13 +26,13 @@ say "2. register owner + member"
 EMAIL_O="owner.$(ts)@smoke.local"
 EMAIL_M="member.$(ts)@smoke.local"
 curl -s -X POST "$BASE/register" -H 'content-type: application/json' \
-  -d "{\"email\":\"$EMAIL_O\",\"name\":\"Owner\",\"password\":\"smoketest123\"}" > /tmp/smoke_o.json
+  -d "{\"email\":\"$EMAIL_O\",\"name\":\"Owner$(ts)\",\"password\":\"smoketest123\"}" > /tmp/smoke_o.json
 TOKEN_O=$(JQ '["token"]' < /tmp/smoke_o.json)
-[[ -n "$TOKEN_O" ]] || fail "owner token missing"
+[[ -n "$TOKEN_O" ]] || fail "owner token missing ($(cat /tmp/smoke_o.json))"
 curl -s -X POST "$BASE/register" -H 'content-type: application/json' \
-  -d "{\"email\":\"$EMAIL_M\",\"name\":\"Member\",\"password\":\"smoketest123\"}" > /tmp/smoke_m.json
+  -d "{\"email\":\"$EMAIL_M\",\"name\":\"Member$(ts)\",\"password\":\"smoketest123\"}" > /tmp/smoke_m.json
 TOKEN_M=$(JQ '["token"]' < /tmp/smoke_m.json)
-[[ -n "$TOKEN_M" ]] || fail "member token missing"
+[[ -n "$TOKEN_M" ]] || fail "member token missing ($(cat /tmp/smoke_m.json))"
 
 say "3. login wrong + right"
 CODE=$(curl -s -o /tmp/smoke_l.json -w '%{http_code}' -X POST "$BASE/login" -H 'content-type: application/json' \

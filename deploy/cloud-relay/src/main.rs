@@ -75,32 +75,109 @@ fn parse_netloc(url: &str) -> (String, u16, String) {
 }
 
 fn http_request(method: &str, url: &str, body: &str) -> Result<(u16, String, String), String> {
+    use std::io::{BufRead, BufReader, Read};
     let (host, port, path) = parse_netloc(url);
     let mut conn = TcpStream::connect((host.as_str(), port)).map_err(|e| e.to_string())?;
+    conn.set_read_timeout(Some(std::time::Duration::from_secs(60)))
+        .map_err(|e| e.to_string())?;
     let req = format!(
         "{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );
     conn.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
-    let mut raw = String::new();
-    conn.read_to_string(&mut raw).map_err(|e| e.to_string())?;
-    let (head, rest) = match raw.split_once("\r\n\r\n") {
-        Some((h, b)) => (h, b),
-        None => (raw.as_str(), ""),
-    };
-    let status = head
-        .lines()
-        .next()
-        .and_then(|l| l.split_whitespace().nth(1))
+
+    // Parse status line + headers properly. The Lambda runtime API serves
+    // /next responses with Transfer-Encoding: chunked for larger events; the
+    // naive read-to-EOF approach captured the chunk framing inside the body
+    // (breaking multi-op pushes).
+    let mut reader = BufReader::new(conn);
+    let mut status_line = String::new();
+    reader
+        .read_line(&mut status_line)
+        .map_err(|e| format!("read status line: {e}"))?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(0);
     let mut resp_headers = String::new();
-    for line in head.lines().skip(1) {
-        resp_headers.push_str(line);
+    let mut content_length: Option<usize> = None;
+    let mut chunked = false;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).map_err(|e| format!("read header: {e}"))? == 0 {
+            break;
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        resp_headers.push_str(trimmed);
         resp_headers.push('\n');
+        let lower = line.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("content-length:") {
+            content_length = v.trim().parse::<usize>().ok();
+        } else if lower.trim_start().starts_with("transfer-encoding:")
+            && lower.to_ascii_lowercase().contains("chunked")
+        {
+            chunked = true;
+        }
     }
-    Ok((status, rest.to_string(), resp_headers))
+
+    let body = if let Some(cl) = content_length {
+        let mut buf = vec![0u8; cl];
+        reader
+            .read_exact(&mut buf)
+            .map_err(|e| format!("read body: {e}"))?;
+        String::from_utf8_lossy(&buf).into_owned()
+    } else if chunked {
+        read_chunked(&mut reader)?
+    } else {
+        let mut s = String::new();
+        reader.read_to_string(&mut s).map_err(|e| e.to_string())?;
+        s
+    };
+    Ok((status, body, resp_headers))
+}
+
+/// Decodes an HTTP/1.1 chunked-transfer body from the reader.
+fn read_chunked(reader: &mut impl std::io::BufRead) -> Result<String, String> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    loop {
+        let mut size_line = String::new();
+        let n = reader
+            .read_line(&mut size_line)
+            .map_err(|e| format!("read chunk size: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        let size_str = size_line.trim().split(';').next().unwrap_or("");
+        let size = usize::from_str_radix(size_str.trim(), 16)
+            .map_err(|e| format!("bad chunk size {:?}: {e}", size_line.trim()))?;
+        if size == 0 {
+            // Trailer headers until the final blank line.
+            loop {
+                let mut t = String::new();
+                if reader.read_line(&mut t).map_err(|e| format!("read trailer: {e}"))? == 0 {
+                    break;
+                }
+                if t == "\r\n" || t == "\n" {
+                    break;
+                }
+            }
+            break;
+        }
+        let mut buf = vec![0u8; size];
+        reader
+            .read_exact(&mut buf)
+            .map_err(|e| format!("read chunk data: {e}"))?;
+        out.extend_from_slice(&buf);
+        let mut crlf = [0u8; 2];
+        reader.read_exact(&mut crlf).map_err(|e| format!("chunk crlf: {e}"))?;
+    }
+    Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
 fn fetch_next(endpoint: &str) -> Result<Option<(String, String)>, String> {
@@ -164,7 +241,16 @@ fn handle_event_inner(store: &dyn Store, raw: &str) -> Result<(u16, String, Stri
     if let Value::Object(ref mut m) = body {
         for (k, v) in parse_query(&evt.get("rawQueryString").and_then(|v| v.as_str()).unwrap_or("")) {
             if !m.contains_key(&k) {
-                m.insert(k, json!(v));
+                // Query params arrive as strings, but callers expect numbers for
+                // `seq` and `wait` (pull cursor position and long-poll duration).
+                let val = if k == "seq" || k == "wait" {
+                    v.parse::<i64>()
+                        .map(|n| json!(n))
+                        .unwrap_or_else(|_| json!(v))
+                } else {
+                    json!(v)
+                };
+                m.insert(k, val);
             }
         }
     }
@@ -260,4 +346,45 @@ fn base64_decode(s: &str) -> Vec<u8> {
 #[allow(dead_code)]
 fn status_line(detail: &str) -> String {
     detail.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn merge_query(body: &mut Value, qs: &str) {
+        if let Value::Object(ref mut m) = body {
+            for (k, v) in parse_query(qs) {
+                if !m.contains_key(&k) {
+                    let val = if k == "seq" || k == "wait" {
+                        v.parse::<i64>()
+                            .map(|n| json!(n))
+                            .unwrap_or_else(|_| json!(v))
+                    } else {
+                        json!(v)
+                    };
+                    m.insert(k, val);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn query_params_coerce_seq_and_wait_to_numbers() {
+        let mut body = json!({});
+        merge_query(&mut body, "team_id=t1&file_id=f1&site=s1&h=20260811045336.382&seq=7&wait=12000");
+        assert_eq!(body["seq"], 7i64);
+        assert_eq!(body["wait"], 12000i64);
+        assert_eq!(body["team_id"], "t1");
+        assert_eq!(body["site"], "s1");
+        assert_eq!(body["h"], "20260811045336.382");
+    }
+
+    #[test]
+    fn query_params_do_not_override_body() {
+        let mut body = json!({"seq": 3});
+        merge_query(&mut body, "seq=9&wait=5");
+        assert_eq!(body["seq"], 3i64, "body value wins over query param");
+        assert_eq!(body["wait"], 5i64);
+    }
 }
