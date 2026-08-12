@@ -22,8 +22,27 @@ fn host_for(bucket: &str, region: &str) -> String {
     format!("{}.s3.{}.amazonaws.com", bucket, region)
 }
 
+/// Percent-encodes an S3 object key for SigV4 signing (reserved chars like
+/// `@` in personal-space keys must be encoded, otherwise S3 computes a
+/// different canonical path and rejects the signature).
+fn encode_path(key: &str) -> String {
+    let mut out = String::with_capacity(key.len() + 8);
+    for b in key.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(b as char)
+            }
+            _ => {
+                out.push('%');
+                out.push_str(&format!("{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
 fn path_for(key: &str) -> String {
-    format!("/{}", key)
+    format!("/{}", encode_path(key))
 }
 
 pub fn upload_url(key: &str, team_id: &str) -> String {

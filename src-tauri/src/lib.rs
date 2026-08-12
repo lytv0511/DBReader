@@ -431,11 +431,45 @@ fn register_live_hook(conn: &Connection, app: &tauri::AppHandle) {
     ));
 }
 
+/// Ensures the app's core inventory schema exists in a newly opened database.
+/// Databases without the core tables (e.g. uploaded or legacy files) are
+/// unusable until the schema is applied. No-op when `products` already exists;
+/// sample seed data is only inserted when no core tables existed at all.
+fn ensure_app_schema(conn: &Connection) -> Result<(), String> {
+    let table_exists = |name: &str| -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            rusqlite::params![name],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false)
+    };
+    if table_exists("products") {
+        return Ok(());
+    }
+    let had_core_tables = table_exists("categories") || table_exists("batches") || table_exists("providers");
+    conn.execute_batch("BEGIN;")
+        .map_err(|e| format!("Failed to start transaction: {}", e))?;
+    if let Err(e) = conn.execute_batch(INVENTORY_SCHEMA) {
+        conn.execute_batch("ROLLBACK;").ok();
+        return Err(format!("Failed to create schema: {}", e));
+    }
+    conn.execute_batch("COMMIT;")
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+    if !had_core_tables {
+        conn.execute_batch(SEED_DATA)
+            .map_err(|e| format!("Failed to seed sample data: {}", e))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn open_database(path: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
+    ensure_app_schema(&conn)?;
     let tables = get_tables_internal(&conn)?;
     let mut columns = Vec::new();
     if let Some(first) = tables.first() {
@@ -503,6 +537,7 @@ fn cloud_open(team_id: String, file_id: String, state: State<DbState>, app: taur
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
+    ensure_app_schema(&conn)?;
     let tables = get_tables_internal(&conn)?;
     let mut columns = Vec::new();
     if let Some(first) = tables.first() {
