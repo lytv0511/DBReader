@@ -3,15 +3,11 @@ import { ArrowLeft, Pencil, Save, X } from 'lucide-react';
 import { updateProduct } from '../../lib/db';
 import type { Product } from './ProductGallery';
 import ProductHistory from './product-tabs/ProductHistory';
-import ProductFields from './product-tabs/ProductFields';
 import ProductNotes from './product-tabs/ProductNotes';
-import ProductCalendar from './product-tabs/ProductCalendar';
-import ProductClients from './product-tabs/ProductClients';
-import ProductNotifications from './product-tabs/ProductNotifications';
 import ProductReport from './product-tabs/ProductReport';
 import { useI18n } from '../../lib/language';
 
-type TabId = 'history' | 'fields' | 'calendar' | 'notes' | 'clients' | 'alerts' | 'report';
+type TabId = 'history' | 'notes' | 'report';
 
 interface Tab {
   id: TabId;
@@ -20,11 +16,7 @@ interface Tab {
 
 const TABS: Tab[] = [
   { id: 'history', label: 'History' },
-  { id: 'fields', label: 'Fields' },
-  { id: 'calendar', label: 'Calendar' },
   { id: 'notes', label: 'Notes' },
-  { id: 'clients', label: 'Clients' },
-  { id: 'alerts', label: 'Alerts' },
   { id: 'report', label: 'Report' },
 ];
 
@@ -57,26 +49,18 @@ export default function ProductDetail({ product, onBack, currencySymbol, refresh
     switch (activeTab) {
       case 'history':
         return <ProductHistory refreshKey={refreshKey} productId={product.id} />;
-      case 'fields':
-        return <ProductFields refreshKey={refreshKey} productId={product.id} categoryId={product.category_id} />;
-      case 'calendar':
-        return <ProductCalendar refreshKey={refreshKey} productId={product.id} />;
       case 'notes':
         return <ProductNotes refreshKey={refreshKey} productId={product.id} />;
-      case 'clients':
-        return <ProductClients refreshKey={refreshKey} productId={product.id} />;
-      case 'alerts':
-        return <ProductNotifications refreshKey={refreshKey} productId={product.id} />;
       case 'report':
         return <ProductReport refreshKey={refreshKey} productId={product.id} currencySymbol={currencySymbol} />;
     }
   };
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-bg-secondary border-b border-border px-6 py-4">
-        <div className="flex items-center gap-4">
+      <div className="shrink-0 bg-bg-secondary border-b border-border px-3 sm:px-6 py-3 sm:py-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           <button onClick={onBack} className="p-2 rounded-lg hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors">
             <ArrowLeft size={16} />
           </button>
@@ -111,12 +95,12 @@ export default function ProductDetail({ product, onBack, currencySymbol, refresh
       </div>
 
       {/* Tab bar */}
-      <div className="sticky top-[73px] z-10 bg-bg-secondary border-b border-border px-6 flex gap-0">
+      <div className="shrink-0 bg-bg-secondary border-b border-border px-3 sm:px-6 flex gap-0 overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors shrink-0 whitespace-nowrap ${
               activeTab === tab.id
                 ? 'border-accent text-accent'
                 : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border'
@@ -127,7 +111,7 @@ export default function ProductDetail({ product, onBack, currencySymbol, refresh
         ))}
       </div>
 
-      <div className="p-6">
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 sm:p-6">
         {error && (
           <div className="mb-4 p-3 bg-error/10 border border-error/20 rounded-lg text-xs text-error">{error}</div>
         )}

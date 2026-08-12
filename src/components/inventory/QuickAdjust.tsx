@@ -19,15 +19,6 @@ interface Provider {
   sub_name: string | null;
 }
 
-interface RecentAdjustment {
-  id: number;
-  product_name: string;
-  quantity_change: number;
-  transaction_type: string;
-  notes: string | null;
-  created_at: string;
-}
-
 const TX_TYPES = [
   { value: 'PURCHASE', labelKey: 'common.tx.PURCHASE', icon: <ShoppingCart size={16} />, color: 'bg-success/10 border-success/30 text-success hover:bg-success/20', activeColor: 'bg-success/20 border-success text-success' },
   { value: 'USAGE', labelKey: 'common.tx.USAGE', icon: <Minus size={16} />, color: 'bg-warning/10 border-warning/30 text-warning hover:bg-warning/20', activeColor: 'bg-warning/20 border-warning text-warning' },
@@ -41,7 +32,6 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [recent, setRecent] = useState<RecentAdjustment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +68,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
     if (!quiet) setLoading(true);
     setError(null);
     try {
-      const [productsResult, providersResult, recentResult] = await Promise.all([
+      const [productsResult, providersResult] = await Promise.all([
         executeQuery(`
           SELECT
             p.id, p.name, p.sku,
@@ -93,14 +83,6 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
           ORDER BY c.name, p.name
         `),
         executeQuery('SELECT id, name, sub_name FROM providers ORDER BY name, sub_name'),
-        executeQuery(`
-          SELECT il.id, p.name AS product_name, il.quantity_change, il.transaction_type, il.notes, il.created_at
-          FROM inventory_logs il
-          JOIN batches b ON il.batch_id = b.id
-          JOIN products p ON b.product_id = p.id
-          ORDER BY il.created_at DESC
-          LIMIT 10
-        `),
       ]);
 
       setProducts(productsResult.rows.map((r) => ({
@@ -116,15 +98,6 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
         id: r[0] as number,
         name: r[1] as string,
         sub_name: r[2] as string | null,
-      })));
-
-      setRecent(recentResult.rows.map((r) => ({
-        id: r[0] as number,
-        product_name: r[1] as string,
-        quantity_change: r[2] as number,
-        transaction_type: r[3] as string,
-        notes: r[4] as string | null,
-        created_at: r[5] as string,
       })));
     } catch (err) {
       setError(String(err));
@@ -208,20 +181,6 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
     }
   };
 
-  const txBg: Record<string, string> = {
-    PURCHASE: 'bg-success/10',
-    USAGE: 'bg-warning/10',
-    SPOILAGE: 'bg-error/10',
-    ADJUSTMENT: 'bg-accent/10',
-  };
-
-  const txColor: Record<string, string> = {
-    PURCHASE: 'text-success',
-    USAGE: 'text-warning',
-    SPOILAGE: 'text-error',
-    ADJUSTMENT: 'text-accent',
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
@@ -232,22 +191,22 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
   }
 
   return (
-    <div className="h-full flex flex-col sm:flex-row overflow-hidden">
+    <div className="h-full flex flex-col sm:flex-row overflow-hidden overflow-x-hidden">
       {/* Left: Adjust form */}
-      <div className="w-full sm:w-[420px] border-b sm:border-b-0 sm:border-r border-border bg-bg-secondary flex flex-col shrink-0 max-h-[55%] sm:max-h-none overflow-y-auto">
-        <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-base font-bold text-text-primary">{t('adjust.title')}</h2>
-          <p className="text-xs text-text-secondary mt-0.5">{t('adjust.subtitle')}</p>
+      <div className="w-full sm:w-[420px] flex-1 sm:flex-none border-b sm:border-b-0 sm:border-r border-border bg-bg-secondary flex flex-col shrink-0 min-w-0 overflow-y-auto overflow-x-hidden">
+        <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
+          <h2 className="text-sm sm:text-base font-bold text-text-primary">{t('adjust.title')}</h2>
+          <p className="text-[11px] sm:text-xs text-text-secondary mt-0.5">{t('adjust.subtitle')}</p>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="p-4 sm:p-5 space-y-4 sm:space-y-5">
           {/* Product selector */}
           <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.productLabel')}</label>
+            <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.productLabel')}</label>
             <select
               value={selectedProductId}
               onChange={(e) => setSelectedProductId(e.target.value === '' ? '' : Number(e.target.value))}
-              className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
+              className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary focus:outline-none focus:border-accent"
             >
               <option value="">{t('adjust.productPlaceholder')}</option>
               {products.map((p) => (
@@ -269,7 +228,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
             }`}>
               <div>
                 <p className="text-xs text-text-secondary">{t('adjust.currentStock')}</p>
-                <p className={`text-2xl font-bold ${
+                <p className={`text-xl sm:text-2xl font-bold ${
                   selectedProduct.current_stock <= 0 ? 'text-error' :
                   selectedProduct.current_stock <= selectedProduct.reorder_threshold ? 'text-warning' : 'text-success'
                 }`}>
@@ -289,13 +248,13 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
 
           {/* Transaction type */}
           <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.actionLabel')}</label>
+            <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.actionLabel')}</label>
             <div className="grid grid-cols-2 gap-2">
               {TX_TYPES.map((tx) => (
                 <button
                   key={tx.value}
                   onClick={() => setTxType(tx.value)}
-                  className={`flex items-center gap-2 px-3 py-3 rounded-lg border text-sm font-medium transition-all ${
+                  className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2.5 sm:py-3 rounded-lg border text-[13px] sm:text-sm font-medium min-w-0 transition-all ${
                     txType === tx.value ? tx.activeColor : tx.color
                   }`}
                 >
@@ -308,11 +267,11 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
 
           {/* Quantity */}
           <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.quantityLabel')}</label>
+            <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.quantityLabel')}</label>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setQty(String(Math.max(1, Number(qty) - 1)))}
-                className="p-2.5 bg-bg-primary hover:bg-bg-hover border border-border rounded-lg text-text-secondary hover:text-text-primary transition-colors"
+                className="p-2 sm:p-2.5 bg-bg-primary hover:bg-bg-hover border border-border rounded-lg text-text-secondary hover:text-text-primary transition-colors shrink-0"
               >
                 <Minus size={14} />
               </button>
@@ -324,11 +283,11 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
                 }}
                 type="text"
                 inputMode="decimal"
-                className="flex-1 px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-center text-lg font-bold text-text-primary focus:outline-none focus:border-accent"
+                className="flex-1 min-w-0 px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-center text-base sm:text-lg font-bold text-text-primary focus:outline-none focus:border-accent"
               />
               <button
                 onClick={() => setQty(String(Number(qty) + 1))}
-                className="p-2.5 bg-bg-primary hover:bg-bg-hover border border-border rounded-lg text-text-secondary hover:text-text-primary transition-colors"
+                className="p-2 sm:p-2.5 bg-bg-primary hover:bg-bg-hover border border-border rounded-lg text-text-secondary hover:text-text-primary transition-colors shrink-0"
               >
                 <Plus size={14} />
               </button>
@@ -353,11 +312,11 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
           {/* Direction (only for ADJUSTMENT) */}
           {txType === 'ADJUSTMENT' && (
             <div>
-              <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.direction')}</label>
+              <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">{t('adjust.direction')}</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setAdjustDir('add')}
-                  className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
+                  className={`flex items-center justify-center gap-2 px-2.5 sm:px-3 py-2 rounded-lg border text-[13px] sm:text-sm font-medium transition-all ${
                     adjustDir === 'add'
                       ? 'bg-success/20 border-success text-success'
                       : 'bg-bg-primary border-border text-text-secondary hover:border-success/50 hover:text-success'
@@ -368,7 +327,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
                 </button>
                 <button
                   onClick={() => setAdjustDir('remove')}
-                  className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
+                  className={`flex items-center justify-center gap-2 px-2.5 sm:px-3 py-2 rounded-lg border text-[13px] sm:text-sm font-medium transition-all ${
                     adjustDir === 'remove'
                       ? 'bg-error/20 border-error text-error'
                       : 'bg-bg-primary border-border text-text-secondary hover:border-error/50 hover:text-error'
@@ -384,14 +343,14 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
           {/* Batch number (only for PURCHASE) */}
           {txType === 'PURCHASE' && (
             <div>
-              <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+              <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
                 {t('adjust.batchLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
               </label>
               <input
                 value={batchNumber}
                 onChange={(e) => setBatchNumber(e.target.value)}
                 placeholder={t('batch.ph.batchNumber')}
-                className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
+                className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
               />
             </div>
           )}
@@ -405,20 +364,20 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
               value={txDate}
               onChange={(e) => setTxDate(e.target.value)}
               type="date"
-              className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
+              className="w-full max-w-[160px] px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary focus:outline-none focus:border-accent"
             />
           </div>
 
           {/* Storage company + location */}
           <div className="space-y-5">
             <div>
-              <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+              <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
                 {t('adjust.providerLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
               </label>
               <select
                 value={storageCompany}
                 onChange={(e) => handleStorageCompanyChange(e.target.value)}
-                className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
+                className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary focus:outline-none focus:border-accent"
               >
                 <option value="">{t('adjust.noProvider')}</option>
                 {storageCompanies.map((c) => (
@@ -429,13 +388,13 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
 
             {storageCompany && (
               <div>
-                <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+                <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
                   {t('adjust.storageLocation')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
                 </label>
                 <select
                   value={providerId}
                   onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent"
+                  className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary focus:outline-none focus:border-accent"
                 >
                   <option value="">{t('adjust.noLocation')}</option>
                   {storageLocations.map((l) => (
@@ -448,7 +407,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
 
           {/* Notes (optional) */}
           <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+            <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
               {t('adjust.notesLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
             </label>
             <textarea
@@ -456,7 +415,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
               onChange={(e) => setNotes(e.target.value)}
               placeholder={t('adjust.notesPlaceholder')}
               rows={2}
-              className="w-full px-3 py-2.5 bg-bg-primary border border-border rounded-lg text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent resize-none"
+              className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent resize-none"
             />
           </div>
 
@@ -464,7 +423,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
           <button
             onClick={handleSubmit}
             disabled={submitting || selectedProductId === '' || !qty || Number(qty) <= 0}
-            className={`w-full py-3 rounded-lg text-sm font-bold transition-all ${
+            className={`w-full py-2.5 sm:py-3 rounded-lg text-[13px] sm:text-sm font-bold transition-all ${
               submitting || selectedProductId === '' || !qty || Number(qty) <= 0
                 ? 'bg-bg-tertiary text-text-secondary/50 cursor-not-allowed'
                 : txType === 'PURCHASE'
@@ -481,43 +440,8 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
         </div>
       </div>
 
-      {/* Right: Recent adjustments + full stock overview */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Recent adjustments */}
-        <div className="border-b border-border">
-          <div className="px-5 py-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-text-primary">{t('adjust.recent')}</h3>
-            <button onClick={() => fetchData()} className="text-text-secondary hover:text-text-primary transition-colors">
-              <RefreshCw size={12} />
-            </button>
-          </div>
-          <div className="divide-y divide-border max-h-[280px] overflow-y-auto">
-            {recent.length === 0 ? (
-              <div className="px-5 py-6 text-center text-xs text-text-secondary">{t('adjust.noRecent')}</div>
-            ) : (
-              recent.map((r) => (
-                <div key={r.id} className="px-5 py-2.5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${txBg[r.transaction_type]} ${txColor[r.transaction_type]}`}>
-                      {r.transaction_type}
-                    </span>
-                    <div>
-                      <p className="text-sm text-text-primary">{r.product_name}</p>
-                      {r.notes && <p className="text-[11px] text-text-secondary truncate max-w-[250px]">{r.notes}</p>}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className={`text-sm font-bold ${r.quantity_change >= 0 ? 'text-success' : 'text-error'}`}>
-                      {r.quantity_change >= 0 ? '+' : ''}{r.quantity_change}
-                    </p>
-                    <p className="text-[10px] text-text-secondary">{r.created_at?.replace('T', ' ').slice(0, 16)}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
+      {/* Right: full stock overview (desktop only) */}
+      <div className="hidden sm:block flex-1 overflow-y-auto overflow-x-hidden">
         {/* Stock overview */}
         <div className="px-5 py-3">
           <h3 className="text-sm font-semibold text-text-primary mb-3">{t('adjust.allStock')}</h3>

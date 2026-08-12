@@ -495,6 +495,53 @@ fn create_new_database(path: String, state: State<DbState>, app: tauri::AppHandl
     })
 }
 
+/// Downloads a team inventory from the account's cloud into the device and
+/// opens it as the current database, linked to the team so live sync runs.
+#[tauri::command]
+fn cloud_open(team_id: String, file_id: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
+    let path = sync::download_cloud_file(&app, &team_id, &file_id)?;
+    let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
+    let tables = get_tables_internal(&conn)?;
+    let mut columns = Vec::new();
+    if let Some(first) = tables.first() {
+        columns = get_columns_internal(&conn, first)?;
+    }
+    sync::link_conn_to_cloud(&conn, &app, &team_id, &file_id)?;
+    register_live_hook(&conn, &app);
+    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    *inner = InnerState {
+        conn: Some(conn),
+        path: Some(path.to_string_lossy().to_string()),
+    };
+    drop(inner);
+    sync::poke_live_sync(&app);
+    let handle = app.clone();
+    std::thread::spawn(move || email_check(&handle, false));
+    Ok(TableInfo {
+        name: tables.first().cloned().unwrap_or_default(),
+        columns,
+    })
+}
+
+/// Publishes the currently open database into a team as a team inventory so
+/// other members can open and sync it (admin only).
+#[tauri::command]
+fn team_publish(team_id: String, app: tauri::AppHandle) -> Result<(), String> {
+    let db_state = app.state::<DbState>();
+    let inner = db_state.inner.lock().map_err(|e| e.to_string())?;
+    let path = inner.path.clone().ok_or("No database connected")?;
+    drop(inner);
+    let file_name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("inventory.db")
+        .to_string();
+    sync::publish_db_to_team(&app, &team_id, &path, &file_name)?;
+    Ok(())
+}
+
 #[tauri::command]
 fn mobile_create_database(name: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -2653,7 +2700,17 @@ let mut builder = tauri::Builder::default()
             sync::sync_signout,
             sync::account_status,
             sync::account_signin,
+            sync::account_signup,
             sync::account_signout,
+            sync::account_inventories,
+            sync::team_create,
+            sync::team_join,
+            sync::team_code,
+            sync::team_rotate_code,
+            sync::team_members,
+            sync::team_set_role,
+            cloud_open,
+            team_publish,
         ])
         .on_window_event(|window, event| {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

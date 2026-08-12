@@ -132,6 +132,23 @@ impl Store for DdbStore {
         })
     }
 
+    fn user_by_name(&self, name: &str) -> Option<User> {
+        let want = name.to_lowercase();
+        let items = self.ddb.scan(&self.users_table, "", &[]).ok()?;
+        items
+            .into_iter()
+            .map(item_to_value)
+            .filter_map(|v| {
+                Some(User {
+                    email: s(&v, "user_id")?,
+                    nm: s(&v, "nm")?,
+                    pw: s(&v, "pw")?,
+                    created_ts: v.get("created_ts").and_then(|x| x.get("N")).and_then(|x| x.as_str()).and_then(|x| x.parse().ok()).unwrap_or(0),
+                })
+            })
+            .find(|u| u.nm.to_lowercase() == want)
+    }
+
     fn user_put(&self, u: &User) {
         let _ = self.ddb.put_item(
             &self.users_table,

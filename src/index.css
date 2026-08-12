@@ -16,6 +16,14 @@
   --color-warning: var(--warning);
 }
 
+html {
+  background-color: #0f1117;
+}
+
+html.light {
+  background-color: #ffffff;
+}
+
 :root {
   --bg-primary: #0f1117;
   --bg-secondary: #1a1d27;

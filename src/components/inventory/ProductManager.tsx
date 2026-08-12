@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag } from 'lucide-react';
+import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag, ChevronRight } from 'lucide-react';
 import { executeQuery, upsertProductAttribute, deleteCategory } from '../../lib/db';
 import { useI18n } from '../../lib/language';
 import { UNIT_RECS } from '../../lib/units';
+import { isMobile } from '../../lib/platform';
+import ProductDetail from './ProductDetail';
+import type { Product as GalleryProduct } from './ProductGallery';
 
 interface Product {
   id: number;
@@ -12,6 +15,8 @@ interface Product {
   base_unit_name: string;
   reorder_threshold: number;
   category_name: string;
+  category_icon: string;
+  category_color: string;
 }
 
 interface Category {
@@ -76,7 +81,8 @@ function UnitInput({ value, onChange, placeholder }: { value: string; onChange: 
   );
 }
 
-export default function ProductManager({ refreshKey }: { refreshKey?: number }) {
+export default function ProductManager({ refreshKey, currencySymbol }: { refreshKey?: number; currencySymbol: string }) {
+  const mobile = isMobile();
   const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -108,7 +114,9 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
       const [productsResult, categoriesResult] = await Promise.all([
         executeQuery(`
           SELECT p.id, p.category_id, p.name, p.sku, p.base_unit_name, p.reorder_threshold,
-                 COALESCE(c.name, 'Uncategorized') AS category_name
+                 COALESCE(c.name, 'Uncategorized') AS category_name,
+                 COALESCE(c.icon, '📋') AS category_icon,
+                 COALESCE(c.color, '#5b6abf') AS category_color
           FROM products p
           LEFT JOIN categories c ON p.category_id = c.id
           ORDER BY c.name, p.name
@@ -124,6 +132,8 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
         base_unit_name: r[4] as string,
         reorder_threshold: r[5] as number,
         category_name: r[6] as string,
+        category_icon: r[7] as string || '📋',
+        category_color: r[8] as string || '#5b6abf',
       })));
 
       setCategories(categoriesResult.rows.map((r) => ({
@@ -289,50 +299,87 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
     );
   }
 
-  return (
-    <div className="h-full flex flex-col sm:flex-row overflow-hidden">
-      {/* Product List */}
-      <div className="w-full sm:w-[340px] border-b sm:border-b-0 sm:border-r border-border bg-bg-secondary flex flex-col shrink-0 max-h-[40%] sm:max-h-none">
-        <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">{t('prods.title')}</h3>
-          <div className="flex gap-1">
-            <button
-              onClick={() => { setFormCategoryName(''); setModalMode('category'); }}
-              className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
-              title={t('prods.addCategory')}
-            >
-              <Tag size={12} />
-            </button>
-            <button
-              onClick={openNewProduct}
-              className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
-              title={t('prods.addProduct')}
-            >
-              <Plus size={12} />
-            </button>
-          </div>
+  const mobileDetail: GalleryProduct | null = selectedProduct ? {
+    id: selectedProduct.id,
+    name: selectedProduct.name,
+    sku: selectedProduct.sku,
+    category_name: selectedProduct.category_name,
+    category_id: selectedProduct.category_id,
+    category_icon: selectedProduct.category_icon,
+    category_color: selectedProduct.category_color,
+    current_stock: 0,
+    reorder_threshold: selectedProduct.reorder_threshold,
+    base_unit_name: selectedProduct.base_unit_name,
+    batch_id: null,
+    provider_id: null,
+    provider_name: '',
+    batch_number: '',
+  } : null;
+
+  const productList = (
+    <div className={mobile ? 'h-full flex flex-col overflow-hidden' : 'w-full sm:w-[340px] border-b sm:border-b-0 sm:border-r border-border bg-bg-secondary flex flex-col shrink-0 max-h-[40%] sm:max-h-none'}>
+      <div className="px-3 py-2 border-b border-border flex items-center justify-between shrink-0">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">{t('prods.title')}</h3>
+        <div className="flex gap-1">
+          <button
+            onClick={() => { setFormCategoryName(''); setModalMode('category'); }}
+            className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
+            title={t('prods.addCategory')}
+          >
+            <Tag size={12} />
+          </button>
+          <button
+            onClick={openNewProduct}
+            className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
+            title={t('prods.addProduct')}
+          >
+            <Plus size={12} />
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-border">
-          {products.map((p) => (
-            <div
-              key={p.id}
-              onClick={() => setSelectedProduct(p)}
-              className={`px-3 py-2.5 cursor-pointer transition-colors ${
-                selectedProduct?.id === p.id ? 'bg-accent/10 border-l-2 border-accent' : 'hover:bg-bg-hover border-l-2 border-transparent'
-              }`}
-            >
+      </div>
+      <div className="flex-1 overflow-y-auto divide-y divide-border">
+        {products.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => setSelectedProduct(p)}
+            className={`px-3 py-4 flex items-center gap-3 cursor-pointer transition-colors ${
+              selectedProduct?.id === p.id ? 'bg-accent/10 border-l-2 border-accent' : 'hover:bg-bg-hover border-l-2 border-transparent'
+            }`}
+          >
+            <span className="text-xl shrink-0">{p.category_icon}</span>
+            <div className="flex-1 min-w-0">
               <p className="text-sm text-text-primary font-medium truncate">{p.name}</p>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-[10px] text-text-secondary">{p.category_name}</span>
+                <span className="text-[10px] text-text-secondary truncate">{p.category_name}</span>
                 {p.sku && <span className="text-[10px] text-text-secondary font-mono">{p.sku}</span>}
               </div>
             </div>
-          ))}
-        </div>
+            {mobile && <ChevronRight size={14} className="text-text-secondary/50 shrink-0" />}
+          </div>
+        ))}
       </div>
+    </div>
+  );
+
+  if (mobile) {
+    if (mobileDetail) {
+      return (
+        <ProductDetail
+          refreshKey={refreshKey}
+          product={mobileDetail}
+          onBack={() => setSelectedProduct(null)}
+          currencySymbol={currencySymbol}
+        />
+      );
+    }
+  }
+
+  return (
+    <div className="h-full flex flex-col sm:flex-row overflow-hidden">
+      {productList}
 
       {/* Product Detail */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className={`flex-1 overflow-y-auto p-6 ${mobile ? 'hidden' : ''}`}>
         {!selectedProduct ? (
           <div className="flex items-center justify-center h-full text-text-secondary text-sm">
             {t('prods.selectEmpty')}

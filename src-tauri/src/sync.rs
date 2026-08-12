@@ -912,6 +912,42 @@ struct CloudApi {
     endpoint: String,
 }
 
+/// Builds a readable error from a non-200 API response, keeping the HTTP
+/// status in the message so callers can branch on it.
+fn api_error(path: &str, status: u16, mut body: ureq::Body) -> String {
+    let msg = body
+        .read_json::<serde_json::Value>()
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
+        .unwrap_or_default();
+    if msg.is_empty() {
+        format!("cloud {} returned status {}", path, status)
+    } else {
+        format!("cloud {} failed (status {}): {}", path, status, msg)
+    }
+}
+
+/// Derives a stable, valid username from a device account email
+/// (e.g. device-abc123@dbreader.dev -> device-abc123).
+fn device_username_for(email: &str) -> String {
+    let local = email.split('@').next().unwrap_or("device");
+    let cleaned: String = local
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let mut cleaned = cleaned.trim_matches(['.', '-']).to_string();
+    if cleaned.len() < 3 {
+        cleaned = format!("{}{}", cleaned, "dev".repeat(1)).chars().take(32).collect();
+    }
+    cleaned.chars().take(32).collect()
+}
+
 impl CloudApi {
     fn new(endpoint: &str) -> Result<CloudApi, String> {
         if endpoint.trim().is_empty() {
@@ -929,7 +965,7 @@ impl CloudApi {
         }
         let resp = req.send_json(&body).map_err(|e| format!("cloud {} failed: {}", path, e))?;
         if resp.status() != 200 {
-            return Err(format!("cloud {} returned status {}", path, resp.status()));
+            return Err(api_error(path, resp.status().as_u16(), resp.into_body()));
         }
         resp.into_body()
             .read_json()
@@ -943,19 +979,113 @@ impl CloudApi {
         }
         let resp = req.call().map_err(|e| format!("cloud {} failed: {}", path, e))?;
         if resp.status() != 200 {
-            return Err(format!("cloud {} returned status {}", path, resp.status()));
+            return Err(api_error(path, resp.status().as_u16(), resp.into_body()));
         }
         resp.into_body()
             .read_json()
             .map_err(|e| format!("cloud {} returned invalid JSON: {}", path, e))
     }
 
+    /// Logs in with an identifier that is a username OR an email address.
+    fn login_identifier(&self, identifier: &str, password: &str) -> Result<(String, String, String), String> {
+        let v = self.post_json(
+            "/api/v1/login",
+            serde_json::json!({ "email": identifier, "password": password }),
+            "",
+        )?;
+        Ok((
+            v.get("token").and_then(|t| t.as_str()).map(String::from)
+                .ok_or_else(|| "login response missing token".to_string())?,
+            v.get("email").and_then(|t| t.as_str()).map(String::from)
+                .ok_or_else(|| "login response missing email".to_string())?,
+            v.get("name").and_then(|t| t.as_str()).map(String::from)
+                .ok_or_else(|| "login response missing name".to_string())?,
+        ))
+    }
+
+    /// Registers a new account with a username, returning (token, email, name).
+    fn register_account(&self, username: &str, email: &str, password: &str) -> Result<(String, String, String), String> {
+        let v = self.post_json(
+            "/api/v1/register",
+            serde_json::json!({ "email": email, "name": username, "password": password }),
+            "",
+        )?;
+        Ok((
+            v.get("token").and_then(|t| t.as_str()).map(String::from)
+                .ok_or_else(|| "register response missing token".to_string())?,
+            v.get("email").and_then(|t| t.as_str()).map(String::from)
+                .ok_or_else(|| "register response missing email".to_string())?,
+            v.get("name").and_then(|t| t.as_str()).map(String::from)
+                .ok_or_else(|| "register response missing name".to_string())?,
+        ))
+    }
+
+    /// Lists every team of the signed-in account plus the published files in
+    /// each team (the account's cloud inventory).
+    fn account_inventories(&self, token: &str) -> Result<serde_json::Value, String> {
+        let me = self.get_json("/api/v1/me", token)?;
+        let mut teams = Vec::new();
+        if let Some(arr) = me.get("teams").and_then(|t| t.as_array()) {
+            for t in arr {
+                let mut entry = t.clone();
+                if let Some(team_id) = t.get("team_id").and_then(|x| x.as_str()) {
+                    let files = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
+                    entry["files"] = files.get("files").cloned().unwrap_or_else(|| serde_json::json!([]));
+                } else {
+                    entry["files"] = serde_json::json!([]);
+                }
+                teams.push(entry);
+            }
+        }
+        let mut out = serde_json::json!({ "email": me.get("email"), "name": me.get("name") });
+        out["teams"] = serde_json::Value::Array(teams);
+        Ok(out)
+    }
+
+    fn team_members(&self, token: &str, team_id: &str) -> Result<serde_json::Value, String> {
+        self.get_json(&format!("/api/v1/team/members?team_id={}", team_id), token)
+    }
+
+    fn set_member_role(&self, token: &str, team_id: &str, email: &str, role: &str) -> Result<(), String> {
+        self.post_json(
+            "/api/v1/team/members",
+            serde_json::json!({ "team_id": team_id, "email": email, "role": role }),
+            token,
+        )?;
+        Ok(())
+    }
+
+    fn rotate_code(&self, token: &str, team_id: &str) -> Result<String, String> {
+        let v = self.post_json(
+            "/api/v1/code/rotate",
+            serde_json::json!({ "team_id": team_id }),
+            token,
+        )?;
+        v.get("code")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "rotate response missing code".to_string())
+    }
+
+    fn download_url(&self, token: &str, team_id: &str, file_id: &str) -> Result<String, String> {
+        let v = self.post_json(
+            "/api/v1/files/download",
+            serde_json::json!({ "team_id": team_id, "file_id": file_id }),
+            token,
+        )?;
+        v.get("download_url")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "download response missing download_url".to_string())
+    }
+
     /// Registers a device account, or logs in when the account already exists.
     fn ensure_account(&self, email: &str, password: &str) -> Result<String, String> {
+        let username = device_username_for(email);
         let token = self
             .post_json(
                 "/api/v1/register",
-                serde_json::json!({ "email": email, "name": "Device", "password": password }),
+                serde_json::json!({ "email": email, "name": username, "password": password }),
                 "",
             )
             .and_then(|v| {
@@ -1077,6 +1207,11 @@ impl CloudApi {
 
     /// Publishes a new (empty) database file and returns its file_id.
     fn publish_file(&self, token: &str, team_id: &str, name: &str) -> Result<String, String> {
+        self.upload_file(token, team_id, name, b"x")
+    }
+
+    /// Uploads a database file (any bytes) to a team and confirms it.
+    fn upload_file(&self, token: &str, team_id: &str, name: &str, body_bytes: &[u8]) -> Result<String, String> {
         let v = self.post_json(
             "/api/v1/files/upload-url",
             serde_json::json!({ "team_id": team_id, "name": name }),
@@ -1094,14 +1229,14 @@ impl CloudApi {
             .ok_or_else(|| "upload-url response missing upload_url".to_string())?;
         let put = user_agent()
             .put(&upload_url)
-            .send("x")
+            .send(body_bytes)
             .map_err(|e| format!("S3 upload failed: {}", e))?;
         if put.status() != 200 {
             return Err(format!("S3 upload returned status {}", put.status()));
         }
         self.post_json(
             "/api/v1/files/confirm",
-            serde_json::json!({ "team_id": team_id, "file_id": file_id, "size": 1 }),
+            serde_json::json!({ "team_id": team_id, "file_id": file_id, "size": body_bytes.len() }),
             token,
         )?;
         Ok(file_id)
@@ -1610,14 +1745,14 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
         && meta_get(conn, "token")?.map(|t| !t.is_empty()).unwrap_or(false);
     if has_link && meta_get(conn, "endpoint")?.map(|e| e == endpoint).unwrap_or(false) {
         let api = CloudApi::new(&endpoint)?;
-        let token = api.ensure_account(email, password)?;
+        let (token, _, _) = api.login_identifier(email, password)?;
         meta_set(conn, "cloud_email", email)?;
         meta_set(conn, "cloud_pass", password)?;
         meta_set(conn, "token", &token)?;
         return Ok(());
     }
     let api = CloudApi::new(&endpoint)?;
-    let token = api.ensure_account(email, password)?;
+    let (token, _, _) = api.login_identifier(email, password)?;
     meta_set(conn, "cloud_email", email)?;
     meta_set(conn, "cloud_pass", password)?;
     meta_set(conn, "token", &token)?;
@@ -1683,12 +1818,15 @@ struct StoredAccount {
     email: String,
     password: String,
     token: String,
+    #[serde(default)]
+    name: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountStatus {
     pub email: String,
+    pub name: String,
 }
 
 const ACCOUNT_FILE: &str = "account.json";
@@ -1714,23 +1852,55 @@ fn account_save(app: &AppHandle, account: &StoredAccount) -> Result<(), String> 
         .map_err(|e| e.to_string())
 }
 
-/// Returns the signed-in account email, or an empty string when the app is not
-/// signed in. Works without an open database.
+/// Returns the signed-in account (email + username), or empty strings when
+/// the app is not signed in. Works without an open database.
 #[tauri::command]
 pub fn account_status(app: AppHandle) -> Result<AccountStatus, String> {
+    let a = account_load(&app);
     Ok(AccountStatus {
-        email: account_load(&app).map(|a| a.email).unwrap_or_default(),
+        email: a.as_ref().map(|a| a.email.clone()).unwrap_or_default(),
+        name: a.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
     })
 }
 
-/// Signs in to (or registers) the personal account and stores it for this
-/// device. The account is created automatically on first use.
+fn store_account(app: &AppHandle, email: String, password: String, token: String, name: String) -> Result<AccountStatus, String> {
+    account_save(
+        app,
+        &StoredAccount {
+            email: email.clone(),
+            password,
+            token,
+            name: name.clone(),
+        },
+    )?;
+    if let Ok(status) = sync_status(app.clone()) {
+        if status.db_open {
+            auto_connect_account(app);
+        }
+    }
+    Ok(AccountStatus { email, name })
+}
+
+fn valid_username(u: &str) -> bool {
+    let n = u.len();
+    (3..=32).contains(&n)
+        && u.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
+}
+
+/// Creates a brand-new account with a username. Accounts are never created
+/// implicitly during sign-in.
 #[tauri::command]
-pub fn account_signin(
+pub fn account_signup(
+    username: String,
     email: String,
     password: String,
     app: AppHandle,
 ) -> Result<AccountStatus, String> {
+    let username = username.trim().to_string();
+    if !valid_username(&username) {
+        return Err("Username must be 3-32 letters, numbers, dots, dashes or underscores".into());
+    }
     let email = email.trim().to_string();
     if email.len() < 3 || !email.contains('@') {
         return Err("Enter a valid email address".into());
@@ -1739,21 +1909,28 @@ pub fn account_signin(
         return Err("Password must be at least 8 characters".into());
     }
     let api = CloudApi::new(&cloud_endpoint())?;
-    let token = api.ensure_account(&email, &password)?;
-    account_save(
-        &app,
-        &StoredAccount {
-            email: email.clone(),
-            password,
-            token,
-        },
-    )?;
-    if let Ok(status) = sync_status(app.clone()) {
-        if status.db_open {
-            auto_connect_account(&app);
-        }
+    let (token, email, name) = api.register_account(&username, &email, &password)?;
+    store_account(&app, email, password, token, name)
+}
+
+/// Signs in with a username or email address and password. Never creates an
+/// account — use account_signup for that.
+#[tauri::command]
+pub fn account_signin(
+    identifier: String,
+    password: String,
+    app: AppHandle,
+) -> Result<AccountStatus, String> {
+    let identifier = identifier.trim().to_string();
+    if identifier.len() < 3 {
+        return Err("Enter your username or email address".into());
     }
-    Ok(AccountStatus { email })
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters".into());
+    }
+    let api = CloudApi::new(&cloud_endpoint())?;
+    let (token, email, name) = api.login_identifier(&identifier, &password)?;
+    store_account(&app, email, password, token, name)
 }
 
 /// Signs out of the personal account on this device. Databases keep their
@@ -1762,6 +1939,165 @@ pub fn account_signin(
 pub fn account_signout(app: AppHandle) -> Result<(), String> {
     let _ = std::fs::remove_file(account_path(&app));
     Ok(())
+}
+
+/// Every team of the signed-in account together with the published inventory
+/// files in each team. Does not require an open database.
+#[tauri::command]
+pub fn account_inventories(app: AppHandle) -> Result<serde_json::Value, String> {
+    let account = account_load(&app).ok_or("Not signed in")?;
+    let api = CloudApi::new(&cloud_endpoint())?;
+    api.account_inventories(&account.token)
+}
+
+/// Creates a new team (max 3 per account, enforced server-side) and returns
+/// its team_id, name, role and invite code.
+#[tauri::command]
+pub fn team_create(name: String, app: AppHandle) -> Result<serde_json::Value, String> {
+    let account = account_load(&app).ok_or("Not signed in")?;
+    if name.trim().is_empty() {
+        return Err("Team name required".into());
+    }
+    let api = CloudApi::new(&cloud_endpoint())?;
+    api.post_json("/api/v1/team/create", serde_json::json!({ "name": name.trim() }), &account.token)
+}
+
+/// Joins a team with its invite code. Returns team_id/name/role; the UI then
+/// lets the user open an inventory from the team.
+#[tauri::command]
+pub fn team_join(code: String, app: AppHandle) -> Result<serde_json::Value, String> {
+    let account = account_load(&app).ok_or("Not signed in")?;
+    let api = CloudApi::new(&cloud_endpoint())?;
+    api.post_json("/api/v1/team/join", serde_json::json!({ "code": code.trim() }), &account.token)
+}
+
+/// The current invite code of a team (admin only).
+#[tauri::command]
+pub fn team_code(team_id: String, app: AppHandle) -> Result<String, String> {
+    let account = account_load(&app).ok_or("Not signed in")?;
+    CloudApi::new(&cloud_endpoint())?.invite_code(&account.token, &team_id)
+}
+
+/// Generates a new invite code for the team (admin only).
+#[tauri::command]
+pub fn team_rotate_code(team_id: String, app: AppHandle) -> Result<String, String> {
+    let account = account_load(&app).ok_or("Not signed in")?;
+    CloudApi::new(&cloud_endpoint())?.rotate_code(&account.token, &team_id)
+}
+
+/// The member list (name, email, role) of a team.
+#[tauri::command]
+pub fn team_members(team_id: String, app: AppHandle) -> Result<serde_json::Value, String> {
+    let account = account_load(&app).ok_or("Not signed in")?;
+    CloudApi::new(&cloud_endpoint())?.team_members(&account.token, &team_id)
+}
+
+/// Changes a member's role ('full'/'viewer'), or 'owner' to transfer the team
+/// (admin only).
+#[tauri::command]
+pub fn team_set_role(team_id: String, email: String, role: String, app: AppHandle) -> Result<(), String> {
+    let account = account_load(&app).ok_or("Not signed in")?;
+    CloudApi::new(&cloud_endpoint())?.set_member_role(&account.token, &team_id, &email, &role)
+}
+
+// ---------- cloud database open / publish ----------
+
+/// Downloads a team inventory file to the device and returns its local path.
+/// The file is stored under the app data dir so it is managed by the app.
+pub(crate) fn download_cloud_file(
+    app: &AppHandle,
+    team_id: &str,
+    file_id: &str,
+) -> Result<PathBuf, String> {
+    let account = account_load(app).ok_or("Not signed in")?;
+    let api = CloudApi::new(&cloud_endpoint())?;
+    let url = api.download_url(&account.token, team_id, file_id)?;
+    let resp = user_agent()
+        .get(&url)
+        .call()
+        .map_err(|e| format!("Cloud file download failed: {}", e))?;
+    if resp.status() != 200 {
+        return Err(format!("Cloud file download returned status {}", resp.status()));
+    }
+    let bytes = resp
+        .into_body()
+        .read_to_vec()
+        .map_err(|e| format!("Cloud file download failed: {}", e))?;
+    if bytes.is_empty() {
+        return Err("Cloud file is empty".into());
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No app data dir: {}", e))?
+        .join("cloud")
+        .join(team_id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create cloud data dir: {}", e))?;
+    let path = dir.join(format!("{}.db", file_id));
+    std::fs::write(&path, &bytes).map_err(|e| format!("Cannot store cloud file: {}", e))?;
+    Ok(path)
+}
+
+/// Links an opened database to a cloud team inventory: stores the account
+/// credentials/ids in its sync meta, regenerates the local site id so this
+/// device is a fresh replica in the sync group, and starts at the end of the
+/// history that came with the downloaded file.
+pub(crate) fn link_conn_to_cloud(
+    conn: &Connection,
+    app: &AppHandle,
+    team_id: &str,
+    file_id: &str,
+) -> Result<(), String> {
+    let account = account_load(app).ok_or("Not signed in")?;
+    ensure_schema(conn)?;
+    db_id_or_create(conn)?;
+    meta_set(conn, "site_id", &format!("{}", uuid::Uuid::new_v4().simple()))?;
+    meta_set(conn, "token", &account.token)?;
+    meta_set(conn, "cloud_email", &account.email)?;
+    meta_set(conn, "cloud_pass", &account.password)?;
+    meta_set(conn, "cloud_team_id", team_id)?;
+    meta_set(conn, "cloud_file_id", file_id)?;
+    let schema_key = compute_schema_key(conn)?;
+    meta_set(conn, "transport", "relay")?;
+    meta_set(conn, "endpoint", &cloud_endpoint())?;
+    meta_set(conn, "schema_key", &schema_key)?;
+    meta_set(conn, "enabled", "1")?;
+    let tail: Option<(String, String, i64)> = conn
+        .query_row(
+            &format!(
+                "SELECT hlc, site_id, seq FROM {} ORDER BY hlc DESC, site_id DESC, seq DESC LIMIT 1",
+                LOG_TABLE
+            ),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .ok();
+    if let Some((h, site, seq)) = tail {
+        meta_set(conn, "cursor", &cursor_from(&h, &site, seq))?;
+    }
+    Ok(())
+}
+
+/// Publishes the currently open database file into a team as a team inventory
+/// (admin only; enforced server-side). `db_path` must be the on-disk location
+/// of the open database.
+pub(crate) fn publish_db_to_team(
+    app: &AppHandle,
+    team_id: &str,
+    db_path: &str,
+    name: &str,
+) -> Result<(), String> {
+    let account = account_load(app).ok_or("Not signed in")?;
+    let bytes = std::fs::read(db_path).map_err(|e| format!("Cannot read database file: {}", e))?;
+    let api = CloudApi::new(&cloud_endpoint())?;
+    api.upload_file(&account.token, team_id, name, &bytes)?;
+    Ok(())
+}
+
+/// Pokes the live sync loop so it picks up meta changes immediately.
+pub(crate) fn poke_live_sync(app: &AppHandle) {
+    let live = app.state::<std::sync::Arc<crate::sync_live::LiveSync>>();
+    live.signal();
 }
 
 /// Connects the open database to the app's personal account in the background.

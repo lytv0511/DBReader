@@ -10,7 +10,6 @@ pub const ROLE_FULL: &str = "full";
 pub const ROLE_VIEWER: &str = "viewer";
 
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-const CODE_LIFE_SECS: i64 = 30 * 86400;
 const PULL_LIMIT: usize = 2000;
 const OPS_MAX_CHARS: usize = 380_000;
 const SESSION_SECS: i64 = 30 * 86400;
@@ -60,6 +59,7 @@ pub struct Team {
 
 pub trait Store: Send + Sync {
     fn user_get(&self, email: &str) -> Option<User>;
+    fn user_by_name(&self, name: &str) -> Option<User>;
     fn user_put(&self, u: &User);
     fn session_get(&self, token: &str) -> Option<SessionRec>;
     fn session_put(&self, s: &SessionRec);
@@ -97,6 +97,42 @@ fn hash_hex(s: &str) -> String {
 
 fn normalize_email(e: &str) -> String {
     e.trim().to_lowercase()
+}
+
+fn normalize_name(s: &str) -> String {
+    s.trim().to_lowercase()
+}
+
+fn valid_username(name: &str) -> bool {
+    let n = name.len();
+    (3..=32).contains(&n)
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
+}
+
+/// Resolves a login identifier to a user. Emails are matched exactly
+/// (case-insensitive); anything else is treated as a username.
+fn user_for_identifier(store: &dyn Store, identifier: &str) -> Option<User> {
+    let id = identifier.trim();
+    if id.is_empty() {
+        return None;
+    }
+    if id.contains('@') {
+        store.user_get(&normalize_email(id))
+    } else {
+        store.user_by_name(&normalize_name(id))
+    }
+}
+
+/// Generates an invite code that is not used by any existing team.
+fn unique_code(store: &dyn Store) -> String {
+    loop {
+        let code = normalize_code(&random_code());
+        if store.team_by_code(&hash_hex(&code)).is_none() {
+            return code;
+        }
+    }
 }
 
 fn normalize_code(s: &str) -> String {
@@ -192,6 +228,15 @@ fn h_register(store: &dyn Store, email: &str, name: &str, password: &str) -> Res
     if email.len() < 3 || email.len() > 254 || !email.contains('@') {
         return Resp::err(400, "invalid email");
     }
+    if !valid_username(name.trim()) {
+        return Resp::err(
+            400,
+            "username required (3-32 letters, numbers, dot, dash or underscore)",
+        );
+    }
+    if store.user_by_name(&normalize_name(name)).is_some() {
+        return Resp::err(409, "username already taken");
+    }
     if password.len() < 8 {
         return Resp::err(400, "password must be at least 8 characters");
     }
@@ -204,7 +249,7 @@ fn h_register(store: &dyn Store, email: &str, name: &str, password: &str) -> Res
     };
     let user = User {
         email: email.clone(),
-        nm: if name.trim().is_empty() { email.clone() } else { name.trim().to_string() },
+        nm: name.trim().to_string(),
         pw,
         created_ts: now_ts(),
     };
@@ -224,17 +269,15 @@ fn h_register(store: &dyn Store, email: &str, name: &str, password: &str) -> Res
 }
 
 fn h_login(store: &dyn Store, email: &str, password: &str) -> Resp {
-    let email = normalize_email(email);
-    let user = store.user_get(&email);
-    let Some(user) = user else {
-        return Resp::err(401, "wrong email or password");
+    let Some(user) = user_for_identifier(store, email) else {
+        return Resp::err(401, "wrong username/email or password");
     };
     if !verify_password(password, &user.pw) {
-        return Resp::err(401, "wrong email or password");
+        return Resp::err(401, "wrong username/email or password");
     }
     let session = SessionRec {
         token: random_token(),
-        email,
+        email: user.email.clone(),
         expiry_ts: now_ts() + SESSION_SECS,
     };
     store.session_put(&session);
@@ -263,21 +306,9 @@ fn h_me(store: &dyn Store, auth: &str) -> Resp {
         created_ts: 0,
     });
     let mut teams = Vec::new();
-    for mut team in store.all_teams(&session.email) {
+    for team in store.all_teams(&session.email) {
         let is_owner = team.owner == session.email;
-        let mut code: Option<String> = None;
-        if is_owner {
-            let now = now_ts();
-            if team.code_ts + CODE_LIFE_SECS <= now {
-                let fresh = random_code();
-                team.code_sha = hash_hex(&fresh);
-                team.code_ts = now;
-                code = Some(fresh);
-                store.team_put(&team);
-            } else {
-                code = Some(team.code.clone());
-            }
-        }
+        let code = if is_owner { Some(team.code.clone()) } else { None };
         teams.push(json!({
             "team_id": team.team_id,
             "name": team.nm,
@@ -300,8 +331,11 @@ fn h_team_create(store: &dyn Store, auth: &str, name: &str) -> Resp {
     if name.is_empty() || name.len() > 60 {
         return Resp::err(400, "team name required (max 60 chars)");
     }
+    if store.all_teams(&session.email).len() >= 3 {
+        return Resp::err(403, "team limit reached (3 teams per account)");
+    }
     let team_id = uuid::Uuid::new_v4().to_string();
-    let code = normalize_code(&random_code());
+    let code = unique_code(store);
     let mut members = HashMap::new();
     members.insert(session.email.clone(), ROLE_OWNER.to_string());
     let team = Team {
@@ -335,10 +369,6 @@ fn h_team_join(store: &dyn Store, auth: &str, code: &str) -> Resp {
         Some(t) => t,
         None => return Resp::err(404, "code not found"),
     };
-    let now = now_ts();
-    if team.code_ts + CODE_LIFE_SECS <= now {
-        return Resp::err(410, "code expired");
-    }
     if !team.members.contains_key(&session.email) {
         team.members.insert(session.email.clone(), ROLE_FULL.to_string());
         store.team_put(&team);
@@ -360,7 +390,7 @@ fn h_code_rotate(store: &dyn Store, auth: &str, team_id: &str) -> Resp {
     if team.owner != session.email {
         return Resp::err(403, "only the team creator can rotate the code");
     }
-    let code = normalize_code(&random_code());
+    let code = unique_code(store);
     let mut team = team;
     team.code = code.clone();
     team.code_sha = hash_hex(&code);
@@ -404,11 +434,19 @@ fn h_member_role(store: &dyn Store, auth: &str, team_id: &str, email: &str, role
     if !team.members.contains_key(&email) {
         return Resp::err(404, "not a member of this team");
     }
-    if role != ROLE_FULL && role != ROLE_VIEWER {
-        return Resp::err(400, "role must be 'full' or 'viewer'");
-    }
     let mut team = team;
-    team.members.insert(email, role.to_string());
+    if role == ROLE_OWNER {
+        // Transfer the team to another member: the new owner keeps admin;
+        // the previous creator stays as a full member.
+        team.owner = email.clone();
+        team.members.insert(session.email.clone(), ROLE_FULL.to_string());
+        team.members.insert(email.clone(), ROLE_OWNER.to_string());
+    } else {
+        if role != ROLE_FULL && role != ROLE_VIEWER {
+            return Resp::err(400, "role must be 'full' or 'viewer'");
+        }
+        team.members.insert(email, role.to_string());
+    }
     store.team_put(&team);
     Resp::ok(json!({"ok": true}))
 }
@@ -785,6 +823,16 @@ impl Store for MemoryStore {
     fn user_put(&self, u: &User) {
         self.inner.lock().unwrap().users.insert(u.email.clone(), u.clone());
     }
+    fn user_by_name(&self, name: &str) -> Option<User> {
+        let want = name.to_lowercase();
+        self.inner
+            .lock()
+            .unwrap()
+            .users
+            .values()
+            .find(|u| u.nm.to_lowercase() == want)
+            .cloned()
+    }
     fn session_get(&self, token: &str) -> Option<SessionRec> {
         self.inner.lock().unwrap().sessions.get(token).cloned()
     }
@@ -871,7 +919,7 @@ mod tests {
     #[test]
     fn multi_op_push_batch() {
         let s = MemoryStore::new();
-        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"owner@x.com","password":"secret123"}));
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"owner@x.com","name":"owner","password":"secret123"}));
         let owner_token = r.body["token"].as_str().unwrap().to_string();
         let r = req(&s, "POST", "/api/v1/team/create", Some(&owner_token), json!({"name":"Wine Shop"}));
         assert_eq!(r.status, 200);
@@ -904,6 +952,7 @@ mod tests {
         let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"a@x.com","name":"Alice","password":"secret123"}));
         assert_eq!(r.status, 200);
         let token = r.body["token"].as_str().unwrap().to_string();
+        assert_eq!(r.body["name"], "Alice");
 
         let r = req(&s, "POST", "/api/v1/login", None, json!({"email":"a@x.com","password":"secret123"}));
         assert_eq!(r.status, 200);
@@ -922,11 +971,104 @@ mod tests {
     }
 
     #[test]
+    fn username_required_unique_and_login() {
+        let s = MemoryStore::new();
+        // username is mandatory
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"no@x.com","password":"secret123"}));
+        assert_eq!(r.status, 400);
+        // duplicates rejected case-insensitively
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"a@x.com","name":"Alice","password":"secret123"}));
+        assert_eq!(r.status, 200);
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"b@x.com","name":"alice","password":"secret123"}));
+        assert_eq!(r.status, 409);
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"c@x.com","name":"Bob","password":"secret123"}));
+        assert_eq!(r.status, 200);
+        // login with username (case-insensitive), not just email
+        let r = req(&s, "POST", "/api/v1/login", None, json!({"email":"alice","password":"secret123"}));
+        assert_eq!(r.status, 200, "login by username: {:?}", r.body);
+        let r = req(&s, "POST", "/api/v1/login", None, json!({"email":"ALICE","password":"secret123"}));
+        assert_eq!(r.status, 200);
+        let r = req(&s, "POST", "/api/v1/login", None, json!({"email":"bob","password":"wrong"}));
+        assert_eq!(r.status, 401);
+        // unknown username
+        let r = req(&s, "POST", "/api/v1/login", None, json!({"email":"nobody","password":"secret123"}));
+        assert_eq!(r.status, 401);
+    }
+
+    #[test]
+    fn team_limit_and_admin_transfer() {
+        let s = MemoryStore::new();
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"owner@x.com","name":"owner","password":"secret123"}));
+        let owner_token = r.body["token"].as_str().unwrap().to_string();
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"member@x.com","name":"member","password":"secret123"}));
+        let member_token = r.body["token"].as_str().unwrap().to_string();
+
+        for i in 0..3 {
+            let r = req(&s, "POST", "/api/v1/team/create", Some(&owner_token), json!({"name": format!("Team {}", i)}));
+            assert_eq!(r.status, 200, "team {} create: {:?}", i, r.body);
+        }
+        let r = req(&s, "POST", "/api/v1/team/create", Some(&owner_token), json!({"name":"Team 4"}));
+        assert_eq!(r.status, 403, "4th team must be rejected");
+
+        let mut team_id = String::new();
+        let mut code = String::new();
+        for i in 0..3 {
+            let r = req(&s, "GET", "/api/v1/me", Some(&owner_token), json!({}));
+            let teams = r.body["teams"].as_array().unwrap();
+            let t = &teams[i];
+            team_id = t["team_id"].as_str().unwrap().to_string();
+            code = t["code"].as_str().unwrap().to_string();
+            assert_eq!(r.status, 200);
+            assert!(teams.iter().all(|t| t["code"].as_str().is_some()), "owner sees every team code");
+        }
+
+        // member joins and is listed
+        let r = req(&s, "POST", "/api/v1/team/join", Some(&member_token), json!({"code": code}));
+        assert_eq!(r.status, 200);
+        let r = req(&s, "GET", "/api/v1/team/members", Some(&owner_token), json!({"team_id": team_id}));
+        assert_eq!(r.status, 200);
+        let members = r.body["members"].as_array().unwrap();
+        assert_eq!(members.len(), 2);
+        let owner_entry = members.iter().find(|m| m["email"] == "owner@x.com").unwrap();
+        assert_eq!(owner_entry["name"], "owner");
+        assert_eq!(owner_entry["role"], "owner");
+
+        // transfer: owner -> member
+        let r = req(&s, "POST", "/api/v1/team/members", Some(&owner_token), json!({"team_id": team_id, "email": "member@x.com", "role": "owner"}));
+        assert_eq!(r.status, 200, "transfer: {:?}", r.body);
+        let r = req(&s, "GET", "/api/v1/team/members", Some(&member_token), json!({"team_id": team_id}));
+        let members = r.body["members"].as_array().unwrap();
+        for m in members {
+            let role = m["role"].as_str().unwrap();
+            let email = m["email"].as_str().unwrap();
+            if email == "member@x.com" {
+                assert_eq!(role, "owner");
+            } else {
+                assert_eq!(role, "full", "old creator demoted to full");
+            }
+        }
+        // new owner sees the code, old owner cannot rotate anymore
+        let r = req(&s, "GET", "/api/v1/me", Some(&member_token), json!({}));
+        assert!(r.body["teams"].as_array().unwrap().iter().all(|t| t["code"].as_str().is_some()));
+        let r = req(&s, "POST", "/api/v1/code/rotate", Some(&owner_token), json!({"team_id": team_id}));
+        assert_eq!(r.status, 403);
+        let r = req(&s, "POST", "/api/v1/code/rotate", Some(&member_token), json!({"team_id": team_id}));
+        assert_eq!(r.status, 200);
+        let new_code = r.body["code"].as_str().unwrap().to_string();
+        assert_ne!(new_code, code);
+        // rotated code still joins (permanent, no expiry)
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"late@x.com","name":"late","password":"secret123"}));
+        let late_token = r.body["token"].as_str().unwrap().to_string();
+        let r = req(&s, "POST", "/api/v1/team/join", Some(&late_token), json!({"code": new_code}));
+        assert_eq!(r.status, 200);
+    }
+
+    #[test]
     fn full_team_sync_flow() {
         let s = MemoryStore::new();
-        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"owner@x.com","password":"secret123"}));
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"owner@x.com","name":"owner","password":"secret123"}));
         let owner_token = r.body["token"].as_str().unwrap().to_string();
-        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"member@x.com","password":"secret123"}));
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"member@x.com","name":"member","password":"secret123"}));
         let member_token = r.body["token"].as_str().unwrap().to_string();
 
         let r = req(&s, "POST", "/api/v1/team/create", Some(&owner_token), json!({"name":"Wine Shop"}));

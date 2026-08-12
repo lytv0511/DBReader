@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Database, Loader2, Lock, Mail } from 'lucide-react';
-import { accountSignIn } from '../lib/account';
+import { ArrowLeft, Database, Loader2, Lock, Mail, User } from 'lucide-react';
+import { accountSignIn, accountSignUp } from '../lib/account';
 import { isMobile as isMobilePlatform } from '../lib/platform';
 
 const inputCls =
@@ -8,30 +8,50 @@ const inputCls =
 
 interface LoginViewProps {
   t: (key: string) => string;
-  onSignedIn: (email: string) => void;
+  onSignedIn: () => void;
 }
 
+type Page = 'signin' | 'create';
+
 export default function LoginView({ t, onSignedIn }: LoginViewProps) {
+  const [page, setPage] = useState<Page>('signin');
+  const [identifier, setIdentifier] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const isMobile = isMobilePlatform();
 
-  const canSubmit = email.trim().length > 0 && password.length > 0;
+  const canSubmit =
+    !busy &&
+    (page === 'signin'
+      ? identifier.trim().length > 0 && password.length > 0
+      : username.trim().length >= 3 && email.includes('@') && password.length >= 8);
 
   const submit = async () => {
-    if (!canSubmit || busy) return;
+    if (!canSubmit) return;
     setError(null);
     setBusy(true);
     try {
-      const s = await accountSignIn(email.trim(), password);
-      onSignedIn(s.email);
+      if (page === 'signin') {
+        await accountSignIn(identifier.trim(), password);
+      } else {
+        await accountSignUp(username.trim(), email.trim(), password);
+      }
+      onSignedIn();
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      setError(msg.includes('username already taken') ? t('login.nameTaken') : msg);
     } finally {
       setBusy(false);
     }
+  };
+
+  const switchPage = (next: Page) => {
+    setPage(next);
+    setError(null);
+    setPassword('');
   };
 
   const centered = !isMobile;
@@ -56,22 +76,57 @@ export default function LoginView({ t, onSignedIn }: LoginViewProps) {
         >
           <Database size={centered ? 26 : 36} className="text-accent" />
         </div>
-        <h1 className="text-xl font-bold text-text-primary">{t('login.title')}</h1>
-        <p className="text-sm text-text-secondary leading-relaxed">{t('login.tagline')}</p>
+        {page === 'signin' ? (
+          <>
+            <h1 className="text-xl font-bold text-text-primary">{t('login.signInTitle')}</h1>
+            <p className="text-sm text-text-secondary leading-relaxed">{t('login.signInSub')}</p>
+          </>
+        ) : (
+          <>
+            <h1 className="text-xl font-bold text-text-primary">{t('login.createTitle')}</h1>
+            <p className="text-sm text-text-secondary leading-relaxed">{t('login.createSub')}</p>
+          </>
+        )}
 
         <div className="flex flex-col gap-3 w-full mt-2 text-left">
-          <div className="relative">
-            <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-            <input
-              className={`${inputCls} pl-9`}
-              type="email"
-              value={email}
-              autoFocus={!isMobile}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder={t('login.email')}
-              onKeyDown={(e) => e.key === 'Enter' && submit()}
-            />
-          </div>
+          {page === 'signin' ? (
+            <div className="relative">
+              <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+              <input
+                className={`${inputCls} pl-9`}
+                value={identifier}
+                autoFocus={!isMobile}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder={t('login.usernameOrEmail')}
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="relative">
+                <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                <input
+                  className={`${inputCls} pl-9`}
+                  value={username}
+                  autoFocus={!isMobile}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={t('login.username')}
+                  onKeyDown={(e) => e.key === 'Enter' && submit()}
+                />
+              </div>
+              <div className="relative">
+                <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                <input
+                  className={`${inputCls} pl-9`}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={t('login.email')}
+                  onKeyDown={(e) => e.key === 'Enter' && submit()}
+                />
+              </div>
+            </>
+          )}
           <div className="relative">
             <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
             <input
@@ -83,22 +138,39 @@ export default function LoginView({ t, onSignedIn }: LoginViewProps) {
               onKeyDown={(e) => e.key === 'Enter' && submit()}
             />
           </div>
+          {page === 'create' && (
+            <p className="text-xs text-text-secondary -mt-1">{t('login.nameHelper')}</p>
+          )}
           <button
             onClick={submit}
-            disabled={!canSubmit || busy}
+            disabled={!canSubmit}
             className="flex items-center justify-center gap-2 px-4 py-2.5 bg-accent hover:opacity-90 disabled:opacity-50 rounded-md text-sm font-semibold text-white transition-opacity"
           >
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
-            {t('login.submit')}
+            {busy ? <Loader2 size={14} className="animate-spin" /> : page === 'signin' ? <Database size={14} /> : <User size={14} />}
+            {page === 'signin' ? t('login.signIn') : t('login.createAccount')}
           </button>
           {error && (
             <div className="px-3 py-2 bg-error/10 border border-error/30 rounded-md text-xs text-error break-words">
               {error}
             </div>
           )}
+          {page === 'signin' ? (
+            <button
+              onClick={() => switchPage('create')}
+              className="text-xs text-accent hover:underline text-left"
+            >
+              {t('login.switchToCreate')}
+            </button>
+          ) : (
+            <button
+              onClick={() => switchPage('signin')}
+              className="flex items-center gap-1 text-xs text-accent hover:underline text-left"
+            >
+              <ArrowLeft size={12} />
+              {t('login.switchToSignIn')}
+            </button>
+          )}
         </div>
-
-        <p className="text-xs text-text-secondary leading-relaxed">{t('login.createHint')}</p>
       </div>
     </div>
   );

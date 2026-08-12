@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, ChevronUp, ChevronDown, Search } from 'lucide-react';
 import { executeQuery } from '../../../lib/db';
 import { useI18n } from '../../../lib/language';
+import { isMobile } from '../../../lib/platform';
 
 interface LogEntry {
   id: number;
@@ -31,6 +32,7 @@ const TX_COLORS: Record<string, { text: string; bg: string; border: string }> = 
 
 export default function ProductHistory({ productId, refreshKey }: ProductHistoryProps) {
   const { t } = useI18n();
+  const mobile = isMobile();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -194,8 +196,8 @@ export default function ProductHistory({ productId, refreshKey }: ProductHistory
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-6 py-3 border-b border-border bg-bg-secondary shrink-0">
-        <div className="flex items-center justify-between mb-3">
+      <div className="px-3 sm:px-6 py-3 border-b border-border bg-bg-secondary shrink-0">
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
           <div className="flex items-center gap-3">
             <h3 className="text-sm font-bold text-text-primary">{t('phist.title')}</h3>
             <span className="text-[10px] text-text-secondary">{t('phist.entriesCount', { shown: filtered.length, total: logs.length })}</span>
@@ -218,7 +220,7 @@ export default function ProductHistory({ productId, refreshKey }: ProductHistory
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap min-w-0">
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
@@ -245,60 +247,64 @@ export default function ProductHistory({ productId, refreshKey }: ProductHistory
             className="px-2 py-1 bg-bg-primary border border-border rounded text-[10px] text-text-primary focus:outline-none focus:border-accent"
           />
 
-          <div className="relative ml-auto">
+          <div className="relative ml-auto min-w-0">
             <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary" />
             <input
               value={filterNotes}
               onChange={(e) => setFilterNotes(e.target.value)}
               placeholder={t('phist.searchNotes')}
-              className="pl-6 pr-2 py-1 bg-bg-primary border border-border rounded text-[10px] text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-[160px]"
+              className="pl-6 pr-2 py-1 bg-bg-primary border border-border rounded text-[10px] text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-[160px] max-w-full"
             />
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-auto">
         {filtered.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-secondary text-xs">
             {logs.length === 0 ? t('phist.empty') : t('phist.emptyFiltered')}
           </div>
         ) : (
-          <table className="w-full text-xs">
+          <table className="w-full table-fixed text-xs">
             <thead className="sticky top-0 bg-bg-secondary border-b border-border">
               <tr>
                 <th
                   onClick={() => handleSort('created_at')}
-                  className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
+                  className={`text-left px-2 sm:px-4 py-2.5 text-text-secondary font-semibold w-[36%] sm:w-[24%] ${sortHeaderClass}`}
                 >
                   <span className="inline-flex items-center gap-1">{t('phist.col.date')} <SortIcon field="created_at" /></span>
                 </th>
+                {!mobile && (
                 <th
                   onClick={() => handleSort('transaction_type')}
-                  className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
+                  className={`text-left px-2 sm:px-4 py-2.5 text-text-secondary font-semibold w-[13%] ${sortHeaderClass}`}
                 >
                   <span className="inline-flex items-center gap-1">{t('phist.col.type')} <SortIcon field="transaction_type" /></span>
                 </th>
+                )}
                 <th
                   onClick={() => handleSort('batch_number')}
-                  className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
+                  className={`text-left px-2 sm:px-4 py-2.5 text-text-secondary font-semibold w-[22%] sm:w-[14%] ${sortHeaderClass}`}
                 >
                   <span className="inline-flex items-center gap-1">{t('phist.col.batch')} <SortIcon field="batch_number" /></span>
                 </th>
                 <th
                   onClick={() => handleSort('quantity_change')}
-                  className={`text-right px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
+                  className={`text-right px-2 sm:px-4 py-2.5 text-text-secondary font-semibold w-[16%] sm:w-[11%] ${sortHeaderClass}`}
                 >
                   <span className="inline-flex items-center gap-1 justify-end">{t('phist.col.qty')} <SortIcon field="quantity_change" /></span>
                 </th>
+                {!mobile && (
                 <th
                   onClick={() => handleSort('notes')}
-                  className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
+                  className={`text-left px-2 sm:px-4 py-2.5 text-text-secondary font-semibold w-[20%] ${sortHeaderClass}`}
                 >
                   <span className="inline-flex items-center gap-1">{t('phist.col.notes')} <SortIcon field="notes" /></span>
                 </th>
+                )}
                 <th
                   onClick={() => handleSort('provider_name')}
-                  className={`text-left px-4 py-2.5 text-text-secondary font-semibold ${sortHeaderClass}`}
+                  className={`text-left px-2 sm:px-4 py-2.5 text-text-secondary font-semibold w-[26%] sm:w-[18%] ${sortHeaderClass}`}
                 >
                   <span className="inline-flex items-center gap-1">{t('phist.col.provider')} <SortIcon field="provider_name" /></span>
                 </th>
@@ -309,36 +315,41 @@ export default function ProductHistory({ productId, refreshKey }: ProductHistory
                 const tc = TX_COLORS[log.transaction_type] || { text: 'text-text-secondary', bg: 'bg-bg-tertiary', border: 'border-border' };
                 return (
                   <tr key={log.id} className="hover:bg-bg-hover transition-colors">
-                    <td className="px-4 py-2.5 text-text-secondary whitespace-nowrap">
-                      {log.created_at?.replace('T', ' ').slice(0, 19)}
+                    <td className="px-2 sm:px-4 py-2.5 text-text-secondary truncate">
+                      {log.created_at?.replace('T', ' ').slice(0, 16)}
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className={`inline-block px-2 py-0.5 rounded border text-[10px] font-semibold ${tc.bg} ${tc.text} ${tc.border}`}>
+                    {!mobile && (
+                    <td className="px-2 sm:px-4 py-2.5">
+                      <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-semibold truncate max-w-full ${tc.bg} ${tc.text} ${tc.border}`}>
                         {log.transaction_type}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-text-secondary font-mono">{log.batch_number || '-'}</td>
-                    <td className={`px-4 py-2.5 text-right font-bold ${log.quantity_change >= 0 ? 'text-success' : 'text-error'}`}>
+                    )}
+                    <td className="px-2 sm:px-4 py-2.5 text-text-secondary font-mono truncate">{log.batch_number || '-'}</td>
+                    <td className={`px-2 sm:px-4 py-2.5 text-right font-bold ${log.quantity_change >= 0 ? 'text-success' : 'text-error'}`}>
                       {log.quantity_change >= 0 ? '+' : ''}{log.quantity_change}
                     </td>
-                    <td className="px-4 py-2.5 text-text-secondary truncate max-w-[200px]">{log.notes || '-'}</td>
-                    <td className="px-4 py-2.5 text-text-secondary">
+                    {!mobile && (
+                    <td className="px-2 sm:px-4 py-2.5 text-text-secondary truncate">{log.notes || '-'}</td>
+                    )}
+                    <td className="px-2 sm:px-4 py-2.5 text-text-secondary truncate">
                       {log.provider_name ? `${log.provider_name}${log.provider_sub ? ` - ${log.provider_sub}` : ''}` : '-'}
                     </td>
                   </tr>
                 );
               })}
             </tbody>
+            {!mobile && (
             <tfoot className="border-t border-border bg-bg-tertiary">
               <tr className="text-[10px] font-semibold">
-                <td className="px-4 py-2.5 text-text-secondary" colSpan={3}>{t('phist.summary')}</td>
-                <td className="px-4 py-2.5 text-right space-x-3">
+                <td className="px-2 sm:px-4 py-2.5 text-text-secondary" colSpan={3}>{t('phist.summary')}</td>
+                <td className="px-2 sm:px-4 py-2.5 text-right truncate">
                   <span className="text-success">+{summary.totalPurchased}</span>
                   <span className="text-warning">{summary.totalUsed}</span>
                   <span className="text-error">{summary.totalSpoiled}</span>
                   <span className="text-text-primary">= {summary.net}</span>
                 </td>
-                <td className="px-4 py-2.5 text-text-secondary">
+                <td className="px-2 sm:px-4 py-2.5 text-text-secondary truncate">
                   <span className="text-success">{t('phist.purchased')}</span>{' '}
                   <span className="text-warning">{t('phist.used')}</span>{' '}
                   <span className="text-error">{t('phist.spoiled')}</span>{' '}
@@ -347,6 +358,7 @@ export default function ProductHistory({ productId, refreshKey }: ProductHistory
                 <td />
               </tr>
             </tfoot>
+            )}
           </table>
         )}
       </div>

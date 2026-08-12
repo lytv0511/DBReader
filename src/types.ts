@@ -24,7 +24,7 @@ export interface PresetData {
   timestamp: number;
 }
 
-export type ViewMode = 'dashboard' | 'gallery' | 'detail' | 'products' | 'batches' | 'logs' | 'adjust' | 'used' | 'categories' | 'reports' | 'txhistory' | 'settings' | 'workspace';
+export type ViewMode = 'dashboard' | 'gallery' | 'detail' | 'products' | 'batches' | 'logs' | 'adjust' | 'used' | 'categories' | 'reports' | 'txhistory' | 'settings' | 'workspace' | 'teams';
 
 export const DEFAULT_TABS = ['gallery', 'categories', 'adjust', 'dashboard', 'products', 'txhistory'];
 

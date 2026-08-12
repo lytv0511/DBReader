@@ -4,7 +4,7 @@ const app = new App();
 new DbReaderStack(app, "DbReaderStack", {
     env: {
         account: process.env.CDK_DEFAULT_ACCOUNT,
-        region: process.env.CDK_DEFAULT_REGION ?? "ap-southeast-2",
+        region: "ap-southeast-2",
     },
 });
 app.synth();

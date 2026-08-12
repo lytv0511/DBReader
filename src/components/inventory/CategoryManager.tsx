@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag } from 'lucide-react';
-import { executeQuery, upsertCategory, deleteCategory, getCategoryTemplates, upsertCategoryTemplate, deleteCategoryTemplate } from '../../lib/db';
+import { RefreshCw, Plus, Pencil, Trash2, ArrowLeft, ChevronRight, Save } from 'lucide-react';
+import { executeQuery, upsertCategory, deleteCategory } from '../../lib/db';
 import { useI18n } from '../../lib/language';
+import { isMobile } from '../../lib/platform';
 
 interface Category {
   id: number;
@@ -10,14 +11,6 @@ interface Category {
   icon: string;
   color: string;
   product_count: number;
-}
-
-interface Template {
-  id: number;
-  attr_key: string;
-  attr_type: string;
-  is_required: boolean;
-  display_order: number;
 }
 
 const EMOJI_OPTIONS = ['🍷', '🥂', '🌸', '🍾', '🫙', '🍸', '🚬', '📦', '☕', '🫒', '🧀', '🥩', '🐟', '🍞', '🍫', '🎁', '🧹', '🔧'];
@@ -35,22 +28,17 @@ const COLOR_OPTIONS = [
 
 export default function CategoryManager({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
+  const mobile = isMobile();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
-  const [templates, setTemplates] = useState<Template[]>([]);
 
   const [editingCategory, setEditingCategory] = useState(false);
   const [formName, setFormName] = useState('');
   const [formDesc, setFormDesc] = useState('');
   const [formIcon, setFormIcon] = useState('📋');
   const [formColor, setFormColor] = useState('#5b6abf');
-
-  const [showNewTemplate, setShowNewTemplate] = useState(false);
-  const [tplFormKey, setTplFormKey] = useState('');
-  const [tplFormType, setTplFormType] = useState('string');
-  const [tplFormRequired, setTplFormRequired] = useState(false);
 
   const fetchData = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -78,28 +66,10 @@ export default function CategoryManager({ refreshKey }: { refreshKey?: number })
     }
   }, []);
 
-  const fetchTemplates = useCallback(async (categoryId: number) => {
-    try {
-      const result = await getCategoryTemplates(categoryId);
-      setTemplates(result.map((r) => ({
-        id: r.id as number,
-        attr_key: r.attr_key as string,
-        attr_type: r.attr_type as string,
-        is_required: r.is_required as boolean,
-        display_order: r.display_order as number,
-      })));
-    } catch (err) {
-      setError(String(err));
-    }
-  }, []);
-
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
     if (refreshKey !== undefined && refreshKey > 0) fetchData(true);
   }, [refreshKey, fetchData]);
-  useEffect(() => {
-    if (selectedCategory) fetchTemplates(selectedCategory.id);
-  }, [selectedCategory, fetchTemplates]);
 
   const openNewCategory = () => {
     setEditingCategory(true);
@@ -147,36 +117,6 @@ export default function CategoryManager({ refreshKey }: { refreshKey?: number })
     }
   };
 
-  const saveTemplate = async () => {
-    if (!tplFormKey.trim() || !selectedCategory) return;
-    try {
-      await upsertCategoryTemplate(
-        selectedCategory.id,
-        tplFormKey,
-        tplFormType,
-        tplFormRequired,
-        Math.max(0, ...templates.map((t) => t.display_order)) + 1
-      );
-      setShowNewTemplate(false);
-      setTplFormKey('');
-      setTplFormType('string');
-      setTplFormRequired(false);
-      await fetchTemplates(selectedCategory.id);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
-  const handleDeleteTemplate = async (templateId: number) => {
-    if (!selectedCategory) return;
-    try {
-      await deleteCategoryTemplate(templateId);
-      await fetchTemplates(selectedCategory.id);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
@@ -186,50 +126,50 @@ export default function CategoryManager({ refreshKey }: { refreshKey?: number })
     );
   }
 
-  return (
-    <div className="h-full flex flex-col sm:flex-row overflow-hidden">
-      {/* Category list */}
-      <div className="w-full sm:w-[300px] border-b sm:border-b-0 sm:border-r border-border bg-bg-secondary flex flex-col shrink-0 max-h-[40%] sm:max-h-none">
-        <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">{t('cats.title')}</span>
-          <button
-            onClick={openNewCategory}
-            className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
-            title={t('cats.addCategory')}
-          >
-            <Plus size={12} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-border">
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => { setSelectedCategory(cat); setEditingCategory(false); }}
-              className={`w-full text-left px-3 py-3 transition-colors ${
-                selectedCategory?.id === cat.id ? 'bg-accent/10' : 'hover:bg-bg-hover'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <span className="text-xl" style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}>{cat.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-text-primary truncate">{cat.name}</p>
-                  <p className="text-[10px] text-text-secondary">{t('cats.productCount', { count: cat.product_count })}</p>
-                </div>
-                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
-              </div>
-            </button>
-          ))}
-          {categories.length === 0 && (
-            <div className="p-4 text-xs text-text-secondary text-center">{t('cats.noCategories')}</div>
-          )}
-        </div>
+  const categoryList = (
+    <div className={mobile ? 'h-full flex flex-col overflow-hidden' : 'w-full sm:w-[300px] border-b sm:border-b-0 sm:border-r border-border bg-bg-secondary flex flex-col shrink-0 max-h-[40%] sm:max-h-none'}>
+      <div className="px-3 py-2 border-b border-border flex items-center justify-between shrink-0">
+        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">{t('cats.title')}</span>
+        <button
+          onClick={openNewCategory}
+          className="p-1.5 rounded hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
+          title={t('cats.addCategory')}
+        >
+          <Plus size={12} />
+        </button>
       </div>
+      <div className="flex-1 overflow-y-auto divide-y divide-border">
+        {categories.map((cat) => (
+          <button
+            key={cat.id}
+            onClick={() => { setSelectedCategory(cat); setEditingCategory(false); }}
+            className={`w-full text-left px-3 py-4 transition-colors ${
+              selectedCategory?.id === cat.id ? 'bg-accent/10' : 'hover:bg-bg-hover'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="text-xl" style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}>{cat.icon}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-text-primary truncate">{cat.name}</p>
+                <p className="text-[10px] text-text-secondary">{t('cats.productCount', { count: cat.product_count })}</p>
+              </div>
+              <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+              {mobile && <ChevronRight size={14} className="text-text-secondary/50 shrink-0" />}
+            </div>
+          </button>
+        ))}
+        {categories.length === 0 && (
+          <div className="p-4 text-xs text-text-secondary text-center">{t('cats.noCategories')}</div>
+        )}
+      </div>
+    </div>
+  );
 
-      {/* Detail / Edit panel */}
-      <div className="flex-1 overflow-y-auto">
-        {editingCategory ? (
-          <div className="p-6 max-w-[500px]">
-            <h3 className="text-sm font-bold text-text-primary mb-4">{selectedCategory ? t('cats.editCategory') : t('cats.newCategory')}</h3>
+  const detailContent = (
+    <div className={mobile ? 'p-5' : 'p-6'}>
+      {editingCategory ? (
+        <div className="max-w-[500px]">
+          <h3 className="text-sm font-bold text-text-primary mb-4">{selectedCategory ? t('cats.editCategory') : t('cats.newCategory')}</h3>
             <div className="space-y-4">
               {/* Icon picker */}
               <div>
@@ -297,7 +237,7 @@ export default function CategoryManager({ refreshKey }: { refreshKey?: number })
             </div>
           </div>
         ) : selectedCategory ? (
-          <div className="p-6 space-y-6">
+          <div className="space-y-6">
             <div className="flex items-center gap-3">
               <span className="text-3xl">{selectedCategory.icon}</span>
               <div className="flex-1">
@@ -312,62 +252,49 @@ export default function CategoryManager({ refreshKey }: { refreshKey?: number })
                 <Trash2 size={14} />
               </button>
             </div>
-
-            {/* Attribute templates */}
-            <div className="bg-bg-secondary border border-border rounded-lg">
-              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-text-primary">{t('cats.templates')}</h3>
-                  <p className="text-[10px] text-text-secondary">{t('cats.templatesSubtitle')}</p>
-                </div>
-                <button
-                  onClick={() => setShowNewTemplate(true)}
-                  className="flex items-center gap-1 px-2 py-1 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-[10px] text-text-secondary transition-colors"
-                >
-                  <Plus size={10} /> {t('common.add')}
-                </button>
-              </div>
-              <div className="divide-y divide-border">
-                {templates.map((tpl) => (
-                  <div key={tpl.id} className="px-4 py-2.5 flex items-center gap-3">
-                    <Tag size={12} className="text-accent" />
-                    <span className="text-xs font-medium text-text-primary">{tpl.attr_key}</span>
-                    <span className="text-[10px] text-text-secondary px-1.5 py-0.5 bg-bg-primary border border-border rounded">{tpl.attr_type}</span>
-                    {tpl.is_required && <span className="text-[10px] text-warning font-semibold">{t('cats.required')}</span>}
-                    <span className="text-[10px] text-text-secondary ml-auto">{t('cats.templateOrder', { count: tpl.display_order })}</span>
-                    <button onClick={() => handleDeleteTemplate(tpl.id)} className="text-text-secondary hover:text-error transition-colors">
-                      <Trash2 size={10} />
-                    </button>
-                  </div>
-                ))}
-                {showNewTemplate && (
-                  <div className="px-4 py-2.5 flex items-center gap-3 bg-accent/5">
-                    <Tag size={12} className="text-accent" />
-                    <input value={tplFormKey} onChange={(e) => setTplFormKey(e.target.value)} placeholder={t('cats.ph.attributeName')} className="w-32 px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent" autoFocus />
-                    <select value={tplFormType} onChange={(e) => setTplFormType(e.target.value)} className="px-2 py-1 bg-bg-primary border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent">
-                      <option value="string">{t('common.attrType.string')}</option>
-                      <option value="number">{t('common.attrType.number')}</option>
-                      <option value="boolean">{t('common.attrType.boolean')}</option>
-                    </select>
-                    <label className="flex items-center gap-1 text-[10px] text-text-secondary cursor-pointer">
-                      <input type="checkbox" checked={tplFormRequired} onChange={(e) => setTplFormRequired(e.target.checked)} className="rounded border-border" />
-                      {t('cats.required')}
-                    </label>
-                    <button onClick={saveTemplate} className="p-1 bg-accent hover:bg-accent-hover rounded text-white"><Save size={10} /></button>
-                    <button onClick={() => setShowNewTemplate(false)} className="p-1 bg-bg-tertiary hover:bg-bg-hover rounded text-text-secondary"><X size={10} /></button>
-                  </div>
-                )}
-                {templates.length === 0 && !showNewTemplate && (
-                  <div className="p-4 text-xs text-text-secondary text-center">{t('cats.noTemplates')}</div>
-                )}
-              </div>
-            </div>
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-text-secondary text-sm">
             {t('cats.selectCategory')}
           </div>
         )}
+    </div>
+  );
+
+  if (mobile && (selectedCategory || editingCategory)) {
+    return (
+      <div className="h-full flex flex-col overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-secondary shrink-0">
+          <button
+            onClick={() => { setSelectedCategory(null); setEditingCategory(false); }}
+            className="flex items-center justify-center w-8 h-8 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-text-primary transition-colors shrink-0"
+            aria-label="Back"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <span className="text-sm font-semibold text-text-primary truncate">
+            {editingCategory ? (selectedCategory ? t('cats.editCategory') : t('cats.newCategory')) : selectedCategory?.name}
+          </span>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {detailContent}
+        </div>
+        {error && (
+          <div className="fixed bottom-4 right-4 bg-error/10 border border-error/20 text-error px-4 py-2 rounded-lg text-xs shadow-lg z-50">
+            {error}
+            <button onClick={() => setError(null)} className="ml-2 hover:underline">{t('common.dismiss')}</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col sm:flex-row overflow-hidden">
+      {categoryList}
+      {/* Detail / Edit panel */}
+      <div className={`flex-1 overflow-y-auto ${mobile ? 'hidden' : ''}`}>
+        {detailContent}
       </div>
 
       {error && (

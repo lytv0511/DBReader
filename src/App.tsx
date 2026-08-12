@@ -23,12 +23,16 @@ import {
   UploadCloud,
   FilePlus2,
   Share2,
+  Users,
+  CloudDownload,
 } from 'lucide-react';
 
 import SettingsView from './components/SettingsView';
 import HelpChat from './components/HelpChat';
 import LoginView from './components/LoginView';
-import { accountStatus, accountSignOut } from './lib/account';
+import CloudOpenModal from './components/CloudOpenModal';
+import TeamsView from './components/TeamsView';
+import { accountStatus, accountSignOut, type AccountStatus } from './lib/account';
 import Dashboard from './components/inventory/Dashboard';
 import ProductManager from './components/inventory/ProductManager';
 import BatchManager from './components/inventory/BatchManager';
@@ -93,8 +97,6 @@ const ALL_TABS: { mode: ViewMode; labelKey: string }[] = INVENTORY_TABS.map((t) 
 
 export default function App() {
   const [isMobile, setIsMobile] = useState<boolean>(() => isMobilePlatform());
-  const [debugInfo, setDebugInfo] = useState<string>('');
-  const [debugVisible, setDebugVisible] = useState(() => sessionStorage.getItem('hideDbg') !== '1');
   const [isConnected, setIsConnected] = useState(false);
   const [dbPath, setDbPath] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('workspace');
@@ -114,14 +116,18 @@ export default function App() {
   const [mobileBusy, setMobileBusy] = useState(false);
   const viewModeRef = useRef<ViewMode>(viewMode);
   const [syncTick, setSyncTick] = useState(0);
-  const [account, setAccount] = useState<{ email: string } | null>(null);
+  const [account, setAccount] = useState<{ email: string; name: string } | null>(null);
   const [accountChecked, setAccountChecked] = useState(false);
+  const [cloudOpenOpen, setCloudOpenOpen] = useState(false);
+  const [teamsKey, setTeamsKey] = useState(0);
+  const [sessionStarted, setSessionStarted] = useState(false);
+  const startupOpenedRef = useRef(false);
 
   useEffect(() => {
     let disposed = false;
     accountStatus()
       .then((s) => {
-        if (!disposed) setAccount(s.email ? { email: s.email } : null);
+        if (!disposed) setAccount(s.email ? { email: s.email, name: s.name } : null);
       })
       .catch(() => {})
       .finally(() => {
@@ -132,6 +138,22 @@ export default function App() {
     };
   }, []);
 
+  const handleCloudOpened = useCallback(async () => {
+    try {
+      const currentPath = await getDatabasePath();
+      if (currentPath) {
+        setDbPath(currentPath);
+        setPrefs((p) => ({ ...p, lastDbPath: currentPath }));
+      }
+    } catch {
+      // ignore
+    }
+    setIsConnected(true);
+    setCloudOpenOpen(false);
+    setViewMode('workspace');
+    setTeamsKey((k) => k + 1);
+  }, []);
+
   const handleSignOut = async () => {
     try {
       await accountSignOut();
@@ -139,7 +161,19 @@ export default function App() {
       // ignore
     }
     setAccount(null);
+    setSessionStarted(false);
   };
+
+  const handleSignedIn = useCallback(async () => {
+    let st: AccountStatus | null = null;
+    try {
+      st = await accountStatus();
+    } catch {
+      // ignore
+    }
+    setAccount(st?.email ? { email: st.email, name: st.name } : null);
+    setSessionStarted(true);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -165,7 +199,6 @@ useEffect(() => {
     const update = () => {
       applyFormFactor();
       setIsMobile(isMobilePlatform());
-      setDebugInfo(`FF=${document.documentElement.dataset.formFactor} W=${window.innerWidth} UA=${navigator.userAgent}`);
     };
     update();
     const onResize = () => requestAnimationFrame(update);
@@ -297,7 +330,15 @@ useEffect(() => {
         enabled: isTabEnabled(tb.mode),
       })
     );
-    return all.filter((tb) => !(isMobile && tb.mode === 'dashboard'));
+    return [
+      {
+        mode: 'teams',
+        label: t('team.title'),
+        icon: <Users size={22} />,
+        enabled: true,
+      },
+      ...all.filter((tb) => !(isMobile && tb.mode === 'dashboard')),
+    ];
   }, [prefs.enabledTabs, lang, isMobile]);
 
   useEffect(() => {
@@ -361,23 +402,30 @@ useEffect(() => {
         };
         prefsLoadedRef.current = true;
         setPrefs(merged);
-        if (merged.openOnStartup && merged.lastDbPath) {
-          try {
-            await openDatabase(merged.lastDbPath);
-            await migrateSchema().catch(() => {});
-            setIsConnected(true);
-            setDbPath(merged.lastDbPath);
-            setViewMode(isTabEnabled('dashboard') ? 'dashboard' : fallbackView());
-          } catch {
-            setPrefs((p) => ({ ...p, lastDbPath: null }));
-          }
-        }
       })
       .catch(() => {
         prefsLoadedRef.current = true;
       })
       .finally(() => setInitializing(false));
   }, []);
+
+  useEffect(() => {
+    if (!sessionStarted || !prefsLoadedRef.current || startupOpenedRef.current) return;
+    startupOpenedRef.current = true;
+    if (prefs.openOnStartup && prefs.lastDbPath) {
+      openDatabase(prefs.lastDbPath)
+        .then(() => migrateSchema().catch(() => {}))
+        .then(() => {
+          setIsConnected(true);
+          setDbPath(prefs.lastDbPath);
+          setViewMode(isTabEnabled('dashboard') ? 'dashboard' : fallbackView());
+        })
+        .catch(() => {
+          setPrefs((p) => ({ ...p, lastDbPath: null }));
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionStarted, prefs]);
 
   const handleOpenFile = useCallback(async () => {
     if (isMobile) {
@@ -500,8 +548,8 @@ useEffect(() => {
     <I18nProvider language={prefs.language}>
       {!accountChecked ? (
         <div className="h-screen flex items-center justify-center bg-bg-primary" />
-      ) : !account ? (
-        <LoginView t={t} onSignedIn={(email) => setAccount({ email })} />
+      ) : !sessionStarted ? (
+        <LoginView t={t} onSignedIn={handleSignedIn} />
       ) : (
       <>
       <div className="h-screen flex flex-col bg-bg-primary text-text-primary">
@@ -529,6 +577,14 @@ useEffect(() => {
         >
           <Plus size={12} />
           {t('app.new')}
+        </button>
+
+        <button
+          onClick={() => setCloudOpenOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-primary transition-colors shrink-0"
+        >
+          <CloudDownload size={12} />
+          {t('openFrom.cloud')}
         </button>
 
         <button
@@ -688,7 +744,7 @@ useEffect(() => {
           )}
           {viewMode === 'categories' && <CategoryManager refreshKey={syncTick} />}
           {viewMode === 'used' && <UseHistory refreshKey={syncTick} />}
-          {viewMode === 'products' && <ProductManager refreshKey={syncTick} />}
+          {viewMode === 'products' && <ProductManager refreshKey={syncTick} currencySymbol={prefs.currencySymbol} />}
           {viewMode === 'batches' && <BatchManager refreshKey={syncTick} currencySymbol={prefs.currencySymbol} />}
           {viewMode === 'logs' && <InventoryLog refreshKey={syncTick} />}
           {viewMode === 'txhistory' && <TransactionHistory refreshKey={syncTick} />}
@@ -752,6 +808,22 @@ useEffect(() => {
                         <FilePlus2 size={16} />
                         {t('welcome.create')}
                       </button>
+                      <button
+                        onClick={() => setViewMode('teams')}
+                        disabled={mobileBusy}
+                        className="flex items-center justify-center gap-2 px-4 py-3 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-xl text-sm font-medium text-text-secondary transition-colors disabled:opacity-50"
+                      >
+                        <Users size={16} />
+                        {t('team.title')}
+                      </button>
+                      <button
+                        onClick={() => setCloudOpenOpen(true)}
+                        disabled={mobileBusy}
+                        className="flex items-center justify-center gap-2 px-4 py-3 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-xl text-sm font-medium text-text-secondary transition-colors disabled:opacity-50"
+                      >
+                        <CloudDownload size={16} />
+                        {t('openFrom.cloud')}
+                      </button>
                       {mobileBusy && (
                         <span className="text-xs text-text-secondary animate-pulse">Working…</span>
                       )}
@@ -809,6 +881,14 @@ useEffect(() => {
               )}
             </>
           )}
+          {viewMode === 'teams' && (
+            <TeamsView
+              key={teamsKey}
+              t={t}
+              dbOpen={isConnected}
+              onOpened={handleCloudOpened}
+            />
+          )}
           {viewMode === 'settings' && (
             <SettingsView
               prefs={prefs}
@@ -844,23 +924,27 @@ useEffect(() => {
               >
                 {t('welcome.create')}
               </button>
+              <button
+                onClick={() => setCloudOpenOpen(true)}
+                className="px-4 py-2 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-lg text-sm font-medium text-text-secondary hover:text-text-primary transition-colors"
+              >
+                <CloudDownload size={14} className="inline mr-1.5 -mt-0.5" />
+                {t('openFrom.cloud')}
+              </button>
             </div>
           </div>
         </div>
       )}
       </div>
 
-      {debugVisible && (
-        <button
-          onClick={() => { setDebugVisible(false); sessionStorage.setItem('hideDbg', '1'); }}
-          className="fixed bottom-16 right-2 z-50 px-2 py-1 rounded bg-black/70 border border-white/20 text-xs text-white/90 font-mono max-w-[90%] truncate"
-          title="Tap to hide"
-        >
-          {debugInfo}
-        </button>
-      )}
-
       <HelpChat open={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      <CloudOpenModal
+        open={cloudOpenOpen}
+        t={t}
+        onClose={() => setCloudOpenOpen(false)}
+        onOpened={handleCloudOpened}
+      />
 
       {isMobile && mobileCreateOpen && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 px-6">
