@@ -1247,6 +1247,21 @@ impl CloudApi {
         self.upload_file(token, team_id, name, b"x")
     }
 
+    /// Reads a consistent copy of the open database so auto-published files
+    /// carry real data instead of an empty placeholder. A second device
+    /// opening the cloud file must get this device's inventory.
+    fn db_snapshot_bytes(conn: &Connection) -> Result<Vec<u8>, String> {
+        let tmp = std::env::temp_dir().join(format!("dbreader-publish-{}.db", uuid::Uuid::new_v4().simple()));
+        conn.execute_batch(&format!(
+            "VACUUM INTO '{}'",
+            tmp.to_string_lossy().replace('\'', "''")
+        ))
+        .map_err(|e| format!("Cannot snapshot database: {}", e))?;
+        let bytes = std::fs::read(&tmp).map_err(|e| format!("Cannot read snapshot file: {}", e))?;
+        let _ = std::fs::remove_file(&tmp);
+        Ok(bytes)
+    }
+
     /// Uploads a database file (any bytes) to a team and confirms it.
     fn upload_file(&self, token: &str, team_id: &str, name: &str, body_bytes: &[u8]) -> Result<String, String> {
         let v = self.post_json(
@@ -1316,7 +1331,8 @@ fn ensure_cloud_session(conn: &Connection, endpoint: &str, db_id: &str, site_id:
         team_id
     };
     let file_id = if file_id.is_empty() {
-        api.publish_file(&session_token, &team_id, &format!("{}.db", db_id))?
+        let snap = CloudApi::db_snapshot_bytes(conn)?;
+        CloudApi::upload_file(&api, &session_token, &team_id, &format!("{}.db", db_id), &snap)?
     } else {
         file_id
     };
@@ -1818,7 +1834,8 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
                 }
                 None => {
                     let team_id = api.create_team(&token, &db_id)?;
-                    let file_id = api.publish_file(&token, &team_id, &format!("{}.db", db_id))?;
+                    let snap = CloudApi::db_snapshot_bytes(conn)?;
+                    let file_id = api.upload_file(&token, &team_id, &format!("{}.db", db_id), &snap)?;
                     meta_set(conn, "cloud_team_id", &team_id)?;
                     meta_set(conn, "cloud_file_id", &file_id)?;
                 }
