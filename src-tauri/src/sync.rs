@@ -1192,6 +1192,41 @@ impl CloudApi {
         Ok(best.map(|(t, f, _)| (t, f)))
     }
 
+    /// When the database id does not match any published file, links a second
+    /// device to the account's single published database (across all teams) so
+    /// signing in with the same account on a fresh database copy syncs it with
+    /// the existing one. Returns `None` when the account has zero or multiple
+    /// published files (ambiguous — the UI offers explicit team/file picking).
+    fn only_file(&self, token: &str) -> Result<Option<(String, String)>, String> {
+        let v = self.get_json("/api/v1/me", token)?;
+        let teams = v
+            .get("teams")
+            .and_then(|t| t.as_array())
+            .ok_or_else(|| "me response missing teams".to_string())?;
+        let mut found: Option<(String, String)> = None;
+        for t in teams {
+            let Some(team_id) = t.get("team_id").and_then(|x| x.as_str()) else {
+                continue;
+            };
+            let files_v = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
+            let files: Vec<serde_json::Value> = files_v
+                .get("files")
+                .and_then(|f| f.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for f in &files {
+                let Some(file_id) = f.get("file_id").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                if found.is_some() {
+                    return Ok(None);
+                }
+                found = Some((team_id.to_string(), file_id.to_string()));
+            }
+        }
+        Ok(found)
+    }
+
     /// Returns the invite code for this team (owners only; refreshes the code
     /// server-side when the previous one expired).
     fn invite_code(&self, token: &str, team_id: &str) -> Result<String, String> {
@@ -1775,10 +1810,19 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
             meta_set(conn, "cloud_file_id", &file_id)?;
         }
         None => {
-            let team_id = api.create_team(&token, &db_id)?;
-            let file_id = api.publish_file(&token, &team_id, &format!("{}.db", db_id))?;
-            meta_set(conn, "cloud_team_id", &team_id)?;
-            meta_set(conn, "cloud_file_id", &file_id)?;
+            let link = api.only_file(&token)?;
+            match link {
+                Some((team_id, file_id)) => {
+                    meta_set(conn, "cloud_team_id", &team_id)?;
+                    meta_set(conn, "cloud_file_id", &file_id)?;
+                }
+                None => {
+                    let team_id = api.create_team(&token, &db_id)?;
+                    let file_id = api.publish_file(&token, &team_id, &format!("{}.db", db_id))?;
+                    meta_set(conn, "cloud_team_id", &team_id)?;
+                    meta_set(conn, "cloud_file_id", &file_id)?;
+                }
+            }
         }
     }
     meta_set(conn, "transport", "relay")?;
