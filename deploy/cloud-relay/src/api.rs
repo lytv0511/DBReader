@@ -348,8 +348,8 @@ fn h_team_create(store: &dyn Store, auth: &str, name: &str) -> Resp {
     if name.is_empty() || name.len() > 60 {
         return Resp::err(400, "team name required (max 60 chars)");
     }
-    if store.all_teams(&session.email).len() >= 3 {
-        return Resp::err(403, "team limit reached (3 teams per account)");
+    if store.all_teams(&session.email).len() >= 24 {
+        return Resp::err(403, "team limit reached (24 teams per account)");
     }
     let team_id = uuid::Uuid::new_v4().to_string();
     let code = unique_code(store);
@@ -1054,16 +1054,16 @@ mod tests {
         let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"member@x.com","name":"member","password":"secret123"}));
         let member_token = r.body["token"].as_str().unwrap().to_string();
 
-        for i in 0..3 {
+        for i in 0..24 {
             let r = req(&s, "POST", "/api/v1/team/create", Some(&owner_token), json!({"name": format!("Team {}", i)}));
             assert_eq!(r.status, 200, "team {} create: {:?}", i, r.body);
         }
-        let r = req(&s, "POST", "/api/v1/team/create", Some(&owner_token), json!({"name":"Team 4"}));
-        assert_eq!(r.status, 403, "4th team must be rejected");
+        let r = req(&s, "POST", "/api/v1/team/create", Some(&owner_token), json!({"name":"Team 25"}));
+        assert_eq!(r.status, 403, "25th team must be rejected");
 
         let mut team_id = String::new();
         let mut code = String::new();
-        for i in 0..3 {
+        for i in 0..24 {
             let r = req(&s, "GET", "/api/v1/me", Some(&owner_token), json!({}));
             let teams = r.body["teams"].as_array().unwrap();
             let t = &teams[i];

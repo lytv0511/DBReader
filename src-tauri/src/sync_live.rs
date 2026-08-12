@@ -52,6 +52,12 @@ impl LiveSync {
         std::thread::spawn(move || s.pull_thread(app));
     }
 
+    /// A 404 from the relay means the stored team/file mapping is stale (e.g.
+    /// the cloud was cleaned up): heal by clearing the ids and reconnecting.
+    fn is_missing(e: &str) -> bool {
+        e.contains("404") || e.contains("Relay pull returned status 404")
+    }
+
     fn push_thread(self: &Arc<Self>, app: AppHandle) {
         let mut backoff = 0usize;
         loop {
@@ -81,6 +87,10 @@ impl LiveSync {
                 Ok(_) => backoff = 0,
                 Err(e) => {
                     record_last_error(&app, &e);
+                    if Self::is_missing(&e) && sync::heal_cloud_link(&app).is_ok() {
+                        backoff = 0;
+                        continue;
+                    }
                     std::thread::sleep(ERROR_BACKOFF[backoff]);
                     backoff = (backoff + 1).min(ERROR_BACKOFF.len() - 1);
                 }
@@ -127,6 +137,10 @@ impl LiveSync {
                 Ok(p) => p,
                 Err(e) => {
                     record_last_error(&app, &e);
+                    if Self::is_missing(&e) && sync::heal_cloud_link(&app).is_ok() {
+                        backoff = 0;
+                        continue;
+                    }
                     std::thread::sleep(ERROR_BACKOFF[backoff]);
                     backoff = (backoff + 1).min(ERROR_BACKOFF.len() - 1);
                     continue;

@@ -1831,6 +1831,26 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
     Ok(())
 }
 
+/// Repairs a broken cloud mapping after the backend reports the stored
+/// team/file is gone (404): clears the stale ids and re-runs the account
+/// connect flow, which re-finds the file or creates a fresh team + file and
+/// re-publishes this database. Called by the live-sync threads so devices
+/// recover on their own after server-side cleanup.
+pub(crate) fn heal_cloud_link(app: &AppHandle) -> Result<(), String> {
+    let db_state = app.state::<DbState>();
+    let inner = db_state.inner.lock().map_err(|e| e.to_string())?;
+    let conn = inner.conn.as_ref().ok_or("No database connected")?;
+    let email = meta_get(conn, "cloud_email")?
+        .filter(|e| !e.trim().is_empty())
+        .ok_or_else(|| "cloud email missing; sign in again".to_string())?;
+    let password = meta_get(conn, "cloud_pass")?
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| "cloud password missing; sign in again".to_string())?;
+    meta_set(conn, "cloud_team_id", "")?;
+    meta_set(conn, "cloud_file_id", "")?;
+    connect_db_to_account(conn, &email, &password)
+}
+
 /// Signs in with a personal account. The account is created automatically on
 /// first use; on later devices it reconnects to this database directly (via
 /// the shared file name) without an invite code.
