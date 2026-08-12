@@ -25,6 +25,7 @@ pub struct SyncOp {
     pub site: String,
     pub seq: i64,
     pub hlc: String,
+    #[serde(alias = "table_name")]
     pub table: String,
     pub pk: serde_json::Value,
     #[serde(default)]
@@ -1903,6 +1904,23 @@ mod tests {
             op: "upsert".into(),
             pk_json_raw: "".into(),
         }
+    }
+
+    #[test]
+    fn test_legacy_op_with_table_name_parses() {
+        let legacy = r#"{
+            "site": "39fe4ab85bfd4f4590c196cd83fb5c44",
+            "seq": 14,
+            "hlc": "20260811045336.382",
+            "table_name": "inventory_logs",
+            "pk": {"id": 10},
+            "row": {"id": 10},
+            "op": "upsert"
+        }"#;
+        let op: SyncOp = serde_json::from_str(legacy).expect("legacy op should parse");
+        assert_eq!(op.table, "inventory_logs");
+        assert_eq!(op.pk_json_raw, "");
+        assert_eq!(op_pk_json(&op), r#"{"id":10}"#);
     }
 
     #[test]
