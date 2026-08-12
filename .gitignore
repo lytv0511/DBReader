@@ -51,3 +51,4 @@ src-tauri/plugins/*/target
 
 *.apk
 xwin-runner
+deploy/cloud-relay/target/

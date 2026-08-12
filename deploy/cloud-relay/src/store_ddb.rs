@@ -185,6 +185,16 @@ impl Store for DdbStore {
         let _ = self.ddb.delete_item(&self.sessions_table, &[("token", json!({"S": token}))]);
     }
 
+    fn file_del(&self, team_id: &str, file_id: &str) {
+        let _ = self.ddb.delete_item(
+            &self.files_table,
+            &[
+                ("team_id", json!({"S": team_id})),
+                ("file_id", json!({"S": file_id})),
+            ],
+        );
+    }
+
     fn team_get(&self, id: &str) -> Option<Team> {
         self.item_team(&self.get_team(id)?)
     }

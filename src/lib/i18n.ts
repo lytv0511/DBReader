@@ -177,6 +177,12 @@ const en: Dict = {
   'team.size.mb': 'MB',
   'team.realtime': 'Live sync active',
   'team.realtimeDesc': 'Changes sync to every member in real time while the team inventory is open.',
+  'team.upload': 'Upload database',
+  'team.deleteFile': 'Delete permanently',
+  'team.deleteConfirm': 'Delete for everyone?',
+  'team.deleteYes': 'Delete',
+  'team.deleteNo': 'Cancel',
+  'team.deleted': 'File deleted from the cloud.',
 
 };
 
@@ -341,6 +347,12 @@ const zhCN: Dict = {
   'team.size.mb': 'MB',
   'team.realtime': '实时同步中',
   'team.realtimeDesc': '打开团队库存后，所有成员的更改会实时同步。',
+  'team.upload': '上传数据库',
+  'team.deleteFile': '永久删除',
+  'team.deleteConfirm': '为所有人永久删除？',
+  'team.deleteYes': '删除',
+  'team.deleteNo': '取消',
+  'team.deleted': '已从云端删除文件。',
 
 };
 
@@ -505,6 +517,12 @@ const zhTW: Dict = {
   'team.size.mb': 'MB',
   'team.realtime': '即時同步中',
   'team.realtimeDesc': '開啟團隊庫存後，所有成員的變更會即時同步。',
+  'team.upload': '上傳資料庫',
+  'team.deleteFile': '永久刪除',
+  'team.deleteConfirm': '為所有人永久刪除？',
+  'team.deleteYes': '刪除',
+  'team.deleteNo': '取消',
+  'team.deleted': '已從雲端刪除檔案。',
   'team.openCloud': '從帳戶開啟',
 
 };

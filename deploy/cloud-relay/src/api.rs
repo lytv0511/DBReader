@@ -71,6 +71,7 @@ pub trait Store: Send + Sync {
     fn files_for(&self, team_id: &str) -> Vec<TeamFile>;
     fn file_get(&self, team_id: &str, file_id: &str) -> Option<TeamFile>;
     fn file_put(&self, f: &TeamFile);
+    fn file_del(&self, team_id: &str, file_id: &str);
     fn ops_get(&self, site_key: &str) -> Option<String>;
     fn ops_put(&self, site_key: &str, data: &str);
 }
@@ -219,6 +220,23 @@ fn team_of(
         return Err(Resp::err(403, "not a member of this team"));
     }
     Ok(team)
+}
+
+/// Resolves the storage scope for file operations. An empty/invalid team id
+/// means the account's personal space (files stored under the signed-in
+/// user's email, owned by them alone). Otherwise the team must exist and the
+/// user must be a member. Returns the storage id and the caller's role.
+fn resolved_team(
+    store: &dyn Store,
+    session: &SessionRec,
+    team_id: &str,
+) -> Result<(String, String), Resp> {
+    if team_id.trim().is_empty() {
+        Ok((session.email.clone(), ROLE_OWNER.to_string()))
+    } else {
+        let t = team_of(store, session, team_id)?;
+        Ok((t.team_id.clone(), role_in(&t, &session.email).unwrap_or_default()))
+    }
 }
 
 // ---------- handlers ----------
@@ -455,11 +473,12 @@ fn h_files_list(store: &dyn Store, auth: &str, team_id: &str) -> Resp {
     let Ok(session) = session_ok(store, auth) else {
         return Resp::err(401, "not logged in");
     };
-    let Ok(_team) = team_of(store, &session, team_id) else {
-        return Resp::err(403, "not a member");
+    let (storage, _role) = match resolved_team(store, &session, team_id) {
+        Ok(x) => x,
+        Err(r) => return r,
     };
     let files: Vec<Value> = store
-        .files_for(team_id)
+        .files_for(&storage)
         .into_iter()
         .filter(|f| f.done)
         .map(|f| {
@@ -479,20 +498,18 @@ fn h_file_upload_url(store: &dyn Store, auth: &str, team_id: &str, name: &str) -
     let Ok(session) = session_ok(store, auth) else {
         return Resp::err(401, "not logged in");
     };
-    let Ok(team) = team_of(store, &session, team_id) else {
-        return Resp::err(403, "not a member");
+    let (storage, _role) = match resolved_team(store, &session, team_id) {
+        Ok(x) => x,
+        Err(r) => return r,
     };
-    if team.owner != session.email {
-        return Resp::err(403, "only the team creator can publish files");
-    }
     let name = name.trim();
     if name.is_empty() || name.len() > 120 {
         return Resp::err(400, "file name required");
     }
     let file_id = uuid::Uuid::new_v4().to_string();
-    let s3_key = format!("team/{}/file/{}.db", team_id, file_id);
+    let s3_key = format!("team/{}/file/{}.db", storage, file_id);
     let f = TeamFile {
-        team_id: team_id.to_string(),
+        team_id: storage,
         file_id: file_id.clone(),
         nm: name.to_string(),
         s3_key: s3_key.clone(),
@@ -516,16 +533,14 @@ fn h_file_confirm(store: &dyn Store, auth: &str, team_id: &str, file_id: &str, s
     let Ok(session) = session_ok(store, auth) else {
         return Resp::err(401, "not logged in");
     };
-    let Ok(team) = team_of(store, &session, team_id) else {
-        return Resp::err(403, "not a member");
+    let (storage, _role) = match resolved_team(store, &session, team_id) {
+        Ok(x) => x,
+        Err(r) => return r,
     };
-    if team.owner != session.email {
-        return Resp::err(403, "only the team creator can publish files");
-    }
-    let Some(mut f) = store.file_get(team_id, file_id) else {
+    let Some(mut f) = store.file_get(&storage, file_id) else {
         return Resp::err(404, "file not found");
     };
-    if f.team_id != team_id {
+    if f.team_id != storage {
         return Resp::err(404, "file not found");
     }
     f.done = true;
@@ -539,16 +554,45 @@ fn h_file_download(store: &dyn Store, auth: &str, team_id: &str, file_id: &str) 
     let Ok(session) = session_ok(store, auth) else {
         return Resp::err(401, "not logged in");
     };
-    let Ok(_team) = team_of(store, &session, team_id) else {
-        return Resp::err(403, "not a member");
+    let (storage, _role) = match resolved_team(store, &session, team_id) {
+        Ok(x) => x,
+        Err(r) => return r,
     };
-    let Some(f) = store.file_get(team_id, file_id) else {
+    let Some(f) = store.file_get(&storage, file_id) else {
         return Resp::err(404, "file not found");
     };
     if !f.done {
         return Resp::err(404, "file not ready");
     }
     Resp::ok(json!({"download_url": crate::s3::download_url(&f.s3_key)}))
+}
+
+fn h_file_delete(store: &dyn Store, auth: &str, team_id: &str, file_id: &str) -> Resp {
+    let Ok(session) = session_ok(store, auth) else {
+        return Resp::err(401, "not logged in");
+    };
+    let (storage, _role) = match resolved_team(store, &session, team_id) {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    if storage != session.email {
+        let Ok(team) = team_of(store, &session, &storage) else {
+            return Resp::err(403, "not a member of this team");
+        };
+        if team.owner != session.email {
+            return Resp::err(403, "only the team creator can delete files");
+        }
+    }
+    let Some(f) = store.file_get(&storage, file_id) else {
+        return Resp::err(404, "file not found");
+    };
+    if f.done {
+        if let Err(e) = crate::s3::delete_object(&f.s3_key) {
+            return Resp::err(500, &e);
+        }
+    }
+    store.file_del(&storage, file_id);
+    Resp::ok(json!({"ok": true}))
 }
 
 // ---------- sync ----------
@@ -577,14 +621,14 @@ fn h_push(
     let Ok(session) = session_ok(store, auth) else {
         return Resp::err(401, "not logged in");
     };
-    let Ok(team) = team_of(store, &session, team_id) else {
-        return Resp::err(403, "not a member");
+    let (storage, role) = match resolved_team(store, &session, team_id) {
+        Ok(x) => x,
+        Err(r) => return r,
     };
-    let role = role_in(&team, &session.email).unwrap_or_default();
     if role == ROLE_VIEWER {
         return Resp::err(403, "viewer cannot push changes");
     }
-    let Some(file) = store.file_get(team_id, file_id) else {
+    let Some(file) = store.file_get(&storage, file_id) else {
         return Resp::err(404, "file not found");
     };
     if !file.done {
@@ -597,7 +641,7 @@ fn h_push(
         return Resp::ok(json!({"ok": true}));
     }
 
-    let key = site_key(team_id, file_id, site);
+    let key = site_key(&storage, file_id, site);
     let mut data = store.ops_get(&key).unwrap_or_default();
     let mut max_seq = 0i64;
     for line in data.lines() {
@@ -649,21 +693,22 @@ fn h_pull(
     let Ok(session) = session_ok(store, auth) else {
         return Resp::err(401, "not logged in");
     };
-    let Ok(_team) = team_of(store, &session, team_id) else {
-        return Resp::err(403, "not a member");
+    let (storage, _role) = match resolved_team(store, &session, team_id) {
+        Ok(x) => x,
+        Err(r) => return r,
     };
-    let Some(file) = store.file_get(team_id, file_id) else {
+    let Some(file) = store.file_get(&storage, file_id) else {
         return Resp::err(404, "file not found");
     };
 
     let collect = |store: &dyn Store| -> Vec<Value> {
         let mut ops = Vec::new();
-        for f in store.files_for(team_id) {
+        for f in store.files_for(&storage) {
             if f.file_id != file_id {
                 continue;
             }
             for s in &f.sites {
-                if let Some(data) = store.ops_get(&site_key(team_id, file_id, s)) {
+                if let Some(data) = store.ops_get(&site_key(&storage, file_id, s)) {
                     for line in data.lines() {
                         if let Ok(op) = serde_json::from_str::<Value>(line) {
                             let (oh, os, oseq) = op_cursor(&op);
@@ -758,6 +803,11 @@ pub fn route(store: &dyn Store, method: &str, path: &str, auth: &str, body: &Val
             let team_id = body.get("team_id").and_then(|v| v.as_str()).unwrap_or("");
             let file_id = body.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
             h_file_download(store, auth, team_id, file_id)
+        }
+        ("POST", ["api", "v1", "files", "delete"]) => {
+            let team_id = body.get("team_id").and_then(|v| v.as_str()).unwrap_or("");
+            let file_id = body.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
+            h_file_delete(store, auth, team_id, file_id)
         }
         ("POST", ["api", "v1", "push"]) => {
             let team_id = body.get("team_id").and_then(|v| v.as_str()).unwrap_or("");
@@ -891,6 +941,9 @@ impl Store for MemoryStore {
             .unwrap()
             .files
             .insert(format!("{}|{}", f.team_id, f.file_id), f.clone());
+    }
+    fn file_del(&self, team_id: &str, file_id: &str) {
+        self.inner.lock().unwrap().files.remove(&format!("{}|{}", team_id, file_id));
     }
     fn ops_get(&self, site_key: &str) -> Option<String> {
         self.inner.lock().unwrap().ops.get(site_key).cloned()
@@ -1131,5 +1184,82 @@ mod tests {
         let r = req(&s, "POST", "/api/v1/code/rotate", Some(&owner_token), json!({"team_id": team_id}));
         assert_eq!(r.status, 200);
         assert_eq!(r.body["code"].as_str().unwrap().len(), 8);
+
+        // file delete: member cannot, owner can, repeat not found
+        let r = req(&s, "POST", "/api/v1/files/delete", Some(&member_token), json!({"team_id": team_id, "file_id": file_id}));
+        assert_eq!(r.status, 403);
+        let r = req(&s, "POST", "/api/v1/files/delete", Some(&owner_token), json!({"team_id": team_id, "file_id": file_id}));
+        assert_eq!(r.status, 200);
+
+        // member can now upload/confirm (any member), just not delete
+        let r = req(&s, "POST", "/api/v1/files/upload-url", Some(&member_token), json!({"team_id": team_id, "name": "member.db"}));
+        assert_eq!(r.status, 200);
+        let member_file = r.body["file_id"].as_str().unwrap().to_string();
+        let r = req(&s, "POST", "/api/v1/files/confirm", Some(&member_token), json!({"team_id": team_id, "file_id": member_file, "size": 1}));
+        assert_eq!(r.status, 200);
+
+        // team list still shows the surviving member upload
+        let r = req(&s, "GET", "/api/v1/files", Some(&member_token), json!({"team_id": team_id}));
+        assert_eq!(r.body["files"].as_array().unwrap().len(), 1);
+        assert_eq!(r.body["files"][0]["name"], "member.db");
+
+        // member still cannot delete
+        let r = req(&s, "POST", "/api/v1/files/delete", Some(&member_token), json!({"team_id": team_id, "file_id": member_file}));
+        assert_eq!(r.status, 403);
+
+        // owner deleting the already-deleted file -> not found
+        let r = req(&s, "POST", "/api/v1/files/delete", Some(&owner_token), json!({"team_id": team_id, "file_id": file_id}));
+        assert_eq!(r.status, 404);
+    }
+
+    #[test]
+    fn personal_space_upload_open_delete() {
+        let s = MemoryStore::new();
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"me@x.com","name":"Mine","password":"secret123"}));
+        assert_eq!(r.status, 200);
+        let token = r.body["token"].as_str().unwrap().to_string();
+
+        // upload into the personal space (empty team_id)
+        let r = req(&s, "POST", "/api/v1/files/upload-url", Some(&token), json!({"team_id": "", "name": "mine.db"}));
+        assert_eq!(r.status, 200);
+        let file_id = r.body["file_id"].as_str().unwrap().to_string();
+        let r = req(&s, "POST", "/api/v1/files/confirm", Some(&token), json!({"team_id": "", "file_id": file_id, "size": 99}));
+        assert_eq!(r.status, 200);
+
+        // personal listing
+        let r = req(&s, "GET", "/api/v1/files", Some(&token), json!({"team_id": ""}));
+        assert_eq!(r.status, 200);
+        let files = r.body["files"].as_array().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0]["name"], "mine.db");
+
+        // personal download
+        let r = req(&s, "POST", "/api/v1/files/download", Some(&token), json!({"team_id": "", "file_id": file_id}));
+        assert_eq!(r.status, 200);
+
+        // push/pull work against the personal space
+        let r = req(&s, "POST", "/api/v1/push", Some(&token), json!({
+            "team_id": "", "file_id": file_id, "site": "phone-1", "schema": "k9",
+            "ops": [op("phone-1", 1, "260800000000.009", "products")]
+        }));
+        assert_eq!(r.status, 200);
+        let r = req(&s, "GET", "/api/v1/pull", Some(&token), json!({
+            "team_id": "", "file_id": file_id, "site": "", "h": "", "seq": 0, "wait": 0
+        }));
+        assert_eq!(r.status, 200);
+        assert_eq!(r.body["ops"].as_array().unwrap().len(), 1);
+
+        // another account cannot see the personal file
+        let r = req(&s, "POST", "/api/v1/register", None, json!({"email":"other@x.com","name":"Other","password":"secret123"}));
+        assert_eq!(r.status, 200);
+        let other = r.body["token"].as_str().unwrap().to_string();
+        let r = req(&s, "GET", "/api/v1/files", Some(&other), json!({"team_id": ""}));
+        assert_eq!(r.body["files"].as_array().unwrap().len(), 0);
+
+        // personal delete
+        let r = req(&s, "POST", "/api/v1/files/delete", Some(&token), json!({"team_id": "", "file_id": file_id}));
+        assert_eq!(r.status, 200);
+        let r = req(&s, "GET", "/api/v1/files", Some(&token), json!({"team_id": ""}));
+        assert_eq!(r.body["files"].as_array().unwrap().len(), 0);
     }
 }

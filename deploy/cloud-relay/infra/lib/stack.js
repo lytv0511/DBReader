@@ -77,6 +77,7 @@ export class DbReaderStack extends Stack {
         ops.grantReadWriteData(fn);
         bucket.grantPut(fn);
         bucket.grantRead(fn);
+        bucket.grantDelete(fn);
         const api = new HttpApi(this, "DbReaderApi", {
             apiName: "dbreader-api",
             corsPreflight: {

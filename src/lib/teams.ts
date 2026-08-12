@@ -63,3 +63,11 @@ export async function teamSetRole(teamId: string, email: string, role: string): 
 export async function teamPublish(teamId: string): Promise<void> {
   await invoke('team_publish', { teamId });
 }
+
+export async function teamUploadFile(path: string, teamId: string): Promise<string> {
+  return invoke<string>('team_upload_file', { path, teamId });
+}
+
+export async function teamDeleteFile(teamId: string, fileId: string): Promise<void> {
+  await invoke('team_delete_file', { teamId, fileId });
+}

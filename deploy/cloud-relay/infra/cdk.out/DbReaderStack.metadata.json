@@ -56,7 +56,7 @@
     {
       "type": "aws:cdk:creationStack",
       "data": [
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:93:9)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:94:9)",
         "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
         "...node internals..."
       ]
@@ -70,7 +70,7 @@
     {
       "type": "aws:cdk:creationStack",
       "data": [
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:94:9)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:95:9)",
         "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
         "...node internals..."
       ]
@@ -84,7 +84,7 @@
     {
       "type": "aws:cdk:creationStack",
       "data": [
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:95:9)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:96:9)",
         "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
         "...node internals..."
       ]
@@ -98,7 +98,7 @@
     {
       "type": "aws:cdk:creationStack",
       "data": [
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:96:9)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:97:9)",
         "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
         "...node internals..."
       ]
@@ -249,7 +249,7 @@
       "type": "aws:cdk:creationStack",
       "data": [
         "...new HttpApi2 in aws-cdk-lib...",
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:80:21)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:81:21)",
         "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
         "...node internals..."
       ]
@@ -293,7 +293,7 @@
       "type": "aws:cdk:creationStack",
       "data": [
         "...new HttpApi2 in aws-cdk-lib...",
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:80:21)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:81:21)",
         "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
         "...node internals..."
       ]
@@ -310,7 +310,7 @@
         ".../Users/jasonleong/DBReader/deploy/cloud-relay/infra/node_modules/aws-cdk-lib/aws-apigatewayv2/lib/http/api.js:1:96 in aws-cdk-lib...",
         "Array.map (:)",
         "...WrappedClass.<anonymous> in aws-cdk-lib...",
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:88:13)"
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:89:13)"
       ]
     }
   ],
@@ -325,7 +325,7 @@
         ".../Users/jasonleong/DBReader/deploy/cloud-relay/infra/node_modules/aws-cdk-lib/aws-apigatewayv2/lib/http/api.js:1:96 in aws-cdk-lib...",
         "Array.map (:)",
         "...WrappedClass.<anonymous> in aws-cdk-lib...",
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:88:13)",
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:89:13)",
         "file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/app.js:4 (:)",
         "...node internals..."
       ]
@@ -355,7 +355,7 @@
         ".../Users/jasonleong/DBReader/deploy/cloud-relay/infra/node_modules/aws-cdk-lib/aws-apigatewayv2/lib/http/api.js:1:96 in aws-cdk-lib...",
         "Array.map (:)",
         "...WrappedClass.<anonymous> in aws-cdk-lib...",
-        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:88:13)"
+        "new DbReaderStack (file:///Users/jasonleong/DBReader/deploy/cloud-relay/infra/lib/stack.js:89:13)"
       ]
     }
   ]

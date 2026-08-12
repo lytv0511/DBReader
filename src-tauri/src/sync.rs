@@ -1020,8 +1020,8 @@ impl CloudApi {
         ))
     }
 
-    /// Lists every team of the signed-in account plus the published files in
-    /// each team (the account's cloud inventory).
+    /// Lists the signed-in account's personal files plus every team and the
+    /// published files in each team (the account's cloud inventory).
     fn account_inventories(&self, token: &str) -> Result<serde_json::Value, String> {
         let me = self.get_json("/api/v1/me", token)?;
         let mut teams = Vec::new();
@@ -1039,6 +1039,8 @@ impl CloudApi {
         }
         let mut out = serde_json::json!({ "email": me.get("email"), "name": me.get("name") });
         out["teams"] = serde_json::Value::Array(teams);
+        let personal = self.get_json("/api/v1/files", token)?;
+        out["files"] = personal.get("files").cloned().unwrap_or_else(|| serde_json::json!([]));
         Ok(out)
     }
 
@@ -1240,6 +1242,17 @@ impl CloudApi {
             token,
         )?;
         Ok(file_id)
+    }
+
+    /// Permanently deletes a team file (admin only; enforced server-side). The
+    /// file and its cloud copy are removed for every member.
+    fn delete_file(&self, token: &str, team_id: &str, file_id: &str) -> Result<(), String> {
+        let _ = self.post_json(
+            "/api/v1/files/delete",
+            serde_json::json!({ "team_id": team_id, "file_id": file_id }),
+            token,
+        )?;
+        Ok(())
     }
 }
 
@@ -2092,6 +2105,28 @@ pub(crate) fn publish_db_to_team(
     let api = CloudApi::new(&cloud_endpoint())?;
     api.upload_file(&account.token, team_id, name, &bytes)?;
     Ok(())
+}
+
+/// Uploads an arbitrary local database file into a team (admin only, enforced
+/// server-side). Returns the new cloud file id.
+pub(crate) fn upload_file_to_team(
+    app: &AppHandle,
+    path: &str,
+    team_id: &str,
+    name: &str,
+) -> Result<String, String> {
+    let account = account_load(app).ok_or("Not signed in")?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Cannot read file: {}", e))?;
+    let api = CloudApi::new(&cloud_endpoint())?;
+    api.upload_file(&account.token, team_id, name, &bytes)
+}
+
+/// Permanently deletes a team file for everyone (admin only; enforced
+/// server-side).
+pub fn delete_team_file(app: &AppHandle, team_id: &str, file_id: &str) -> Result<(), String> {
+    let account = account_load(app).ok_or("Not signed in")?;
+    let api = CloudApi::new(&cloud_endpoint())?;
+    api.delete_file(&account.token, team_id, file_id)
 }
 
 /// Pokes the live sync loop so it picks up meta changes immediately.

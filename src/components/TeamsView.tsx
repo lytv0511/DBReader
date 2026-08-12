@@ -12,6 +12,7 @@ import {
   RefreshCw,
   RotateCw,
   Shield,
+  Trash2,
   UploadCloud,
   Users,
 } from 'lucide-react';
@@ -20,6 +21,7 @@ import {
   cloudOpen,
   teamCode,
   teamCreate,
+  teamDeleteFile,
   teamJoin,
   teamMembers,
   teamPublish,
@@ -54,6 +56,7 @@ export default function TeamsView({ t, onOpened, dbOpen }: TeamsViewProps) {
   const [teamName, setTeamName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const refresh = useCallback(async (preserveSelection = true) => {
     setError(null);
@@ -196,6 +199,27 @@ export default function TeamsView({ t, onOpened, dbOpen }: TeamsViewProps) {
     try {
       await teamPublish(selected.team_id);
       setNotice(t('team.published'));
+      refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteFile = async (fileId: string) => {
+    if (!selected) return;
+    if (confirmDelete !== fileId) {
+      setConfirmDelete(fileId);
+      return;
+    }
+    setConfirmDelete(null);
+    setError(null);
+    setNotice(null);
+    setBusy(`delete-${fileId}`);
+    try {
+      await teamDeleteFile(selected.team_id, fileId);
+      setNotice(t('team.deleted'));
       refresh();
     } catch (e) {
       setError(String(e));
@@ -406,6 +430,39 @@ export default function TeamsView({ t, onOpened, dbOpen }: TeamsViewProps) {
                         {opening ? <Loader2 size={11} className="animate-spin" /> : <CloudDownload size={11} />}
                         {t('team.open')}
                       </button>
+                      {isAdmin &&
+                        (confirmDelete === file.file_id ? (
+                          <div className="flex items-center gap-2 rounded-md border border-error/30 bg-error/10 px-2 py-1 shrink-0">
+                            <Trash2 size={11} className="text-error" />
+                            <span className="text-[10px] text-error whitespace-nowrap">{t('team.deleteConfirm')}</span>
+                            <button
+                              onClick={() => deleteFile(file.file_id)}
+                              disabled={!!busy}
+                              className="text-[10px] font-semibold text-error hover:underline"
+                            >
+                              {t('team.deleteYes')}
+                            </button>
+                            <button
+                              onClick={() => setConfirmDelete(null)}
+                              className="text-[10px] text-text-secondary hover:underline"
+                            >
+                              {t('team.deleteNo')}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => deleteFile(file.file_id)}
+                            disabled={!!busy}
+                            title={t('team.deleteFile')}
+                            className="w-7 h-7 grid place-items-center rounded-md bg-bg-tertiary hover:bg-bg-hover border border-border text-text-secondary hover:text-error hover:border-error/40 transition-colors shrink-0"
+                          >
+                            {busy === `delete-${file.file_id}` ? (
+                              <Loader2 size={11} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={11} />
+                            )}
+                          </button>
+                        ))}
                     </div>
                   );
                 })}

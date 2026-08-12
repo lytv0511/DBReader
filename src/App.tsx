@@ -716,7 +716,7 @@ useEffect(() => {
               )}
             </div>
           )}
-          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' ? 'hidden' : 'flex-1'} flex flex-col overflow-hidden`}>
+          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' || viewMode === 'teams' ? 'hidden' : 'flex-1'} flex flex-col overflow-hidden`}>
           {viewMode === 'dashboard' && (
             <Dashboard refreshKey={syncTick} onNavigate={(stockFilter) => {
               setGalleryStockFilter(stockFilter);

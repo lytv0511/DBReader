@@ -542,6 +542,25 @@ fn team_publish(team_id: String, app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Uploads a local database file into a team so it can be opened from the
+/// account cloud (admin only).
+#[tauri::command]
+fn team_upload_file(path: String, team_id: String, app: tauri::AppHandle) -> Result<String, String> {
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("inventory.db")
+        .to_string();
+    sync::upload_file_to_team(&app, &path, &team_id, &name)
+}
+
+/// Permanently deletes a team file from the cloud for every member
+/// (admin only).
+#[tauri::command]
+fn team_delete_file(team_id: String, file_id: String, app: tauri::AppHandle) -> Result<(), String> {
+    sync::delete_team_file(&app, &team_id, &file_id)
+}
+
 #[tauri::command]
 fn mobile_create_database(name: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -2711,6 +2730,8 @@ let mut builder = tauri::Builder::default()
             sync::team_set_role,
             cloud_open,
             team_publish,
+            team_upload_file,
+            team_delete_file,
         ])
         .on_window_event(|window, event| {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

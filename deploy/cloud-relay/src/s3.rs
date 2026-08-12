@@ -40,3 +40,21 @@ pub fn download_url(key: &str) -> String {
     let now = chrono::Utc::now();
     sig.presign("GET", &host, &path_for(key), &[], 900, &now)
 }
+
+/// Permanently removes an object from the bucket. Returns Ok when the object
+/// is gone (404 is treated as success). When no AWS credentials are configured
+/// (offline tests), the delete is skipped and treated as success.
+pub fn delete_object(key: &str) -> Result<(), String> {
+    let (bucket, sig) = config();
+    if sig.access_key.is_empty() {
+        return Ok(());
+    }
+    let host = host_for(&bucket, &sig.region);
+    let now = chrono::Utc::now();
+    let url = sig.presign("DELETE", &host, &path_for(key), &[], 900, &now);
+    match ureq::delete(&url).call() {
+        Ok(_) => Ok(()),
+        Err(ureq::Error::StatusCode(code)) if code == 404 => Ok(()),
+        Err(e) => Err(format!("S3 delete failed: {}", e)),
+    }
+}
