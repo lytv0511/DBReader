@@ -2112,6 +2112,99 @@ mod tests {
     }
 
     #[test]
+    fn test_conflicting_number_resolves_to_newest() {
+        use std::time::Duration;
+        let mem = MemTransport {
+            store: Arc::new(StdMutex::new(Vec::new())),
+            peers: Arc::new(StdMutex::new(Vec::new())),
+            schema: Arc::new(StdMutex::new(String::new())),
+        };
+        let a = setup_db();
+        let b = setup_db();
+        ensure_schema(&a).unwrap();
+        ensure_schema(&b).unwrap();
+        ensure_triggers(&a).unwrap();
+        ensure_triggers(&b).unwrap();
+        let sa = site_id_or_create(&a).unwrap();
+        let sb = site_id_or_create(&b).unwrap();
+        let ka = compute_schema_key(&a).unwrap();
+        meta_set(&a, "schema_key", &ka).unwrap();
+        meta_set(&b, "schema_key", &ka).unwrap();
+        let _ = (sa, sb);
+
+        a.execute("UPDATE products SET reorder_threshold = 42 WHERE id = 1", [])
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        b.execute("UPDATE products SET reorder_threshold = 99 WHERE id = 1", [])
+            .unwrap();
+        sync_all(&mem, &[&a, &b], "dbtest");
+
+        let newest: f64 = b
+            .query_row(
+                "SELECT json_extract(row_json, '$.reorder_threshold') FROM _dbsync_log \
+                 WHERE table_name = 'products' AND op = 'upsert' \
+                   AND json_extract(row_json, '$.reorder_threshold') IS NOT NULL \
+                 ORDER BY hlc DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let va: f64 = a
+            .query_row("SELECT reorder_threshold FROM products WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        let vb: f64 = b
+            .query_row("SELECT reorder_threshold FROM products WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(va, newest, "device A must keep the newest edit");
+        assert_eq!(vb, newest, "device B must keep the newest edit");
+    }
+
+    #[test]
+    fn test_equal_hlc_conflict_converges_deterministically() {
+        let mem = MemTransport {
+            store: Arc::new(StdMutex::new(Vec::new())),
+            peers: Arc::new(StdMutex::new(Vec::new())),
+            schema: Arc::new(StdMutex::new(String::new())),
+        };
+        let a = setup_db();
+        let b = setup_db();
+        ensure_schema(&a).unwrap();
+        ensure_schema(&b).unwrap();
+        ensure_triggers(&a).unwrap();
+        ensure_triggers(&b).unwrap();
+        let sa = site_id_or_create(&a).unwrap();
+        let sb = site_id_or_create(&b).unwrap();
+        let ka = compute_schema_key(&a).unwrap();
+        meta_set(&a, "schema_key", &ka).unwrap();
+        meta_set(&b, "schema_key", &ka).unwrap();
+
+        let hlc = "20991231235959.999";
+        let mk = |site: &str, seq: i64, threshold: i64| SyncOp {
+            site: site.into(),
+            seq,
+            hlc: hlc.into(),
+            table: "products".into(),
+            pk: json!({"id": 1}),
+            row: json!({"reorder_threshold": threshold}).into(),
+            op: "upsert".into(),
+            pk_json_raw: "{\"id\":1}".into(),
+        };
+        mem.push("dbtest", "site-a", &ka, &[mk("site-a", 1, 42)]).unwrap();
+        mem.push("dbtest", "site-b", &ka, &[mk("site-b", 1, 99)]).unwrap();
+
+        let va = pull_loop(&a, &sa, &mem);
+        let vb = pull_loop(&b, &sb, &mem);
+        assert_eq!(va, vb);
+        let ra: f64 = a
+            .query_row("SELECT reorder_threshold FROM products WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        let rb: f64 = b
+            .query_row("SELECT reorder_threshold FROM products WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ra, rb, "equal-HLC edits must converge to one value");
+    }
+
+    #[test]
     fn test_field_merge_keeps_both_edits() {
         let mem = MemTransport {
             store: Arc::new(StdMutex::new(Vec::new())),
