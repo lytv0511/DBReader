@@ -19,6 +19,7 @@ export interface CloudTeam {
 export interface CloudInventories {
   email: string;
   name: string;
+  files: CloudFile[];
   teams: CloudTeam[];
 }
 

@@ -30,6 +30,7 @@ function formatDate(ts: number): string {
 
 export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpenModalProps) {
   const [teams, setTeams] = useState<CloudTeam[] | null>(null);
+  const [myFiles, setMyFiles] = useState<CloudFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -41,9 +42,11 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
     try {
       const inv = await accountInventories();
       setTeams(inv.teams);
+      setMyFiles(inv.files ?? []);
     } catch (e) {
       setError(String(e));
       setTeams([]);
+      setMyFiles([]);
     } finally {
       setLoading(false);
     }
@@ -52,6 +55,7 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
   useEffect(() => {
     if (open) {
       setTeams(null);
+      setMyFiles([]);
       setBusy(null);
       setConfirmDelete(null);
       refresh();
@@ -72,27 +76,29 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
     }
   };
 
-  const doUpload = async (team: CloudTeam) => {
-    if (busy) return;
-    setError(null);
-    let path: string | null = null;
+  const pickUploadPath = async (): Promise<string | null> => {
     if (isMobilePlatform()) {
       try {
-        path = await mobileImportDatabase('dbreader_upload.db');
+        return await mobileImportDatabase('dbreader_upload.db');
       } catch {
-        return;
+        return null;
       }
-    } else {
-      const selected = await dialogOpen({
-        multiple: false,
-        filters: [{ name: 'SQLite Database', extensions: ['db', 'sqlite', 'sqlite3', 'db3'] }],
-      });
-      if (selected && !Array.isArray(selected)) path = selected;
     }
+    const selected = await dialogOpen({
+      multiple: false,
+      filters: [{ name: 'SQLite Database', extensions: ['db', 'sqlite', 'sqlite3', 'db3'] }],
+    });
+    return selected && !Array.isArray(selected) ? selected : null;
+  };
+
+  const doUpload = async (teamId: string) => {
+    if (busy) return;
+    setError(null);
+    const path = await pickUploadPath();
     if (!path) return;
-    setBusy(`upload-${team.team_id}`);
+    setBusy(`upload-${teamId}`);
     try {
-      await teamUploadFile(path, team.team_id);
+      await teamUploadFile(path, teamId);
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -101,8 +107,8 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
     }
   };
 
-  const doDelete = async (team: CloudTeam, file: CloudFile) => {
-    const key = `${team.team_id}/${file.file_id}`;
+  const doDelete = async (teamId: string, file: CloudFile) => {
+    const key = `${teamId}/${file.file_id}`;
     if (confirmDelete !== key) {
       setConfirmDelete(key);
       return;
@@ -111,7 +117,7 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
     setError(null);
     setBusy(`delete-${key}`);
     try {
-      await teamDeleteFile(team.team_id, file.file_id);
+      await teamDeleteFile(teamId, file.file_id);
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -178,37 +184,36 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
               <Loader2 size={14} className="animate-spin" />
               {t('openFrom.opening')}
             </div>
-          ) : teams && teams.length === 0 ? (
+          ) : teams && teams.length === 0 && myFiles.length === 0 ? (
             <div className="py-10 text-center text-xs text-text-secondary">{t('openFrom.noCloud')}</div>
           ) : (
-            teams?.map((team) => (
-              <div key={team.team_id} className="rounded-xl border border-border bg-bg-tertiary/50 overflow-hidden">
+            <>
+              <div className="rounded-xl border border-border bg-bg-tertiary/50 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-2 bg-bg-tertiary border-b border-border">
-                  <Users size={13} className="text-text-secondary" />
-                  <span className="flex-1 text-sm font-semibold text-text-primary truncate">{team.name}</span>
-                  {roleBadge(team.role)}
-                  {team.role === 'owner' && (
-                    <button
-                      onClick={() => doUpload(team)}
-                      disabled={!!busy}
-                      title={t('team.upload')}
-                      className="flex items-center gap-1 px-2.5 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-md text-[11px] font-semibold text-accent transition-colors disabled:opacity-50 shrink-0"
-                    >
-                      {busy === `upload-${team.team_id}` ? (
-                        <Loader2 size={11} className="animate-spin" />
-                      ) : (
-                        <UploadCloud size={11} />
-                      )}
-                      {t('team.upload')}
-                    </button>
-                  )}
+                  <Database size={13} className="text-text-secondary" />
+                  <span className="flex-1 text-sm font-semibold text-text-primary truncate">
+                    {t('openFrom.myFiles')}
+                  </span>
+                  <button
+                    onClick={() => doUpload('')}
+                    disabled={!!busy}
+                    title={t('team.upload')}
+                    className="flex items-center gap-1 px-2.5 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-md text-[11px] font-semibold text-accent transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    {busy === 'upload-' ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <UploadCloud size={11} />
+                    )}
+                    {t('team.upload')}
+                  </button>
                 </div>
-                {team.files.length === 0 ? (
+                {myFiles.length === 0 ? (
                   <div className="px-3 py-3 text-xs text-text-secondary">{t('openFrom.emptyTeam')}</div>
                 ) : (
                   <div className="divide-y divide-border">
-                    {team.files.map((file) => {
-                      const key = `${team.team_id}/${file.file_id}`;
+                    {myFiles.map((file) => {
+                      const key = `/${file.file_id}`;
                       const opening = busy === key;
                       return (
                         <div key={file.file_id} className="flex items-center gap-3 px-3 py-2.5">
@@ -220,53 +225,139 @@ export default function CloudOpenModal({ open, t, onClose, onOpened }: CloudOpen
                             </div>
                           </div>
                           <button
-                            onClick={() => doOpen(team.team_id, file)}
+                            onClick={() => doOpen('', file)}
                             disabled={!!busy}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:opacity-90 disabled:opacity-50 rounded-md text-xs font-semibold text-white transition-opacity shrink-0"
                           >
                             {opening ? <Loader2 size={11} className="animate-spin" /> : <CloudDownload size={11} />}
                             {t('team.open')}
                           </button>
-                          {team.role === 'owner' &&
-                            (confirmDelete === key ? (
-                              <div className="flex items-center gap-2 rounded-md border border-error/30 bg-error/10 px-2 py-1 shrink-0">
-                                <Trash2 size={11} className="text-error" />
-                                <span className="text-[10px] text-error whitespace-nowrap">{t('team.deleteConfirm')}</span>
-                                <button
-                                  onClick={() => doDelete(team, file)}
-                                  disabled={!!busy}
-                                  className="text-[10px] font-semibold text-error hover:underline"
-                                >
-                                  {t('team.deleteYes')}
-                                </button>
-                                <button
-                                  onClick={() => setConfirmDelete(null)}
-                                  className="text-[10px] text-text-secondary hover:underline"
-                                >
-                                  {t('team.deleteNo')}
-                                </button>
-                              </div>
-                            ) : (
+                          {confirmDelete === key ? (
+                            <div className="flex items-center gap-2 rounded-md border border-error/30 bg-error/10 px-2 py-1 shrink-0">
+                              <Trash2 size={11} className="text-error" />
+                              <span className="text-[10px] text-error whitespace-nowrap">{t('team.deleteConfirm')}</span>
                               <button
-                                onClick={() => doDelete(team, file)}
+                                onClick={() => doDelete('', file)}
                                 disabled={!!busy}
-                                title={t('team.deleteFile')}
-                                className="w-7 h-7 grid place-items-center rounded-md bg-bg-tertiary hover:bg-bg-hover border border-border text-text-secondary hover:text-error hover:border-error/40 transition-colors shrink-0"
+                                className="text-[10px] font-semibold text-error hover:underline"
                               >
-                                {busy === `delete-${key}` ? (
-                                  <Loader2 size={11} className="animate-spin" />
-                                ) : (
-                                  <Trash2 size={11} />
-                                )}
+                                {t('team.deleteYes')}
                               </button>
-                            ))}
+                              <button
+                                onClick={() => setConfirmDelete(null)}
+                                className="text-[10px] text-text-secondary hover:underline"
+                              >
+                                {t('team.deleteNo')}
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => doDelete('', file)}
+                              disabled={!!busy}
+                              title={t('team.deleteFile')}
+                              className="w-7 h-7 grid place-items-center rounded-md bg-bg-tertiary hover:bg-bg-hover border border-border text-text-secondary hover:text-error hover:border-error/40 transition-colors shrink-0"
+                            >
+                              {busy === `delete-${key}` ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : (
+                                <Trash2 size={11} />
+                              )}
+                            </button>
+                          )}
                         </div>
                       );
                     })}
                   </div>
                 )}
               </div>
-            ))
+
+              {teams?.map((team) => (
+                <div key={team.team_id} className="rounded-xl border border-border bg-bg-tertiary/50 overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-bg-tertiary border-b border-border">
+                    <Users size={13} className="text-text-secondary" />
+                    <span className="flex-1 text-sm font-semibold text-text-primary truncate">{team.name}</span>
+                    {roleBadge(team.role)}
+                    <button
+                      onClick={() => doUpload(team.team_id)}
+                      disabled={!!busy}
+                      title={t('team.upload')}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-md text-[11px] font-semibold text-accent transition-colors disabled:opacity-50 shrink-0"
+                    >
+                      {busy === `upload-${team.team_id}` ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : (
+                        <UploadCloud size={11} />
+                      )}
+                      {t('team.upload')}
+                    </button>
+                  </div>
+                  {team.files.length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-text-secondary">{t('openFrom.emptyTeam')}</div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {team.files.map((file) => {
+                        const key = `${team.team_id}/${file.file_id}`;
+                        const opening = busy === key;
+                        return (
+                          <div key={file.file_id} className="flex items-center gap-3 px-3 py-2.5">
+                            <Database size={14} className="text-text-secondary shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-text-primary truncate">{file.name}</div>
+                              <div className="text-[11px] text-text-secondary">
+                                {formatSize(file.size, t)} · {formatDate(file.created_ts)}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => doOpen(team.team_id, file)}
+                              disabled={!!busy}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:opacity-90 disabled:opacity-50 rounded-md text-xs font-semibold text-white transition-opacity shrink-0"
+                            >
+                              {opening ? <Loader2 size={11} className="animate-spin" /> : <CloudDownload size={11} />}
+                              {t('team.open')}
+                            </button>
+                            {team.role === 'owner' &&
+                              (confirmDelete === key ? (
+                                <div className="flex items-center gap-2 rounded-md border border-error/30 bg-error/10 px-2 py-1 shrink-0">
+                                  <Trash2 size={11} className="text-error" />
+                                  <span className="text-[10px] text-error whitespace-nowrap">
+                                    {t('team.deleteConfirm')}
+                                  </span>
+                                  <button
+                                    onClick={() => doDelete(team.team_id, file)}
+                                    disabled={!!busy}
+                                    className="text-[10px] font-semibold text-error hover:underline"
+                                  >
+                                    {t('team.deleteYes')}
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDelete(null)}
+                                    className="text-[10px] text-text-secondary hover:underline"
+                                  >
+                                    {t('team.deleteNo')}
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => doDelete(team.team_id, file)}
+                                  disabled={!!busy}
+                                  title={t('team.deleteFile')}
+                                  className="w-7 h-7 grid place-items-center rounded-md bg-bg-tertiary hover:bg-bg-hover border border-border text-text-secondary hover:text-error hover:border-error/40 transition-colors shrink-0"
+                                >
+                                  {busy === `delete-${key}` ? (
+                                    <Loader2 size={11} className="animate-spin" />
+                                  ) : (
+                                    <Trash2 size={11} />
+                                  )}
+                                </button>
+                              ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
           )}
         </div>
 
