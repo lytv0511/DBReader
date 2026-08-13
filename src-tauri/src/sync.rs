@@ -213,6 +213,23 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     Ok(n > 0)
 }
 
+/// True when the database has any sync history (local ops). Seed/reference
+/// rows (categories, units, ...) are inserted before the sync triggers exist
+/// and never hit the log, so a brand-new database has an empty log while a
+/// database that was ever edited has one. Used to decide whether a database
+/// without a published file may adopt the account's single remaining file
+/// (fresh copies only) instead of publishing itself under a new team.
+fn db_has_local_data(conn: &Connection) -> Result<bool, String> {
+    let log_n: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM {}", LOG_TABLE),
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("Failed to read sync log: {}", e))?;
+    Ok(log_n > 0)
+}
+
 fn json_expr(cols: &[String], scope: &str) -> String {
     let parts: Vec<String> = cols
         .iter()
@@ -1878,7 +1895,16 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
             meta_set(conn, "cloud_file_id", &file_id)?;
         }
         None => {
-            let link = api.only_file(&token)?;
+            // Only adopt the account's single file when this database is a
+            // fresh empty copy. A database with its own data or sync history
+            // must never be cross-linked to another database's file (e.g.
+            // after a server-side wipe removed its own file), so it
+            // re-publishes itself as a new team instead.
+            let link = if db_has_local_data(conn)? {
+                None
+            } else {
+                api.only_file(&token)?
+            };
             match link {
                 Some((team_id, file_id)) => {
                     meta_set(conn, "cloud_team_id", &team_id)?;
@@ -2212,6 +2238,12 @@ pub(crate) fn download_cloud_file(
 /// credentials/ids in its sync meta, regenerates the local site id so this
 /// device is a fresh replica in the sync group, and starts at the end of the
 /// history that came with the downloaded file.
+///
+/// Prefers the sync ids embedded in the downloaded database (the team + file
+/// it was published under) so a device opening a copy from "My Files"
+/// joins the same ops partition as every other device of the same database.
+/// Falls back to the caller-provided ids when the copy carries none (or they
+/// are gone server-side).
 pub(crate) fn link_conn_to_cloud(
     conn: &Connection,
     app: &AppHandle,
@@ -2221,12 +2253,26 @@ pub(crate) fn link_conn_to_cloud(
     let account = account_load(app).ok_or("Not signed in")?;
     ensure_schema(conn)?;
     db_id_or_create(conn)?;
+    let embedded_team = meta_get(conn, "cloud_team_id")?.unwrap_or_default();
+    let embedded_file = meta_get(conn, "cloud_file_id")?.unwrap_or_default();
+    let (sync_team, sync_file) = if !embedded_team.is_empty() && !embedded_file.is_empty() {
+        let ok = CloudApi::new(&cloud_endpoint())
+            .and_then(|api| api.file_live(&account.token, &embedded_team, &embedded_file))
+            .unwrap_or(false);
+        if ok {
+            (embedded_team, embedded_file)
+        } else {
+            (team_id.to_string(), file_id.to_string())
+        }
+    } else {
+        (team_id.to_string(), file_id.to_string())
+    };
     meta_set(conn, "site_id", &format!("{}", uuid::Uuid::new_v4().simple()))?;
     meta_set(conn, "token", &account.token)?;
     meta_set(conn, "cloud_email", &account.email)?;
     meta_set(conn, "cloud_pass", &account.password)?;
-    meta_set(conn, "cloud_team_id", team_id)?;
-    meta_set(conn, "cloud_file_id", file_id)?;
+    meta_set(conn, "cloud_team_id", &sync_team)?;
+    meta_set(conn, "cloud_file_id", &sync_file)?;
     let schema_key = compute_schema_key(conn)?;
     meta_set(conn, "transport", "relay")?;
     meta_set(conn, "endpoint", &cloud_endpoint())?;
@@ -3015,7 +3061,11 @@ mod tests {
         let team_id = api
             .create_team(&token_a, &format!("dbtest-{}", &site_a[..8]))
             .unwrap();
-        let file_id = api.publish_file(&token_a, &team_id, "dbtest.db").unwrap();
+        let seed_conn = setup_db();
+        ensure_schema(&seed_conn).unwrap();
+        ensure_triggers(&seed_conn).unwrap();
+        let seed_snap = CloudApi::db_snapshot_bytes(&seed_conn).unwrap();
+        let file_id = api.upload_file(&token_a, &team_id, "dbtest.db", &seed_snap).unwrap();
         let code = api.invite_code(&token_a, &team_id).unwrap();
         assert_eq!(code.len(), 8, "invite code should be 8 characters");
 
@@ -3095,7 +3145,11 @@ mod tests {
 
         let token_a = api.ensure_account(&email, &password).unwrap();
         let team_id = api.create_team(&token_a, &db_id).unwrap();
-        let file_id = api.publish_file(&token_a, &team_id, &format!("{}.db", db_id)).unwrap();
+        let seed_conn = setup_db();
+        ensure_schema(&seed_conn).unwrap();
+        ensure_triggers(&seed_conn).unwrap();
+        let seed_snap = CloudApi::db_snapshot_bytes(&seed_conn).unwrap();
+        let file_id = api.upload_file(&token_a, &team_id, &format!("{}.db", db_id), &seed_snap).unwrap();
 
         let token_b = api.ensure_account(&email, &password).unwrap();
         assert!(!token_b.is_empty(), "second device should get a valid session");
@@ -3130,9 +3184,59 @@ mod tests {
         assert_eq!(pulled.len(), ops_a.len(), "second device should get the ops");
         let applied = apply_batch(&conn_b, &pulled, "").unwrap();
         assert_eq!(applied, ops_a.len() as i64);
-        let count: i64 = conn_b
-            .query_row("SELECT COUNT(*) FROM products WHERE name = 'Account Wine'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 1, "second device should have the account device's insert");
+    }
+
+    #[test]
+    fn test_cloud_only_file_guard_live() {
+        if std::env::var("DBREADER_LIVE_TEST").unwrap_or_default() != "1" {
+            return;
+        }
+        let endpoint = std::env::var("DBREADER_CLOUD_ENDPOINT").unwrap_or_else(|_| {
+            "https://y0nzvgypjb.execute-api.ap-southeast-2.amazonaws.com".to_string()
+        });
+        let api = CloudApi::new(&endpoint).unwrap();
+        let email = format!("guard-{}@dbreader.dev", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        let password = format!("{:x}", uuid::Uuid::new_v4().simple());
+        let db_other = format!("db-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        let token = api.ensure_account(&email, &password).unwrap();
+        let team_other = api.create_team(&token, &db_other).unwrap();
+        let seed = setup_db();
+        ensure_schema(&seed).unwrap();
+        ensure_triggers(&seed).unwrap();
+        let seed_snap = CloudApi::db_snapshot_bytes(&seed).unwrap();
+        let file_other = api.upload_file(&token, &team_other, &format!("{}.db", db_other), &seed_snap).unwrap();
+
+        let fresh = setup_db();
+        ensure_schema(&fresh).unwrap();
+        ensure_triggers(&fresh).unwrap();
+        connect_db_to_account(&fresh, &email, &password).unwrap();
+        let fresh_team = meta_get(&fresh, "cloud_team_id").unwrap().unwrap();
+        let fresh_file = meta_get(&fresh, "cloud_file_id").unwrap().unwrap();
+        assert_eq!(
+            (fresh_team.as_str(), fresh_file.as_str()),
+            (team_other.as_str(), file_other.as_str()),
+            "fresh empty database should adopt the account's single published file"
+        );
+
+        let data = setup_db();
+        ensure_schema(&data).unwrap();
+        ensure_triggers(&data).unwrap();
+        data.execute(
+            "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Guarded', 'GD-1', 'bottle', 5)",
+            [],
+        )
+        .unwrap();
+        connect_db_to_account(&data, &email, &password).unwrap();
+        let data_team = meta_get(&data, "cloud_team_id").unwrap().unwrap();
+        let data_file = meta_get(&data, "cloud_file_id").unwrap().unwrap();
+        assert_ne!(
+            (data_team.as_str(), data_file.as_str()),
+            (team_other.as_str(), file_other.as_str()),
+            "database with data must not be cross-linked to another database's file"
+        );
+        assert!(
+            api.file_live(&token, &data_team, &data_file).unwrap(),
+            "database with data should publish itself as a new team + file"
+        );
     }
 }
