@@ -1147,10 +1147,12 @@ impl CloudApi {
             .filter_map(|f| {
                 let id = f.get("file_id").and_then(|x| x.as_str())?.to_string();
                 let ts = f.get("created_ts").and_then(|x| x.as_i64()).unwrap_or(0);
-                Some((id, ts))
+                let size = f.get("size").and_then(|x| x.as_i64()).unwrap_or(0);
+                Some((id, ts, size))
             })
-            .max_by_key(|(_, ts)| *ts)
-            .map(|(id, _)| id)
+            .filter(|(_, _, size)| *size > 1)
+            .max_by_key(|(_, ts, _)| *ts)
+            .map(|(id, _, _)| id)
             .ok_or_else(|| {
                 "No database file in this team yet — publish it from the owning device first".into()
             })
@@ -1184,6 +1186,9 @@ impl CloudApi {
                 };
                 let name = f.get("name").and_then(|x| x.as_str()).unwrap_or("");
                 let ts = f.get("created_ts").and_then(|x| x.as_i64()).unwrap_or(0);
+                if f.get("size").and_then(|x| x.as_i64()).unwrap_or(0) <= 1 {
+                    continue;
+                }
                 if name == target && best.as_ref().map_or(true, |(_, _, b)| ts > *b) {
                     best = Some((team_id.to_string(), file_id.to_string(), ts));
                 }
@@ -1218,6 +1223,9 @@ impl CloudApi {
                 let Some(file_id) = f.get("file_id").and_then(|x| x.as_str()) else {
                     continue;
                 };
+                if f.get("size").and_then(|x| x.as_i64()).unwrap_or(0) <= 1 {
+                    continue;
+                }
                 if found.is_some() {
                     return Ok(None);
                 }
@@ -1245,6 +1253,21 @@ impl CloudApi {
     /// Publishes a new (empty) database file and returns its file_id.
     fn publish_file(&self, token: &str, team_id: &str, name: &str) -> Result<String, String> {
         self.upload_file(token, team_id, name, b"x")
+    }
+
+    /// True when the file exists in its team with more than one byte of content.
+    /// Old clients published 1-byte placeholders, so the finder helpers skip
+    /// anything this small only through `file_live` checks.
+    fn file_live(&self, token: &str, team_id: &str, file_id: &str) -> Result<bool, String> {
+        let v = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
+        let files = v
+            .get("files")
+            .and_then(|f| f.as_array())
+            .ok_or_else(|| "files response missing list".to_string())?;
+        Ok(files.iter().any(|f| {
+            f.get("file_id").and_then(|x| x.as_str()) == Some(file_id)
+                && f.get("size").and_then(|x| x.as_i64()).unwrap_or(0) > 1
+        }))
     }
 
     /// Reads a consistent copy of the open database so auto-published files
@@ -1334,7 +1357,21 @@ fn ensure_cloud_session(conn: &Connection, endpoint: &str, db_id: &str, site_id:
         let snap = CloudApi::db_snapshot_bytes(conn)?;
         CloudApi::upload_file(&api, &session_token, &team_id, &format!("{}.db", db_id), &snap)?
     } else {
-        file_id
+        match api.file_live(&session_token, &team_id, &file_id) {
+            Ok(true) => file_id,
+            Ok(false) => {
+                let _ = api.delete_file(&session_token, &team_id, &file_id);
+                let snap = CloudApi::db_snapshot_bytes(conn)?;
+                CloudApi::upload_file(&api, &session_token, &team_id, &format!("{}.db", db_id), &snap)?
+            }
+            Err(_) => {
+                let snap = CloudApi::db_snapshot_bytes(conn)?;
+                let fresh_team = api.create_team(&session_token, db_id)?;
+                let fresh_file = CloudApi::upload_file(&api, &session_token, &fresh_team, &format!("{}.db", db_id), &snap)?;
+                meta_set(conn, "cloud_team_id", &fresh_team)?;
+                fresh_file
+            }
+        }
     };
     meta_set(conn, "token", &session_token)?;
     meta_set(conn, "cloud_team_id", &team_id)?;
@@ -1807,19 +1844,34 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
     let has_link = meta_get(conn, "cloud_team_id")?.map(|t| !t.is_empty()).unwrap_or(false)
         && meta_get(conn, "cloud_file_id")?.map(|f| !f.is_empty()).unwrap_or(false)
         && meta_get(conn, "token")?.map(|t| !t.is_empty()).unwrap_or(false);
-    if has_link && meta_get(conn, "endpoint")?.map(|e| e == endpoint).unwrap_or(false) {
-        let api = CloudApi::new(&endpoint)?;
-        let (token, _, _) = api.login_identifier(email, password)?;
-        meta_set(conn, "cloud_email", email)?;
-        meta_set(conn, "cloud_pass", password)?;
-        meta_set(conn, "token", &token)?;
-        return Ok(());
-    }
     let api = CloudApi::new(&endpoint)?;
     let (token, _, _) = api.login_identifier(email, password)?;
     meta_set(conn, "cloud_email", email)?;
     meta_set(conn, "cloud_pass", password)?;
     meta_set(conn, "token", &token)?;
+    if has_link && meta_get(conn, "endpoint")?.map(|e| e == endpoint).unwrap_or(false) {
+        let team_id = meta_get(conn, "cloud_team_id")?.unwrap_or_default();
+        let file_id = meta_get(conn, "cloud_file_id")?.unwrap_or_default();
+        let ok = match api.file_live(&token, &team_id, &file_id) {
+            Ok(live) => live,
+            Err(_) => false,
+        };
+        if ok {
+            return Ok(());
+        }
+        let _ = api.delete_file(&token, &team_id, &file_id);
+        let snap = CloudApi::db_snapshot_bytes(conn)?;
+        match CloudApi::upload_file(&api, &token, &team_id, &format!("{}.db", db_id), &snap) {
+            Ok(new_file) => {
+                meta_set(conn, "cloud_file_id", &new_file)?;
+                return Ok(());
+            }
+            Err(_) => {
+                meta_set(conn, "cloud_team_id", "")?;
+                meta_set(conn, "cloud_file_id", "")?;
+            }
+        }
+    }
     match api.find_file_for_db(&token, &db_id)? {
         Some((team_id, file_id)) => {
             meta_set(conn, "cloud_team_id", &team_id)?;
