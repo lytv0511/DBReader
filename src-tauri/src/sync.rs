@@ -689,7 +689,7 @@ fn user_agent() -> &'static ureq::Agent {
 impl Transport for RelayTransport {
     fn push(
         &self,
-        db_id: &str,
+        _db_id: &str,
         site_id: &str,
         schema_key: &str,
         ops: &[SyncOp],
@@ -700,12 +700,11 @@ impl Transport for RelayTransport {
             "schema": schema_key,
             "ops": ops,
         });
-        if !self.team_id.is_empty() {
-            body["team_id"] = self.team_id.clone().into();
-            body["file_id"] = self.file_id.clone().into();
-        } else {
-            body["db"] = db_id.into();
-        }
+        // The relay resolves an empty team id to the account's personal
+        // space, so team_id/file_id are always sent (never a db= fallback,
+        // which the relay does not route).
+        body["team_id"] = self.team_id.clone().into();
+        body["file_id"] = self.file_id.clone().into();
         let mut req = user_agent().post(&url);
         if !self.token.is_empty() {
             req = req.header("Authorization", format!("Bearer {}", self.token));
@@ -730,22 +729,18 @@ impl Transport for RelayTransport {
         Ok(())
     }
 
-    fn pull(&self, db_id: &str, after: &str, wait_ms: u32) -> Result<(Vec<SyncOp>, Vec<String>, String), String> {
+    fn pull(&self, _db_id: &str, after: &str, wait_ms: u32) -> Result<(Vec<SyncOp>, Vec<String>, String), String> {
         let (h, site, seq) = cursor_after(after);
         // Keep the server-side wait under the client's 15s global timeout.
         let wait_ms = wait_ms.min(12_000);
         let base = self.endpoint.trim_end_matches('/');
-        let url = if !self.team_id.is_empty() {
-            format!(
-                "{}/api/v1/pull?team_id={}&file_id={}&site={}&h={}&seq={}&wait={}",
-                base, self.team_id, self.file_id, site, h, seq, wait_ms
-            )
-        } else {
-            format!(
-                "{}/api/v1/pull?db={}&h={}&site={}&seq={}&wait={}",
-                base, db_id, h, site, seq, wait_ms
-            )
-        };
+        // The relay resolves an empty team id to the account's personal
+        // space, so team_id/file_id are always sent (never a db= fallback,
+        // which the relay does not route).
+        let url = format!(
+            "{}/api/v1/pull?team_id={}&file_id={}&site={}&h={}&seq={}&wait={}",
+            base, self.team_id, self.file_id, site, h, seq, wait_ms
+        );
         let mut req = user_agent().get(&url);
         if !self.token.is_empty() {
             req = req.header("Authorization", format!("Bearer {}", self.token));
@@ -2894,7 +2889,7 @@ mod tests {
         meta_set(&conn, "schema_key", &schema).unwrap();
         assert!(!schema.is_empty());
 
-        let transport = RelayTransport { endpoint: endpoint.clone(), token: "secret".into(), team_id: String::new(), file_id: String::new() };
+        let transport = RelayTransport { endpoint: endpoint.clone(), token: "secret".into(), team_id: String::new(), file_id: "dbtest".into() };
         transport.push("dbtest", &site, &schema, &ops).unwrap();
 
         let (pulled, peers, schema_out) = transport.pull("dbtest", "", 0).unwrap();
@@ -2915,7 +2910,7 @@ mod tests {
             assert_eq!(e.seq, a.seq);
         }
 
-        let bad = RelayTransport { endpoint: endpoint.clone(), token: "nope".into(), team_id: String::new(), file_id: String::new() };
+        let bad = RelayTransport { endpoint: endpoint.clone(), token: "nope".into(), team_id: String::new(), file_id: "dbtest".into() };
         assert!(bad.push("dbtest", &site, &schema, &ops).is_err());
         assert!(bad.pull("dbtest", "", 0).is_err());
 
@@ -2935,8 +2930,8 @@ mod tests {
         });
         let endpoint = format!("http://127.0.0.1:{port}");
 
-        let transport = RelayTransport { endpoint: endpoint.clone(), token: String::new(), team_id: String::new(), file_id: String::new() };
-        let transport2 = RelayTransport { endpoint, token: String::new(), team_id: String::new(), file_id: String::new() };
+        let transport = RelayTransport { endpoint: endpoint.clone(), token: String::new(), team_id: String::new(), file_id: "dbtest".into() };
+        let transport2 = RelayTransport { endpoint, token: String::new(), team_id: String::new(), file_id: "dbtest".into() };
         let conn = setup_db();
         ensure_schema(&conn).unwrap();
         ensure_triggers(&conn).unwrap();

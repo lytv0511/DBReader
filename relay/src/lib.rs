@@ -17,7 +17,10 @@ struct Notify {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PushBody {
+    #[serde(default)]
     db: String,
+    #[serde(default)]
+    file_id: String,
     #[serde(default)]
     site: String,
     #[serde(default)]
@@ -112,7 +115,10 @@ impl Relay {
     fn handle_push(&self, body: &str) -> Result<(), HttpReply> {
         let push: PushBody = serde_json::from_str(body)
             .map_err(|e| HttpReply { status: 400, body: format!("{{\"error\":\"{e}\"}}") })?;
-        if push.db.trim().is_empty() {
+        // The deployed relay identifies files by file_id; the in-process
+        // copy keeps that by partitioning on file_id when present.
+        let db = if push.file_id.is_empty() { push.db } else { push.file_id };
+        if db.trim().is_empty() {
             return Err(HttpReply { status: 400, body: "{\"error\":\"db is required\"}".into() });
         }
         if push.ops.is_empty() {
@@ -122,10 +128,10 @@ impl Relay {
             status: 500,
             body: "{\"error\":\"lock poisoned\"}".into(),
         })?;
-        let dir = self.db_dir(&push.db);
+        let dir = self.db_dir(&db);
         fs::create_dir_all(dir.join("site"))
             .map_err(|e| HttpReply { status: 500, body: format!("{{\"error\":\"{e}\"}}") })?;
-        let mut sites = self.read_sites(&push.db);
+        let mut sites = self.read_sites(&db);
         if !push.site.is_empty() && !sites.contains(&push.site) {
             sites.push(push.site.clone());
             self.write_json(&dir.join("sites.json"), &sites)
@@ -134,7 +140,7 @@ impl Relay {
         if !push.schema.is_empty() {
             let _ = atomic_write(&dir.join("schema.json"), &push.schema);
         }
-        let file = self.site_ops_file(&push.db, &push.site);
+        let file = self.site_ops_file(&db, &push.site);
         let max_seen = self
             .max_seq(&file)
             .map_err(|e| HttpReply { status: 500, body: format!("{{\"error\":\"{e}\"}}") })?;
@@ -158,7 +164,7 @@ impl Relay {
             body: format!("{{\"error\":\"{e}\"}}"),
         })?;
         drop(_guard);
-        self.notify_db(&push.db);
+        self.notify_db(&db);
         Ok(())
     }
 
@@ -186,7 +192,10 @@ impl Relay {
 
     fn handle_pull(&self, url: &str) -> Result<HttpReply, HttpReply> {
         let params = parse_query(url);
-        let db = params.get("db").cloned().unwrap_or_default();
+        let db_param = params.get("db").cloned().unwrap_or_default();
+        let file_id = params.get("file_id").cloned().unwrap_or_default();
+        // Mirror the deployed relay: file_id partitions the ops when present.
+        let db = if file_id.is_empty() { db_param } else { file_id };
         let h = params.get("h").cloned().unwrap_or_default();
         let site = params.get("site").cloned().unwrap_or_default();
         let seq = params.get("seq").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
