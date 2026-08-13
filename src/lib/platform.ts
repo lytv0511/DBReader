@@ -18,6 +18,10 @@ export function isMobile(): boolean {
   return detectFormFactor() !== 'desktop';
 }
 
+export function isTablet(): boolean {
+  return detectFormFactor() === 'tablet';
+}
+
 let appliedFormFactor: FormFactor | null = null;
 
 export function applyFormFactor(): FormFactor {

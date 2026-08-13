@@ -213,21 +213,57 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     Ok(n > 0)
 }
 
-/// True when the database has any sync history (local ops). Seed/reference
-/// rows (categories, units, ...) are inserted before the sync triggers exist
-/// and never hit the log, so a brand-new database has an empty log while a
-/// database that was ever edited has one. Used to decide whether a database
-/// without a published file may adopt the account's single remaining file
-/// (fresh copies only) instead of publishing itself under a new team.
+/// The exact SKUs of the sample products inserted by ensure_app_schema into a
+/// brand-new database. A pristine database contains nothing beyond this seed
+/// content (empty sync log, only these products); anything else means the
+/// database holds user data.
+const SEED_PRODUCT_SKUS: &[&str] = &[
+    "WINE-R-001", "WINE-R-002", "WINE-R-003", "WINE-W-001", "WINE-W-002",
+    "WINE-RS-001", "WINE-SP-001", "WINE-SP-002", "WINE-F-001", "SPIR-001",
+    "SPIR-002", "ACC-001",
+];
+
+/// True when the database holds user data: either it has sync history (local
+/// ops in `_dbsync_log`) or its products table differs from the seed content
+/// of a brand-new database. Seed/reference rows (categories, units, ...) are
+/// inserted before the sync triggers exist and never hit the log, so a
+/// brand-new database has an empty log while a database that was ever edited
+/// has one. Used to decide whether a database without a published file may
+/// adopt the account's single remaining file (pristine copies only) instead
+/// of publishing itself under a new team.
 fn db_has_local_data(conn: &Connection) -> Result<bool, String> {
-    let log_n: i64 = conn
-        .query_row(
+    let log_n: i64 = if table_exists(conn, LOG_TABLE)? {
+        conn.query_row(
             &format!("SELECT COUNT(*) FROM {}", LOG_TABLE),
             [],
             |r| r.get(0),
         )
-        .map_err(|e| format!("Failed to read sync log: {}", e))?;
-    Ok(log_n > 0)
+        .map_err(|e| format!("Failed to read sync log: {}", e))?
+    } else {
+        0
+    };
+    if log_n > 0 {
+        return Ok(true);
+    }
+    if table_exists(conn, "products")? {
+        let mut stmt = conn
+            .prepare("SELECT sku FROM products")
+            .map_err(|e| format!("Failed to read products: {}", e))?;
+        let skus = stmt
+            .query_map([], |r| r.get::<_, Option<String>>(0))
+            .map_err(|e| format!("Failed to read products: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to read products: {}", e))?;
+        let mut seed: Vec<Option<String>> =
+            SEED_PRODUCT_SKUS.iter().map(|s| Some(s.to_string())).collect();
+        seed.sort();
+        let mut local = skus;
+        local.sort();
+        if local != seed {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn json_expr(cols: &[String], scope: &str) -> String {
@@ -290,6 +326,23 @@ fn field_payload(cols: &[String], is_insert: bool) -> String {
         "(SELECT json_group_object(k, v) FROM ({}))",
         rows.join(" UNION ALL ")
     )
+}
+
+/// Drops every `_dbsync_*` trigger so they can be recreated against a possibly
+/// new site id (link_conn_to_cloud regenerates it per device open).
+fn drop_sync_triggers(conn: &Connection) -> Result<(), String> {
+    let names: Vec<String> = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE '_dbsync\\_%' ESCAPE '\\'")
+        .map_err(|e| format!("Failed to list sync triggers: {}", e))?
+        .query_map([], |r| r.get(0))
+        .map_err(|e| format!("Failed to list sync triggers: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to list sync triggers: {}", e))?;
+    for name in names {
+        conn.execute_batch(&format!("DROP TRIGGER IF EXISTS \"{}\";", name.replace('"', "\"\"")))
+            .map_err(|e| format!("Failed to drop sync trigger {}: {}", name, e))?;
+    }
+    Ok(())
 }
 
 pub fn ensure_triggers(conn: &Connection) -> Result<(Vec<String>, Vec<String>), String> {
@@ -620,7 +673,7 @@ fn apply_op(conn: &Connection, op: &SyncOp) -> Result<(), String> {
                     .execute(
                         &format!(
                             "UPDATE {} SET {} = ? WHERE {} AND \
-                             (SELECT COALESCE(hlc, '') FROM _dbsync_field_clock \
+                             (SELECT COALESCE(MAX(hlc), '') FROM _dbsync_field_clock \
                               WHERE table_name = ? AND pk_json = ? AND column = ?) <= ?",
                             q,
                             quote_ident(k),
@@ -1032,13 +1085,21 @@ impl CloudApi {
         ))
     }
 
-    /// Lists the signed-in account's personal files plus every team and the
-    /// published files in each team (the account's cloud inventory).
+    /// Lists the signed-in account's personal files plus every user-created
+    /// team and the published files in each team (the account's cloud
+    /// inventory). Teams auto-created by the app (named after a database id)
+    /// are omitted — teams are only ever made by the user.
     fn account_inventories(&self, token: &str) -> Result<serde_json::Value, String> {
         let me = self.get_json("/api/v1/me", token)?;
         let mut teams = Vec::new();
         if let Some(arr) = me.get("teams").and_then(|t| t.as_array()) {
             for t in arr {
+                let Some(name) = t.get("name").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                if is_premade_team_name(name) {
+                    continue;
+                }
                 let mut entry = t.clone();
                 if let Some(team_id) = t.get("team_id").and_then(|x| x.as_str()) {
                     let files = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
@@ -1170,81 +1231,108 @@ impl CloudApi {
             })
     }
 
-    /// Looks up every team of the signed-in account and returns the team + file
-    /// pair for this database (matched by its auto-generated file name). Lets
-    /// the same account reconnect to its own databases on other devices without
-    /// an invite code.
+    /// Looks up every team of the signed-in account plus the account's
+    /// personal space ("My Files") and returns the team + file pair for this
+    /// database (matched by its auto-generated file name). An empty team id
+    /// means the file lives in the account's personal space. Lets the same
+    /// account reconnect to its own databases on other devices without an
+    /// invite code.
     fn find_file_for_db(&self, token: &str, db_id: &str) -> Result<Option<(String, String)>, String> {
+        let target = format!("{}.db", db_id);
+        let mut best: Option<(String, String, i64)> = None;
+        let consider = |best: &mut Option<(String, String, i64)>, team_id: &str, files: &serde_json::Value| {
+            if let Some(arr) = files.get("files").and_then(|f| f.as_array()) {
+                for f in arr {
+                    let Some(file_id) = f.get("file_id").and_then(|x| x.as_str()) else {
+                        continue;
+                    };
+                    let name = f.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                    let ts = f.get("created_ts").and_then(|x| x.as_i64()).unwrap_or(0);
+                    if f.get("size").and_then(|x| x.as_i64()).unwrap_or(0) <= 1 {
+                        continue;
+                    }
+                    if name == target && best.as_ref().map_or(true, |(_, _, b)| ts > *b) {
+                        *best = Some((team_id.to_string(), file_id.to_string(), ts));
+                    }
+                }
+            }
+        };
+        let personal = self.get_json("/api/v1/files", token)?;
+        consider(&mut best, "", &personal);
         let v = self.get_json("/api/v1/me", token)?;
         let teams = v
             .get("teams")
             .and_then(|t| t.as_array())
             .ok_or_else(|| "me response missing teams".to_string())?;
-        let target = format!("{}.db", db_id);
-        let mut best: Option<(String, String, i64)> = None;
         for t in teams {
             let Some(team_id) = t.get("team_id").and_then(|x| x.as_str()) else {
                 continue;
             };
             let files_v = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
-            let files: Vec<serde_json::Value> = files_v
-                .get("files")
-                .and_then(|f| f.as_array())
-                .cloned()
-                .unwrap_or_default();
-            for f in &files {
-                let Some(file_id) = f.get("file_id").and_then(|x| x.as_str()) else {
-                    continue;
-                };
-                let name = f.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                let ts = f.get("created_ts").and_then(|x| x.as_i64()).unwrap_or(0);
-                if f.get("size").and_then(|x| x.as_i64()).unwrap_or(0) <= 1 {
-                    continue;
-                }
-                if name == target && best.as_ref().map_or(true, |(_, _, b)| ts > *b) {
-                    best = Some((team_id.to_string(), file_id.to_string(), ts));
-                }
-            }
+            consider(&mut best, team_id, &files_v);
         }
         Ok(best.map(|(t, f, _)| (t, f)))
     }
 
     /// When the database id does not match any published file, links a second
-    /// device to the account's single published database (across all teams) so
-    /// signing in with the same account on a fresh database copy syncs it with
-    /// the existing one. Returns `None` when the account has zero or multiple
-    /// published files (ambiguous — the UI offers explicit team/file picking).
+    /// device to the account's single published database (across the personal
+    /// space and every team) so signing in with the same account on a fresh
+    /// database copy syncs it with the existing one. Returns `None` when the
+    /// account has zero or multiple published files (ambiguous — the UI offers
+    /// explicit file picking).
     fn only_file(&self, token: &str) -> Result<Option<(String, String)>, String> {
         let v = self.get_json("/api/v1/me", token)?;
         let teams = v
             .get("teams")
             .and_then(|t| t.as_array())
             .ok_or_else(|| "me response missing teams".to_string())?;
-        let mut found: Option<(String, String)> = None;
-        for t in teams {
-            let Some(team_id) = t.get("team_id").and_then(|x| x.as_str()) else {
-                continue;
-            };
-            let files_v = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
-            let files: Vec<serde_json::Value> = files_v
-                .get("files")
-                .and_then(|f| f.as_array())
-                .cloned()
-                .unwrap_or_default();
-            for f in &files {
+        let mut candidates: Vec<(String, String)> = Vec::new();
+        let personal = self.get_json("/api/v1/files", token)?;
+        if let Some(arr) = personal.get("files").and_then(|f| f.as_array()) {
+            for f in arr {
                 let Some(file_id) = f.get("file_id").and_then(|x| x.as_str()) else {
                     continue;
                 };
                 if f.get("size").and_then(|x| x.as_i64()).unwrap_or(0) <= 1 {
                     continue;
                 }
-                if found.is_some() {
-                    return Ok(None);
-                }
-                found = Some((team_id.to_string(), file_id.to_string()));
+                candidates.push((String::new(), file_id.to_string()));
             }
         }
-        Ok(found)
+        for t in teams {
+            let Some(team_id) = t.get("team_id").and_then(|x| x.as_str()) else {
+                continue;
+            };
+            let files_v = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
+            if let Some(arr) = files_v.get("files").and_then(|f| f.as_array()) {
+                for f in arr {
+                    let Some(file_id) = f.get("file_id").and_then(|x| x.as_str()) else {
+                        continue;
+                    };
+                    if f.get("size").and_then(|x| x.as_i64()).unwrap_or(0) <= 1 {
+                        continue;
+                    }
+                    candidates.push((team_id.to_string(), file_id.to_string()));
+                }
+            }
+        }
+        Ok(match candidates.as_slice() {
+            [(team, file)] => Some((team.clone(), file.clone())),
+            _ => None,
+        })
+    }
+
+    /// The display name of a team, when it exists (looked up via /me).
+    fn team_name(&self, token: &str, team_id: &str) -> Result<Option<String>, String> {
+        let v = self.get_json("/api/v1/me", token)?;
+        if let Some(arr) = v.get("teams").and_then(|t| t.as_array()) {
+            for t in arr {
+                if t.get("team_id").and_then(|x| x.as_str()) == Some(team_id) {
+                    return Ok(t.get("name").and_then(|x| x.as_str()).map(String::from));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Returns the invite code for this team (owners only; refreshes the code
@@ -1267,11 +1355,17 @@ impl CloudApi {
         self.upload_file(token, team_id, name, b"x")
     }
 
-    /// True when the file exists in its team with more than one byte of content.
+    /// True when the file exists in its team (or the account's personal space
+    /// when the team id is empty) with more than one byte of content.
     /// Old clients published 1-byte placeholders, so the finder helpers skip
     /// anything this small only through `file_live` checks.
     fn file_live(&self, token: &str, team_id: &str, file_id: &str) -> Result<bool, String> {
-        let v = self.get_json(&format!("/api/v1/files?team_id={}", team_id), token)?;
+        let url = if team_id.is_empty() {
+            "/api/v1/files".to_string()
+        } else {
+            format!("/api/v1/files?team_id={}", team_id)
+        };
+        let v = self.get_json(&url, token)?;
         let files = v
             .get("files")
             .and_then(|f| f.as_array())
@@ -1341,9 +1435,21 @@ impl CloudApi {
     }
 }
 
-/// Provisions (or reuses) the cloud session/team/file for the current database
-/// and persists the resulting ids into sync meta. Returns an error message the
-/// UI can display when the cloud is unreachable or misconfigured.
+/// Teams auto-created by the app for a database are named exactly after its
+/// auto-generated id (`db-` + 8 hex chars) — e.g. "db-a1b2c3d4". Teams made
+/// by the user can keep any name, so this is a reliable marker for premade
+/// teams that must not be listed as real teams.
+fn is_premade_team_name(name: &str) -> bool {
+    name.len() == 11
+        && name.starts_with("db-")
+        && name[3..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Provisions (or reuses) the cloud session and published file for the
+/// current database and persists the resulting ids into sync meta. Files are
+/// published into the account's personal space — no teams are created
+/// automatically, only by the user. Returns an error message the UI can
+/// display when the cloud is unreachable or misconfigured.
 fn ensure_cloud_session(conn: &Connection, endpoint: &str, db_id: &str, site_id: &str, token: &str) -> Result<(), String> {
     let api = CloudApi::new(endpoint)?;
     let email = meta_get(conn, "cloud_email")?
@@ -1360,11 +1466,6 @@ fn ensure_cloud_session(conn: &Connection, endpoint: &str, db_id: &str, site_id:
     };
     let team_id = meta_get(conn, "cloud_team_id")?.unwrap_or_default();
     let file_id = meta_get(conn, "cloud_file_id")?.unwrap_or_default();
-    let team_id = if team_id.is_empty() {
-        api.create_team(&session_token, db_id)?
-    } else {
-        team_id
-    };
     let file_id = if file_id.is_empty() {
         let snap = CloudApi::db_snapshot_bytes(conn)?;
         CloudApi::upload_file(&api, &session_token, &team_id, &format!("{}.db", db_id), &snap)?
@@ -1378,9 +1479,8 @@ fn ensure_cloud_session(conn: &Connection, endpoint: &str, db_id: &str, site_id:
             }
             Err(_) => {
                 let snap = CloudApi::db_snapshot_bytes(conn)?;
-                let fresh_team = api.create_team(&session_token, db_id)?;
-                let fresh_file = CloudApi::upload_file(&api, &session_token, &fresh_team, &format!("{}.db", db_id), &snap)?;
-                meta_set(conn, "cloud_team_id", &fresh_team)?;
+                let fresh_file = CloudApi::upload_file(&api, &session_token, "", &format!("{}.db", db_id), &snap)?;
+                meta_set(conn, "cloud_team_id", "")?;
                 fresh_file
             }
         }
@@ -1738,8 +1838,8 @@ pub fn sync_status(app: AppHandle) -> Result<SyncStatus, String> {
     .or_else(|_| Ok(no_db_status()))
 }
 
-/// Provisions the cloud connection for the open database (device account,
-/// team, published file) when needed. Idempotent — reuses stored ids.
+/// Provisions the cloud connection for the open database (device account and
+/// personal-space file) when needed. Idempotent — reuses stored ids.
 fn ensure_cloud_connected(conn: &Connection) -> Result<(), String> {
     ensure_schema(conn)?;
     let site_id = site_id_or_create(conn)?;
@@ -1766,8 +1866,9 @@ pub fn sync_disable(app: AppHandle) -> Result<SyncStatus, String> {
     })
 }
 
-/// Enables cloud sync for the open database, provisioning the device account,
-/// team and published file automatically on first use.
+/// Enables cloud sync for the open database, provisioning the device account
+/// and the personal-space file automatically on first use (no teams are
+/// created — those are only made by the user).
 #[tauri::command]
 pub fn sync_enable(app: AppHandle) -> Result<SyncStatus, String> {
     with_open_conn(&app, |conn| {
@@ -1847,14 +1948,15 @@ pub fn sync_invite_code(app: AppHandle) -> Result<String, String> {
     })
 }
 
-/// Links an open database to a personal account: creates the team + published
-/// file under the account on first use, or reconnects to the existing one.
+/// Links an open database to a personal account: publishes the database into
+/// the account's personal space ("My Files") on first use, or reconnects to
+/// the existing one. Teams are never created automatically — they are only
+/// ever made by the user.
 fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Result<(), String> {
     ensure_schema(conn)?;
     let db_id = db_id_or_create(conn)?;
     let endpoint = cloud_endpoint();
-    let has_link = meta_get(conn, "cloud_team_id")?.map(|t| !t.is_empty()).unwrap_or(false)
-        && meta_get(conn, "cloud_file_id")?.map(|f| !f.is_empty()).unwrap_or(false)
+    let has_link = meta_get(conn, "cloud_file_id")?.map(|f| !f.is_empty()).unwrap_or(false)
         && meta_get(conn, "token")?.map(|t| !t.is_empty()).unwrap_or(false);
     let api = CloudApi::new(&endpoint)?;
     let (token, _, _) = api.login_identifier(email, password)?;
@@ -1864,6 +1966,22 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
     if has_link && meta_get(conn, "endpoint")?.map(|e| e == endpoint).unwrap_or(false) {
         let team_id = meta_get(conn, "cloud_team_id")?.unwrap_or_default();
         let file_id = meta_get(conn, "cloud_file_id")?.unwrap_or_default();
+        // Databases linked to a premade team (an auto-created team named after
+        // the db id) are migrated into the account's personal space so the
+        // file shows up under "My Files"; teams are for the user's own files.
+        let linked_to_premade = !team_id.is_empty()
+            && api.team_name(&token, &team_id)?.as_deref() == Some(db_id.as_str());
+        if linked_to_premade {
+            let snap = CloudApi::db_snapshot_bytes(conn)?;
+            let new_file = api.upload_file(&token, "", &format!("{}.db", db_id), &snap)?;
+            let _ = api.delete_file(&token, &team_id, &file_id);
+            meta_set(conn, "cloud_team_id", "")?;
+            meta_set(conn, "cloud_file_id", &new_file)?;
+            meta_set(conn, "transport", "relay")?;
+            meta_set(conn, "endpoint", &endpoint)?;
+            meta_set(conn, "enabled", "1")?;
+            return Ok(());
+        }
         let ok = match api.file_live(&token, &team_id, &file_id) {
             Ok(live) => live,
             Err(_) => false,
@@ -1894,7 +2012,7 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
             // fresh empty copy. A database with its own data or sync history
             // must never be cross-linked to another database's file (e.g.
             // after a server-side wipe removed its own file), so it
-            // re-publishes itself as a new team instead.
+            // re-publishes itself into the personal space instead.
             let link = if db_has_local_data(conn)? {
                 None
             } else {
@@ -1906,10 +2024,9 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
                     meta_set(conn, "cloud_file_id", &file_id)?;
                 }
                 None => {
-                    let team_id = api.create_team(&token, &db_id)?;
                     let snap = CloudApi::db_snapshot_bytes(conn)?;
-                    let file_id = api.upload_file(&token, &team_id, &format!("{}.db", db_id), &snap)?;
-                    meta_set(conn, "cloud_team_id", &team_id)?;
+                    let file_id = api.upload_file(&token, "", &format!("{}.db", db_id), &snap)?;
+                    meta_set(conn, "cloud_team_id", "")?;
                     meta_set(conn, "cloud_file_id", &file_id)?;
                 }
             }
@@ -1923,8 +2040,8 @@ fn connect_db_to_account(conn: &Connection, email: &str, password: &str) -> Resu
 
 /// Repairs a broken cloud mapping after the backend reports the stored
 /// team/file is gone (404): clears the stale ids and re-runs the account
-/// connect flow, which re-finds the file or creates a fresh team + file and
-/// re-publishes this database. Called by the live-sync threads so devices
+/// connect flow, which re-finds the file or publishes a fresh copy into the
+/// account's personal space. Called by the live-sync threads so devices
 /// recover on their own after server-side cleanup.
 pub(crate) fn heal_cloud_link(app: &AppHandle) -> Result<(), String> {
     let db_state = app.state::<DbState>();
@@ -2199,6 +2316,7 @@ pub(crate) fn download_cloud_file(
     app: &AppHandle,
     team_id: &str,
     file_id: &str,
+    name: &str,
 ) -> Result<PathBuf, String> {
     let account = account_load(app).ok_or("Not signed in")?;
     let api = CloudApi::new(&cloud_endpoint())?;
@@ -2224,9 +2342,25 @@ pub(crate) fn download_cloud_file(
         .join("cloud")
         .join(team_id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create cloud data dir: {}", e))?;
-    let path = dir.join(format!("{}.db", file_id));
+    let path = dir.join(sanitize_file_name(name).unwrap_or_else(|| format!("{}.db", file_id)));
     std::fs::write(&path, &bytes).map_err(|e| format!("Cannot store cloud file: {}", e))?;
     Ok(path)
+}
+
+/// Makes a downloaded cloud file's display name safe for the filesystem.
+/// Falls back to None when the name is empty/unsafe so the caller can use a
+/// unique fallback instead of a collision-prone or path-traversal name.
+fn sanitize_file_name(name: &str) -> Option<String> {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let cleaned: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.').trim();
+    if cleaned.is_empty() || cleaned.len() > 120 {
+        return None;
+    }
+    Some(cleaned.to_string())
 }
 
 /// Links an opened database to a cloud team inventory: stores the account
@@ -2234,11 +2368,11 @@ pub(crate) fn download_cloud_file(
 /// device is a fresh replica in the sync group, and starts at the end of the
 /// history that came with the downloaded file.
 ///
-/// Prefers the sync ids embedded in the downloaded database (the team + file
-/// it was published under) so a device opening a copy from "My Files"
-/// joins the same ops partition as every other device of the same database.
-/// Falls back to the caller-provided ids when the copy carries none (or they
-/// are gone server-side).
+/// The ops partition is chosen by [`choose_sync_ids`]: a team open always
+/// uses the clicked team + file (embedded ids must never redirect the user to
+/// a different partition), while a personal-space open prefers the ids
+/// embedded in the downloaded copy so every device opening that copy joins
+/// the original sync group.
 pub(crate) fn link_conn_to_cloud(
     conn: &Connection,
     app: &AppHandle,
@@ -2246,26 +2380,35 @@ pub(crate) fn link_conn_to_cloud(
     file_id: &str,
 ) -> Result<(), String> {
     let account = account_load(app).ok_or("Not signed in")?;
+    link_conn_to_cloud_core(
+        conn,
+        team_id,
+        file_id,
+        &account.email,
+        &account.password,
+        &account.token,
+    )
+}
+
+/// The cloud_open link step without an [`AppHandle`], so the live tests can
+/// exercise the exact production path. See [`link_conn_to_cloud`].
+fn link_conn_to_cloud_core(
+    conn: &Connection,
+    team_id: &str,
+    file_id: &str,
+    email: &str,
+    password: &str,
+    token: &str,
+) -> Result<(), String> {
     ensure_schema(conn)?;
     db_id_or_create(conn)?;
     let embedded_team = meta_get(conn, "cloud_team_id")?.unwrap_or_default();
     let embedded_file = meta_get(conn, "cloud_file_id")?.unwrap_or_default();
-    let (sync_team, sync_file) = if !embedded_team.is_empty() && !embedded_file.is_empty() {
-        let ok = CloudApi::new(&cloud_endpoint())
-            .and_then(|api| api.file_live(&account.token, &embedded_team, &embedded_file))
-            .unwrap_or(false);
-        if ok {
-            (embedded_team, embedded_file)
-        } else {
-            (team_id.to_string(), file_id.to_string())
-        }
-    } else {
-        (team_id.to_string(), file_id.to_string())
-    };
+    let (sync_team, sync_file) = choose_sync_ids(team_id, file_id, &embedded_team, &embedded_file, token)?;
     meta_set(conn, "site_id", &format!("{}", uuid::Uuid::new_v4().simple()))?;
-    meta_set(conn, "token", &account.token)?;
-    meta_set(conn, "cloud_email", &account.email)?;
-    meta_set(conn, "cloud_pass", &account.password)?;
+    meta_set(conn, "token", token)?;
+    meta_set(conn, "cloud_email", email)?;
+    meta_set(conn, "cloud_pass", password)?;
     meta_set(conn, "cloud_team_id", &sync_team)?;
     meta_set(conn, "cloud_file_id", &sync_file)?;
     let schema_key = compute_schema_key(conn)?;
@@ -2286,12 +2429,50 @@ pub(crate) fn link_conn_to_cloud(
     if let Some((h, site, seq)) = tail {
         meta_set(conn, "cursor", &cursor_from(&h, &site, seq))?;
     }
+    drop_sync_triggers(conn)?;
+    ensure_triggers(conn)?;
     Ok(())
+}
+
+/// Chooses the (team, file) ops partition a cloud-open should join.
+///
+/// * A **team open** (clicked team non-empty): always the clicked ids. The
+///   user picked this exact inventory in the team list; embedded ids belong
+///   to wherever the publisher's device was previously linked and must not
+///   silently redirect every opener to a different partition (the old
+///   "opening a file shows a different database" confusion).
+/// * A **personal-space open** (clicked team empty): prefer the ids embedded
+///   in the downloaded snapshot when they still resolve on the server, so a
+///   copy re-opened from "My Files" rejoins the sync group the snapshot came
+///   from; otherwise fall back to the clicked personal file.
+fn choose_sync_ids(
+    clicked_team: &str,
+    clicked_file: &str,
+    embedded_team: &str,
+    embedded_file: &str,
+    token: &str,
+) -> Result<(String, String), String> {
+    if !clicked_team.trim().is_empty() {
+        return Ok((clicked_team.to_string(), clicked_file.to_string()));
+    }
+    if !embedded_team.is_empty() && !embedded_file.is_empty() {
+        let ok = CloudApi::new(&cloud_endpoint())
+            .and_then(|api| api.file_live(token, embedded_team, embedded_file))
+            .unwrap_or(false);
+        if ok {
+            return Ok((embedded_team.to_string(), embedded_file.to_string()));
+        }
+    }
+    Ok((clicked_team.to_string(), clicked_file.to_string()))
 }
 
 /// Publishes the currently open database file into a team as a team inventory
 /// (admin only; enforced server-side). `db_path` must be the on-disk location
-/// of the open database.
+/// of the currently open database.
+///
+/// When the open database is already cloud-linked, it is **relinked** to the
+/// team's partition afterwards so this device keeps syncing against the
+/// published copy instead of its old (personal/previous-team) partition.
 pub(crate) fn publish_db_to_team(
     app: &AppHandle,
     team_id: &str,
@@ -2301,7 +2482,44 @@ pub(crate) fn publish_db_to_team(
     let account = account_load(app).ok_or("Not signed in")?;
     let bytes = std::fs::read(db_path).map_err(|e| format!("Cannot read database file: {}", e))?;
     let api = CloudApi::new(&cloud_endpoint())?;
-    api.upload_file(&account.token, team_id, name, &bytes)?;
+    let file_id = api.upload_file(&account.token, team_id, name, &bytes)?;
+    if let Err(err) = with_open_conn(app, |conn| {
+        if meta_get(conn, "enabled")?.map(|v| v == "1").unwrap_or(false) {
+            relink_conn_to_partition(conn, team_id, &file_id)?;
+        }
+        Ok(())
+    }) {
+        eprintln!("publish_db_to_team: relink skipped: {}", err);
+    }
+    poke_live_sync(app);
+    Ok(())
+}
+
+/// Repoints a linked connection to a different (team, file) ops partition,
+/// keeping the site id (so the log history stays attributable) and lifting the
+/// cursor to the tail of the local log (so the next pull starts at the
+/// partition's beginning instead of replaying stale cursor positions).
+fn relink_conn_to_partition(
+    conn: &Connection,
+    team_id: &str,
+    file_id: &str,
+) -> Result<(), String> {
+    ensure_schema(conn)?;
+    meta_set(conn, "cloud_team_id", team_id)?;
+    meta_set(conn, "cloud_file_id", file_id)?;
+    let tail: Option<(String, String, i64)> = conn
+        .query_row(
+            &format!(
+                "SELECT hlc, site_id, seq FROM {} ORDER BY hlc DESC, site_id DESC, seq DESC LIMIT 1",
+                LOG_TABLE
+            ),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .ok();
+    if let Some((h, site, seq)) = tail {
+        meta_set(conn, "cursor", &cursor_from(&h, &site, seq))?;
+    }
     Ok(())
 }
 
@@ -2473,6 +2691,181 @@ mod tests {
             op: "upsert".into(),
             pk_json_raw: "".into(),
         }
+    }
+
+    #[test]
+    fn test_db_has_local_data_detects_seeded_vs_user_db() {
+        let fresh = setup_db();
+        ensure_schema(&fresh).unwrap();
+        ensure_triggers(&fresh).unwrap();
+        assert!(
+            !db_has_local_data(&fresh).unwrap(),
+            "pristine seeded database must have no local data"
+        );
+
+        let user_product = setup_db();
+        ensure_schema(&user_product).unwrap();
+        ensure_triggers(&user_product).unwrap();
+        user_product
+            .execute(
+                "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'My Bottle', 'MY-001', 'bottle', 2)",
+                [],
+            )
+            .unwrap();
+        assert!(
+            db_has_local_data(&user_product).unwrap(),
+            "a database with a user product but empty log must count as having data"
+        );
+
+        let raw_import = setup_db();
+        raw_import
+            .execute(
+                "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Raw', 'RAW-1', 'bottle', 1)",
+                [],
+            )
+            .unwrap();
+        assert!(
+            db_has_local_data(&raw_import).unwrap(),
+            "a database with only user products (no trigger history) must count as having data"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_file_name_and_trigger_recreation() {
+        assert_eq!(sanitize_file_name("test7.db").as_deref(), Some("test7.db"));
+        assert_eq!(
+            sanitize_file_name("../evil/../../secrets.db").as_deref(),
+            Some("secrets.db")
+        );
+        assert_eq!(sanitize_file_name("").is_none(), true);
+        assert_eq!(sanitize_file_name("....").is_none(), true);
+        assert_eq!(sanitize_file_name("a/b/c.db").as_deref(), Some("c.db"));
+
+        let conn = setup_db();
+        ensure_schema(&conn).unwrap();
+        let site_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        conn.execute("INSERT OR REPLACE INTO _dbsync_meta (key, value) VALUES ('site_id', ?1)", [site_a])
+            .unwrap();
+        ensure_triggers(&conn).unwrap();
+        let has_trigger = |name: &str| {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name = ?1",
+                    rusqlite::params![name],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            n > 0
+        };
+        assert!(has_trigger("_dbsync_i_products_insert"));
+
+        drop_sync_triggers(&conn).unwrap();
+        assert!(!has_trigger("_dbsync_i_products_insert"));
+
+        let site_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        conn.execute("INSERT OR REPLACE INTO _dbsync_meta (key, value) VALUES ('site_id', ?1)", [site_b])
+            .unwrap();
+        ensure_triggers(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'T', 'T-1', 'bottle', 1)",
+            [],
+        )
+        .unwrap();
+        let n: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {} WHERE site_id = ?1", LOG_TABLE), [site_b], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "triggers must log under the current (new) site");
+    }
+
+    #[test]
+    fn test_choose_sync_ids_team_open_wins_over_embedded() {
+        let (team, file) = choose_sync_ids(
+            "ccf75895-2aae-42f5-a0cb-969c5c76801c",
+            "e04cdcdb-c233-409f-aba4-21b9d7407e1a",
+            "29cdae8a-e7af-4510-98a0-94d2d0e3df88",
+            "3fe1bd68-6979-4ef4-b974-9db9910e3776",
+            "dummy-token",
+        )
+        .unwrap();
+        assert_eq!(team, "ccf75895-2aae-42f5-a0cb-969c5c76801c");
+        assert_eq!(file, "e04cdcdb-c233-409f-aba4-21b9d7407e1a");
+    }
+
+    #[test]
+    fn test_choose_sync_ids_personal_open_falls_back_to_clicked() {
+        let (team, file) = choose_sync_ids(
+            "",
+            "c2a880c0-06be-4682-884e-51d72d40893d",
+            "29cdae8a-e7af-4510-98a0-94d2d0e3df88",
+            "3fe1bd68-6979-4ef4-b974-9db9910e3776",
+            "dummy-token",
+        )
+        .unwrap();
+        assert_eq!(team, "");
+        assert_eq!(file, "c2a880c0-06be-4682-884e-51d72d40893d");
+    }
+
+    #[test]
+    fn test_link_conn_to_cloud_core_uses_clicked_ids_and_creates_triggers() {
+        let conn = setup_db();
+        ensure_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO _dbsync_meta (key, value) VALUES ('cloud_team_id', '29cdae8a-e7af-4510-98a0-94d2d0e3df88')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO _dbsync_meta (key, value) VALUES ('cloud_file_id', '3fe1bd68-6979-4ef4-b974-9db9910e3776')",
+            [],
+        )
+        .unwrap();
+        link_conn_to_cloud_core(
+            &conn,
+            "ccf75895-2aae-42f5-a0cb-969c5c76801c",
+            "e04cdcdb-c233-409f-aba4-21b9d7407e1a",
+            "jason@example.com",
+            "password1234",
+            "dummy-token",
+        )
+        .unwrap();
+        let team: String = conn
+            .query_row("SELECT value FROM _dbsync_meta WHERE key = 'cloud_team_id'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(team, "ccf75895-2aae-42f5-a0cb-969c5c76801c");
+        let enabled: String = conn
+            .query_row("SELECT value FROM _dbsync_meta WHERE key = 'enabled'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(enabled, "1");
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '_dbsync\\_%' ESCAPE '\\'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(n > 0, "link must create sync triggers");
+    }
+
+    #[test]
+    fn test_remote_update_to_existing_row_applies() {
+        let donor = setup_db();
+        ensure_schema(&donor).unwrap();
+        ensure_triggers(&donor).unwrap();
+        let site_a = site_id_or_create(&donor).unwrap();
+        donor
+            .execute("UPDATE products SET name = 'Renamed locally' WHERE id = 1", [])
+            .unwrap();
+        let ops = local_ops(&donor, &site_a, 0).unwrap();
+        assert!(!ops.is_empty(), "update must be logged");
+
+        let replica = setup_db();
+        ensure_schema(&replica).unwrap();
+        let applied = apply_batch(&replica, &ops, "").unwrap();
+        assert_eq!(applied, ops.len() as i64);
+        let name: String = replica
+            .query_row("SELECT name FROM products WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(name, "Renamed locally", "remote update must land on the replica");
     }
 
     #[test]
@@ -3036,7 +3429,217 @@ mod tests {
         assert!(bad.push(&team_id, &site, &schema, &ops).is_err());
     }
 
-    /// Two-device flow against the live cloud API (DBREADER_LIVE_TEST=1):
+    /// Live end-to-end of the user's team flow (DBREADER_LIVE_TEST=1, plus
+    /// DBREADER_LIVE_EMAIL / DBREADER_LIVE_PASSWORD for the real account):
+    /// download the real team file, link with real credentials, create a
+    /// product through the sync triggers, push it to the real ops partition
+    /// and pull it back on a second replica. The pushed ops are deleted
+    /// afterwards so the team stays clean.
+    #[test]
+    fn test_live_team_open_link_push_pull() {
+        if std::env::var("DBREADER_LIVE_TEST").unwrap_or_default() != "1" {
+            return;
+        }
+        let email = std::env::var("DBREADER_LIVE_EMAIL").expect("DBREADER_LIVE_EMAIL");
+        let password = std::env::var("DBREADER_LIVE_PASSWORD").expect("DBREADER_LIVE_PASSWORD");
+        let team_id = "ccf75895-2aae-42f5-a0cb-969c5c76801c";
+        let file_id = "e04cdcdb-c233-409f-aba4-21b9d7407e1a";
+
+        let endpoint = cloud_endpoint();
+        let api = CloudApi::new(&endpoint).unwrap();
+        let (token, _, _) = api.login_identifier(&email, &password).unwrap();
+
+        let url = api.download_url(&token, team_id, file_id).unwrap();
+        let mut resp = user_agent().get(&url).call().map_err(|e| e.to_string()).unwrap();
+        assert_eq!(resp.status(), 200);
+        let bytes = resp.body_mut().read_to_vec().unwrap();
+        assert!(!bytes.is_empty());
+
+        let dir = std::env::temp_dir().join(format!("dbreader-live-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("team.db");
+        std::fs::write(&path, &bytes).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        ensure_schema(&conn).unwrap();
+
+        link_conn_to_cloud_core(&conn, team_id, file_id, &email, &password, &token).unwrap();
+        let linked_team: String = conn
+            .query_row("SELECT value FROM _dbsync_meta WHERE key = 'cloud_team_id'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(linked_team, team_id, "team open must keep the clicked team");
+        let site: String = conn
+            .query_row("SELECT value FROM _dbsync_meta WHERE key = 'site_id'", [], |r| r.get(0))
+            .unwrap();
+        let schema = compute_schema_key(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO categories (name, description) VALUES ('Live Test', 'live test category')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Live Team Wine', 'LIVE-001', 'bottle', 2)",
+            [],
+        )
+        .unwrap();
+        let ops = local_ops(&conn, &site, 0).unwrap();
+        assert!(!ops.is_empty(), "trigger must log the insert");
+        let prod_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM products WHERE sku = 'LIVE-001'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(prod_count, 1);
+
+        let t1 = RelayTransport { endpoint: endpoint.clone(), token: token.clone(), team_id: team_id.into(), file_id: file_id.into() };
+        t1.push(team_id, &site, &schema, &ops).unwrap();
+
+        let t2 = RelayTransport { endpoint: endpoint.clone(), token: token.clone(), team_id: team_id.into(), file_id: file_id.into() };
+        let (pulled, peers, schema_out) = t2.pull(team_id, "", 0).unwrap();
+        assert_eq!(schema_out, schema);
+        assert!(peers.contains(&site));
+        let mine: Vec<SyncOp> = pulled.into_iter().filter(|o| o.site == site).collect();
+        assert_eq!(mine.len(), ops.len(), "second replica should receive the pushed ops");
+
+        let conn2 = setup_db();
+        ensure_schema(&conn2).unwrap();
+        ensure_triggers(&conn2).unwrap();
+        let applied = apply_batch(&conn2, &mine, "").unwrap();
+        assert_eq!(applied, ops.len() as i64);
+        let prod_count: i64 = conn2
+            .query_row("SELECT COUNT(*) FROM products WHERE sku = 'LIVE-001'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(prod_count, 1, "second replica must contain the synced product");
+
+        let _ = std::fs::remove_dir_all(&dir);
+        println!("LIVE_OP_PARTITION {}|{}|{}", team_id, file_id, site);
+    }
+
+    /// Device A publishes its open database to a team; the publish *relinks*
+    /// A to the new (team, file) partition. Device B then opens the published
+    /// snapshot, and edits flow both ways over the same partition.
+    #[test]
+    fn test_live_publish_relink_two_way() {
+        if std::env::var("DBREADER_LIVE_TEST").unwrap_or_default() != "1" {
+            return;
+        }
+        let email = std::env::var("DBREADER_LIVE_EMAIL").expect("DBREADER_LIVE_EMAIL");
+        let password = std::env::var("DBREADER_LIVE_PASSWORD").expect("DBREADER_LIVE_PASSWORD");
+        let team_id = "ccf75895-2aae-42f5-a0cb-969c5c76801c";
+
+        let endpoint = cloud_endpoint();
+        let api = CloudApi::new(&endpoint).unwrap();
+        let (token, _, _) = api.login_identifier(&email, &password).unwrap();
+
+        let dir = std::env::temp_dir().join(format!("dbreader-relink-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path_a = dir.join("device-a.db");
+        let conn_a = Connection::open(&path_a).unwrap();
+        conn_a.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn_a.execute_batch(crate::INVENTORY_SCHEMA).unwrap();
+        conn_a.execute_batch(crate::SEED_DATA).unwrap();
+        ensure_schema(&conn_a).unwrap();
+        ensure_triggers(&conn_a).unwrap();
+        let site_a = site_id_or_create(&conn_a).unwrap();
+        let schema = compute_schema_key(&conn_a).unwrap();
+
+        conn_a
+            .execute(
+                "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (1, 'Wine Before Publish', 'PRELIVE-001', 'bottle', 2)",
+                [],
+            )
+            .unwrap();
+
+        let snapshot = CloudApi::db_snapshot_bytes(&conn_a).unwrap();
+        let file_team = api
+            .upload_file(&token, &team_id, &format!("relink-live-{}.db", &site_a[..6]), &snapshot)
+            .unwrap();
+
+        relink_conn_to_partition(&conn_a, team_id, &file_team).unwrap();
+        let meta_team: String = conn_a
+            .query_row("SELECT value FROM _dbsync_meta WHERE key = 'cloud_team_id'", [], |r| r.get(0))
+            .unwrap();
+        let meta_file: String = conn_a
+            .query_row("SELECT value FROM _dbsync_meta WHERE key = 'cloud_file_id'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(meta_team, team_id, "relink must point at the published team");
+        assert_eq!(meta_file, file_team, "relink must point at the published file");
+        let cursor: String = conn_a
+            .query_row("SELECT value FROM _dbsync_meta WHERE key = 'cursor'", [], |r| r.get(0))
+            .unwrap();
+        assert!(!cursor.is_empty(), "relink must lift the cursor to the log tail");
+
+        conn_a
+            .execute(
+                "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (2, 'Wine After Publish', 'PRELIVE-002', 'bottle', 2)",
+                [],
+            )
+            .unwrap();
+        let ops_a = local_ops(&conn_a, &site_a, 0).unwrap();
+        assert!(ops_a.len() >= 2, "both inserts must be logged: {}", ops_a.len());
+        let ta = RelayTransport { endpoint: endpoint.clone(), token: token.clone(), team_id: team_id.into(), file_id: file_team.clone() };
+        ta.push(team_id, &site_a, &schema, &ops_a).unwrap();
+
+        let url = api.download_url(&token, team_id, &file_team).unwrap();
+        let mut resp = user_agent().get(&url).call().map_err(|e| e.to_string()).unwrap();
+        assert_eq!(resp.status(), 200);
+        let bytes = resp.body_mut().read_to_vec().unwrap();
+        let path_b = dir.join("device-b.db");
+        std::fs::write(&path_b, &bytes).unwrap();
+        let conn_b = Connection::open(&path_b).unwrap();
+        conn_b.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        ensure_schema(&conn_b).unwrap();
+        link_conn_to_cloud_core(&conn_b, team_id, &file_team, &email, &password, &token).unwrap();
+        let site_b: String = conn_b
+            .query_row("SELECT value FROM _dbsync_meta WHERE key = 'site_id'", [], |r| r.get(0))
+            .unwrap();
+        assert_ne!(site_b, site_a, "each device must have its own site");
+
+        let pre_count: i64 = conn_b
+            .query_row("SELECT COUNT(*) FROM products WHERE sku = 'PRELIVE-001'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pre_count, 1, "device B must see published data in the snapshot");
+
+        let tb = RelayTransport { endpoint: endpoint.clone(), token: token.clone(), team_id: team_id.into(), file_id: file_team.clone() };
+        let (pulled, peers, schema_out) = tb.pull(team_id, "", 0).unwrap();
+        assert_eq!(schema_out, schema);
+        assert!(peers.contains(&site_a));
+        let _ = site_b;
+        let applied_b = apply_batch(&conn_b, &pulled, "").unwrap();
+        assert!(applied_b >= 2, "device B should apply the pushed ops: {}", applied_b);
+        let after_002: i64 = conn_b
+            .query_row("SELECT COUNT(*) FROM products WHERE sku = 'PRELIVE-002'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after_002, 1, "device B must receive the post-publish edit");
+        let dedup: i64 = conn_b
+            .query_row("SELECT COUNT(*) FROM products WHERE sku = 'PRELIVE-001'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(dedup, 1, "snapshot data plus replayed op must not duplicate");
+
+        conn_b
+            .execute(
+                "INSERT INTO products (category_id, name, sku, base_unit_name, reorder_threshold) VALUES (2, 'Wine From Device B', 'PRELIVE-003', 'bottle', 2)",
+                [],
+            )
+            .unwrap();
+        let ops_b = local_ops(&conn_b, &site_b, 0).unwrap();
+        assert_eq!(ops_b.len(), 1, "device B's edit must log exactly one op");
+        tb.push(team_id, &site_b, &schema, &ops_b).unwrap();
+
+        let (pulled_a, _, _) = ta.pull(team_id, "", 0).unwrap();
+        let from_b: Vec<SyncOp> = pulled_a.into_iter().filter(|o| o.site == site_b).collect();
+        assert!(!from_b.is_empty(), "device A must pull device B's ops");
+        let applied_a = apply_batch(&conn_a, &from_b, "").unwrap();
+        assert_eq!(applied_a, 1);
+        let have_003: i64 = conn_a
+            .query_row("SELECT COUNT(*) FROM products WHERE sku = 'PRELIVE-003'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(have_003, 1, "device B's edit must reach device A");
+
+        let _ = api.delete_file(&token, team_id, &file_team);
+        let _ = std::fs::remove_dir_all(&dir);
+        println!("LIVE_RELINK_FILE {}|{}", team_id, file_team);
+    }
+
     /// device A creates the team + publishes the file, device B registers,
     /// joins with the invite code, finds the file, then both exchange ops.
     #[test]
@@ -3231,7 +3834,7 @@ mod tests {
         );
         assert!(
             api.file_live(&token, &data_team, &data_file).unwrap(),
-            "database with data should publish itself as a new team + file"
+            "database with data should publish itself into the account's personal space"
         );
     }
 }

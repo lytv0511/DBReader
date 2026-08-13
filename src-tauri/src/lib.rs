@@ -532,8 +532,14 @@ fn create_new_database(path: String, state: State<DbState>, app: tauri::AppHandl
 /// Downloads a team inventory from the account's cloud into the device and
 /// opens it as the current database, linked to the team so live sync runs.
 #[tauri::command]
-fn cloud_open(team_id: String, file_id: String, state: State<DbState>, app: tauri::AppHandle) -> Result<TableInfo, String> {
-    let path = sync::download_cloud_file(&app, &team_id, &file_id)?;
+fn cloud_open(
+    team_id: String,
+    file_id: String,
+    name: Option<String>,
+    state: State<DbState>,
+    app: tauri::AppHandle,
+) -> Result<TableInfo, String> {
+    let path = sync::download_cloud_file(&app, &team_id, &file_id, name.as_deref().unwrap_or(""))?;
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;

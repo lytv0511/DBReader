@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegram/tauri-v2-schemas/refs/heads/main/2.1.1/json-schema/tauri-conf.schema.json",
+  "productName": "DBReader Tablet",
+  "build": {
+    "frontendDist": "../dist-tablet",
+    "beforeBuildCommand": "VITE_FORM_FACTOR=tablet tsc -b && VITE_FORM_FACTOR=tablet pnpm exec vite build --outDir dist-tablet"
+  }
+}

@@ -53,3 +53,4 @@ src-tauri/plugins/*/target
 xwin-runner
 deploy/cloud-relay/target/
 dist-install/
+dist-tablet

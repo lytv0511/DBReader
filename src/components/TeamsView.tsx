@@ -177,12 +177,12 @@ export default function TeamsView({ t, onOpened, dbOpen }: TeamsViewProps) {
     }
   };
 
-  const openFromTeam = async (fileId: string) => {
+  const openFromTeam = async (fileId: string, fileName?: string) => {
     if (!selected) return;
     setBusy(`open-${fileId}`);
     setError(null);
     try {
-      await cloudOpen(selected.team_id, fileId);
+      await cloudOpen(selected.team_id, fileId, fileName);
       onOpened();
     } catch (e) {
       setError(String(e));
@@ -423,7 +423,7 @@ export default function TeamsView({ t, onOpened, dbOpen }: TeamsViewProps) {
                         </div>
                       </div>
                       <button
-                        onClick={() => openFromTeam(file.file_id)}
+                        onClick={() => openFromTeam(file.file_id, file.name)}
                         disabled={!!busy}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:opacity-90 disabled:opacity-50 rounded-md text-[11px] font-semibold text-white transition-opacity shrink-0"
                       >

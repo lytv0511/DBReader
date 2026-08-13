@@ -33,8 +33,8 @@ export async function accountInventories(): Promise<CloudInventories> {
   return invoke<CloudInventories>('account_inventories');
 }
 
-export async function cloudOpen(teamId: string, fileId: string): Promise<void> {
-  await invoke('cloud_open', { teamId, fileId });
+export async function cloudOpen(teamId: string, fileId: string, name?: string): Promise<void> {
+  await invoke('cloud_open', { teamId, fileId, name: name ?? '' });
 }
 
 export async function teamCreate(name: string): Promise<CloudTeam> {

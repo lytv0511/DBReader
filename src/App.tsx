@@ -25,6 +25,7 @@ import {
   Share2,
   Users,
   CloudDownload,
+  LogOut,
 } from 'lucide-react';
 
 import SettingsView from './components/SettingsView';
@@ -48,7 +49,7 @@ import Workspace from './components/Workspace';
 import { openDatabase, closeDatabase, createNewDatabase, migrateSchema, savePreferences, loadPreferences, getDatabasePath, mobileImportDatabase, mobileCreateDatabase, mobileExportDatabase } from './lib/db';
 import { t as translate, resolveLang } from './lib/i18n';
 import { I18nProvider } from './lib/language';
-import { isMobile as isMobilePlatform, applyFormFactor } from './lib/platform';
+import { isMobile as isMobilePlatform, isTablet as isTabletPlatform, applyFormFactor } from './lib/platform';
 import type { ViewMode, AppPreferences } from './types';
 import { DEFAULT_TABS } from './types';
 import type { Product } from './components/inventory/ProductGallery';
@@ -97,6 +98,7 @@ const ALL_TABS: { mode: ViewMode; labelKey: string }[] = INVENTORY_TABS.map((t) 
 
 export default function App() {
   const [isMobile, setIsMobile] = useState<boolean>(() => isMobilePlatform());
+  const [isTablet, setIsTablet] = useState<boolean>(() => isTabletPlatform());
   const [isConnected, setIsConnected] = useState(false);
   const [dbPath, setDbPath] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('workspace');
@@ -203,6 +205,7 @@ useEffect(() => {
     const update = () => {
       applyFormFactor();
       setIsMobile(isMobilePlatform());
+      setIsTablet(isTabletPlatform());
     };
     update();
     const onResize = () => requestAnimationFrame(update);
@@ -697,7 +700,7 @@ useEffect(() => {
               ) : (
                 <div className="flex items-center gap-1.5 shrink-0">
                   <Database size={15} className="text-accent" />
-                  <h1 className="text-sm font-bold tracking-tight">DBReader Lite</h1>
+                  <h1 className="text-sm font-bold tracking-tight">{isTablet ? 'DBReader Tablet' : 'DBReader Lite'}</h1>
                 </div>
               )}
               <div className="flex-1 min-w-0 text-right">
@@ -720,7 +723,7 @@ useEffect(() => {
               )}
             </div>
           )}
-          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' || viewMode === 'teams' ? 'hidden' : 'flex-1 flex flex-col overflow-hidden'}`}>
+          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' || viewMode === 'teams' ? 'hidden' : 'flex-1 flex flex-col overflow-hidden'} ${isTablet && viewMode !== 'dashboard' && viewMode !== 'reports' ? 'tablet-content' : ''}`}>
           {viewMode === 'dashboard' && (
             <Dashboard refreshKey={syncTick} onNavigate={(stockFilter) => {
               setGalleryStockFilter(stockFilter);
@@ -779,11 +782,11 @@ useEffect(() => {
             <> 
               {!isConnected && !initializing ? (
                 <div className="flex-1 overflow-y-auto">
-                  <div className="max-w-md mx-auto px-5 py-10 flex flex-col items-center text-center">
+                  <div className={`mx-auto px-5 py-10 flex flex-col items-center text-center ${isTablet ? 'max-w-3xl' : 'max-w-md'}`}>
                     <div className="w-20 h-20 rounded-2xl bg-accent/15 border border-accent/30 flex items-center justify-center mb-5">
                       <Database size={36} className="text-accent" />
                     </div>
-                    <h2 className="text-lg font-bold text-text-primary mb-1">DBReader Lite</h2>
+                    <h2 className="text-lg font-bold text-text-primary mb-1">{isTablet ? 'DBReader Tablet' : 'DBReader Lite'}</h2>
                     <p className="text-sm text-text-secondary mb-8 leading-relaxed">
                       {t('welcome.tagline')}
                     </p>
@@ -795,7 +798,13 @@ useEffect(() => {
                         {mobileError}
                       </div>
                     )}
-                    <div className="flex flex-col gap-3 w-full max-w-[260px]">
+                    <div
+                      className={
+                        isTablet
+                          ? 'grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl'
+                          : 'flex flex-col gap-3 w-full max-w-[260px]'
+                      }
+                    >
                       <button
                         onClick={handleOpenFile}
                         disabled={mobileBusy}
@@ -828,6 +837,16 @@ useEffect(() => {
                         <CloudDownload size={16} />
                         {t('openFrom.cloud')}
                       </button>
+                      {account && (
+                        <button
+                          onClick={handleSignOut}
+                          disabled={mobileBusy}
+                          className="flex items-center justify-center gap-2 px-4 py-3 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-xl text-sm font-medium text-error/80 hover:text-error transition-colors disabled:opacity-50"
+                        >
+                          <LogOut size={16} />
+                          {t('settings.sync.signOut')}
+                        </button>
+                      )}
                       {mobileBusy && (
                         <span className="text-xs text-text-secondary animate-pulse">Working…</span>
                       )}
@@ -851,7 +870,7 @@ useEffect(() => {
                       setViewMode(mode as ViewMode);
                     }}
                   />
-                  <div className="px-4 pb-8">
+                  <div className={`px-4 pb-8 ${isTablet ? 'max-w-3xl mx-auto' : ''}`}>
                     <div className="grid grid-cols-3 gap-3">
                       <button
                         onClick={() => setViewMode('settings')}
@@ -915,26 +934,37 @@ useEffect(() => {
             <p className="text-sm text-text-secondary mb-6">
               {t('welcome.tagline')}
             </p>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleOpenFile}
-                className="px-4 py-2 bg-accent hover:bg-accent-hover rounded-lg text-sm font-medium text-white transition-colors"
-              >
-                {t('welcome.open')}
-              </button>
-              <button
-                onClick={handleCreateNew}
-                className="px-4 py-2 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-lg text-sm font-medium text-accent transition-colors"
-              >
-                {t('welcome.create')}
-              </button>
-              <button
-                onClick={() => setCloudOpenOpen(true)}
-                className="px-4 py-2 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-lg text-sm font-medium text-text-secondary hover:text-text-primary transition-colors"
-              >
-                <CloudDownload size={14} className="inline mr-1.5 -mt-0.5" />
-                {t('openFrom.cloud')}
-              </button>
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleOpenFile}
+                  className="px-4 py-2 bg-accent hover:bg-accent-hover rounded-lg text-sm font-medium text-white transition-colors"
+                >
+                  {t('welcome.open')}
+                </button>
+                <button
+                  onClick={handleCreateNew}
+                  className="px-4 py-2 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-lg text-sm font-medium text-accent transition-colors"
+                >
+                  {t('welcome.create')}
+                </button>
+                <button
+                  onClick={() => setCloudOpenOpen(true)}
+                  className="px-4 py-2 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-lg text-sm font-medium text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  <CloudDownload size={14} className="inline mr-1.5 -mt-0.5" />
+                  {t('openFrom.cloud')}
+                </button>
+              </div>
+              {account && (
+                <button
+                  onClick={handleSignOut}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-text-secondary hover:text-error transition-colors"
+                >
+                  <LogOut size={12} />
+                  {t('settings.sync.signOut')}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -952,7 +982,7 @@ useEffect(() => {
 
       {isMobile && mobileCreateOpen && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 px-6">
-          <div className="w-full max-w-sm rounded-2xl bg-bg-secondary border border-border p-5">
+          <div className={`w-full ${isTablet ? 'max-w-md' : 'max-w-sm'} rounded-2xl bg-bg-secondary border border-border p-5`}>
             <h3 className="text-base font-bold text-text-primary mb-1">
               {t('welcome.create')}
             </h3>
