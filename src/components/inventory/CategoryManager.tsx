@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Plus, Pencil, Trash2, ArrowLeft, ChevronRight, Save } from 'lucide-react';
 import { executeQuery, upsertCategory, deleteCategory } from '../../lib/db';
 import { useI18n } from '../../lib/language';
-import { isMobile } from '../../lib/platform';
+import { isPhone } from '../../lib/platform';
 
 interface Category {
   id: number;
@@ -28,7 +28,7 @@ const COLOR_OPTIONS = [
 
 export default function CategoryManager({ refreshKey }: { refreshKey?: number }) {
   const { t } = useI18n();
-  const mobile = isMobile();
+  const mobile = isPhone();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

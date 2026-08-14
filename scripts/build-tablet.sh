@@ -43,6 +43,10 @@ EOF
 echo "==> building tablet ipa (iPad-only)"
 pnpm tauri ios build --debug --config src-tauri/tauri.tablet.ios.conf.json
 
+echo "==> building tablet simulator app"
+rm -rf src-tauri/gen/apple/build/dbreader_iOS.xcarchive "src-tauri/gen/apple/build/arm64-sim/DBReader Tablet.app"
+pnpm tauri ios build --debug --target aarch64-sim --config src-tauri/tauri.tablet.ios.conf.json
+
 echo "==> patching android launcher label"
 sed -i '' 's/android:label="DBReader"/android:label="DBReader Tablet"/' "$ANDROID_MANIFEST"
 
@@ -54,7 +58,11 @@ mkdir -p dist-install
 IPA="$(ls -t src-tauri/gen/apple/build/arm64/*.ipa 2>/dev/null | head -1)"
 [ -n "$IPA" ] || { echo "tablet ipa not found"; exit 1; }
 cp "$IPA" dist-install/DBReader-Tablet.ipa
+SIM_APP="$(ls -td src-tauri/gen/apple/build/arm64-sim/*.app 2>/dev/null | head -1)"
+[ -n "$SIM_APP" ] || { echo "tablet simulator app not found"; exit 1; }
+rm -rf dist-install/DBReader-Tablet-sim.app
+cp -R "$SIM_APP" dist-install/DBReader-Tablet-sim.app
 APK="$(ls -t src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk 2>/dev/null | head -1)"
 [ -n "$APK" ] || { echo "tablet apk not found"; exit 1; }
 cp "$APK" dist-install/DBReader-Tablet.apk
-ls -la dist-install/DBReader-Tablet.ipa dist-install/DBReader-Tablet.apk
+ls -la dist-install/DBReader-Tablet.ipa dist-install/DBReader-Tablet-sim.app dist-install/DBReader-Tablet.apk

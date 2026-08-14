@@ -2,14 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { allTopics, getTopic, matchHelp } from '../lib/help';
 
 describe('help matcher', () => {
-  it('matches canvas queries', () => {
-    expect(matchHelp('how do I add a table node to the canvas')?.id).toBe('canvas');
-    expect(matchHelp('connect filter node output')?.id).toBe('canvas');
-  })
-
-  it('matches query editor queries', () => {
-    expect(matchHelp('how to run sql')?.id).toBe('query');
-    expect(matchHelp('execute a select query')?.id).toBe('query');
+  it('matches workspace queries', () => {
+    expect(matchHelp('how do I open the workspace')?.id).toBe('workspace');
+    expect(matchHelp('home screen tiles')?.id).toBe('workspace');
   })
 
   it('matches quick use queries', () => {
@@ -55,11 +50,11 @@ describe('help matcher', () => {
   })
 
   it('case insensitive', () => {
-    expect(matchHelp('HOW TO SAVE A PRESET')?.id).toBe('presets');
+    expect(matchHelp('MAKE THE APP AURORA COLORED')?.id).toBe('themes');
   })
 
   it('exposes all topics and lookup', () => {
-    expect(allTopics().length).toBe(23)
+    expect(allTopics().length).toBe(26)
     expect(getTopic('batches')?.id).toBe('batches')
     expect(getTopic('nope')).toBeNull()
   })

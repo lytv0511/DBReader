@@ -3,7 +3,7 @@ import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag, ChevronRight } from 'luc
 import { executeQuery, upsertProductAttribute, deleteCategory } from '../../lib/db';
 import { useI18n } from '../../lib/language';
 import { UNIT_RECS } from '../../lib/units';
-import { isMobile } from '../../lib/platform';
+import { isPhone } from '../../lib/platform';
 import ProductDetail from './ProductDetail';
 import type { Product as GalleryProduct } from './ProductGallery';
 
@@ -81,8 +81,8 @@ function UnitInput({ value, onChange, placeholder }: { value: string; onChange: 
   );
 }
 
-export default function ProductManager({ refreshKey, currencySymbol }: { refreshKey?: number; currencySymbol: string }) {
-  const mobile = isMobile();
+export default function ProductManager({ refreshKey }: { refreshKey?: number }) {
+  const mobile = isPhone();
   const { t } = useI18n();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -368,7 +368,6 @@ export default function ProductManager({ refreshKey, currencySymbol }: { refresh
           refreshKey={refreshKey}
           product={mobileDetail}
           onBack={() => setSelectedProduct(null)}
-          currencySymbol={currencySymbol}
         />
       );
     }

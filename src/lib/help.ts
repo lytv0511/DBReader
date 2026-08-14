@@ -6,28 +6,13 @@ export interface HelpTopic {
 
 export const HELP_TOPICS: HelpTopic[] = [
   {
-    id: 'canvas',
-    keywords: ['canvas', 'flow', 'node', 'table node', 'filter node', 'output node', 'connect', 'diagram', 'layout'],
-    related: ['presets', 'sidebar'],
-  },
-  {
-    id: 'query',
-    keywords: ['query', 'sql', 'editor', 'run', 'sqlite', 'select', 'result'],
-    related: ['sidebar', 'presets'],
-  },
-  {
-    id: 'presets',
-    keywords: ['preset', 'save layout', 'load layout', 'save layout', 'restore'],
-    related: ['canvas', 'query'],
-  },
-  {
-    id: 'sidebar',
-    keywords: ['sidebar', 'schema', 'table', 'tables', 'refresh schema', 'column'],
-    related: ['canvas', 'query'],
+    id: 'workspace',
+    keywords: ['workspace', 'home', 'launcher', 'start screen', 'tile', 'open tool', 'welcome screen'],
+    related: ['account', 'cloud', 'devices'],
   },
   {
     id: 'quickadjust',
-    keywords: ['quick adjust', 'stock in', 'stock out', 'purchase', 'spoilage', 'adjust quantity', 'transaction', 'adjust date', 'adjust provider', 'batch number'],
+    keywords: ['quick adjust', 'stock in', 'stock out', 'purchase', 'spoilage', 'adjust quantity', 'transaction', 'adjust date', 'adjust provider', 'batch number', 'quick quantity'],
     related: ['batches', 'logs', 'providers'],
   },
   {
@@ -47,7 +32,7 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     id: 'logs',
-    keywords: ['log', 'logs', 'inventory log', 'transaction history', 'filter log', 'delete log', 'edit notes'],
+    keywords: ['log', 'logs', 'inventory log', 'activity log', 'transaction history', 'filter log', 'delete log', 'edit notes'],
     related: ['quickadjust', 'used', 'txhistory'],
   },
   {
@@ -62,8 +47,8 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     id: 'detail',
-    keywords: ['detail', 'product detail', 'notes', 'calendar', 'clients', 'notifications', 'report', 'tabs', 'reservation'],
-    related: ['gallery', 'products', 'reports'],
+    keywords: ['detail', 'product detail', 'history', 'notes', 'purchase history', 'usage chart', 'product tabs'],
+    related: ['gallery', 'products'],
   },
   {
     id: 'dashboard',
@@ -73,26 +58,26 @@ export const HELP_TOPICS: HelpTopic[] = [
   {
     id: 'pie',
     keywords: ['pie', 'chart', 'spending', 'value chart', 'history chart'],
-    related: ['dashboard', 'detail', 'cost'],
+    related: ['dashboard', 'cost'],
   },
   {
     id: 'settings',
-    keywords: ['settings', 'theme', 'dark', 'light', 'language', 'startup', 'limit', 'reset', 'gradient'],
-    related: ['tabs', 'query', 'themes'],
+    keywords: ['settings', 'theme', 'dark', 'light', 'language', 'currency', 'email alert', 'sync', 'startup', 'limit', 'tabs', 'reset', 'gradient', 'notification'],
+    related: ['tabs', 'themes', 'sync'],
   },
   {
     id: 'tabs',
-    keywords: ['tab', 'reorder', 'tab order', 'drag', 'organize tabs'],
+    keywords: ['tab', 'reorder', 'tab order', 'drag', 'organize tabs', 'enable tab', 'disable tab', 'hide tab', 'show tab', 'max six', 'taskbar'],
     related: ['settings', 'interface'],
   },
   {
     id: 'cost',
     keywords: ['cost', 'price', 'how much', 'unit price', 'pricing', 'inventory value'],
-    related: ['batches', 'detail', 'reports'],
+    related: ['batches', 'reports'],
   },
   {
     id: 'reports',
-    keywords: ['report', 'reports', 'print report', 'transaction report', 'overall report', 'stock report', 'batch report', 'pdf report', 'product report'],
+    keywords: ['report', 'reports', 'print report', 'activity report', 'purchase report', 'usage report', 'spoilage report', 'adjustment report', 'overall report', 'stock report', 'batch report', 'pdf report', 'product report', 'activities report'],
     related: ['txhistory', 'print', 'cost'],
   },
   {
@@ -102,18 +87,48 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     id: 'providers',
-    keywords: ['provider', 'providers', 'supplier', 'vendor', 'sihl', 'siic', 'who supplied', 'who provided'],
+    keywords: ['provider', 'providers', 'supplier', 'vendor', 'sihl', 'siic', 'who supplied', 'who provided', 'storage'],
     related: ['batches', 'quickadjust', 'txhistory'],
   },
   {
     id: 'themes',
     keywords: ['theme', 'themes', 'gradient', 'color scheme', 'background', 'aurora', 'sunset', 'ocean', 'forest', 'candy', 'gold', 'midnight', 'lava', 'dark mode', 'light mode'],
-    related: ['settings', 'interface'],
+    related: ['settings'],
   },
   {
     id: 'print',
     keywords: ['print', 'save pdf', 'export pdf', 'print report', 'printer', 'print preview'],
-    related: ['reports', 'detail'],
+    related: ['reports'],
+  },
+  {
+    id: 'account',
+    keywords: ['account', 'sign in', 'sign up', 'login', 'create account', 'username', 'password', 'sign out', 'session'],
+    related: ['cloud', 'sync', 'teams'],
+  },
+  {
+    id: 'cloud',
+    keywords: ['cloud', 'account inventories', 'my files', 'upload', 'download', 'backup', 'cloud open', 'cloud file'],
+    related: ['account', 'teams', 'sync'],
+  },
+  {
+    id: 'teams',
+    keywords: ['team', 'teams', 'create team', 'join team', 'invite code', 'member', 'owner', 'viewer', 'publish', 'collaborate', 'share inventory', 'transfer admin'],
+    related: ['cloud', 'account', 'sync'],
+  },
+  {
+    id: 'sync',
+    keywords: ['sync', 'synchronize', 'sync now', 'invite code', 'join code', 'real time', 'live sync', 'same database'],
+    related: ['account', 'cloud', 'teams'],
+  },
+  {
+    id: 'alerts',
+    keywords: ['alert', 'alerts', 'notification', 'notifications', 'email alert', 'smtp', 'desktop notification', 'low stock alert', 'out of stock alert', 'reminder', 'send time'],
+    related: ['settings', 'dashboard'],
+  },
+  {
+    id: 'devices',
+    keywords: ['device', 'devices', 'phone', 'tablet', 'mobile', 'desktop', 'version', 'layout', 'screen', 'ipad', 'android'],
+    related: ['workspace', 'cloud', 'sync'],
   },
   {
     id: 'glossary',

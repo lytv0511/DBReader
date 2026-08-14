@@ -40,28 +40,17 @@ export const WIKI_SECTIONS: WikiSection[] = [
       { type: 'p', keys: ['help.wiki.interface.p2'] },
       { type: 'bullets', keys: ['help.wiki.interface.b0', 'help.wiki.interface.b1'] },
     ],
-    related: ['canvas', 'tab-reorder', 'settings'],
+    related: ['workspace', 'tab-reorder', 'settings'],
   },
   {
-    id: 'canvas',
-    titleKey: 'help.wiki.canvas.title',
+    id: 'workspace',
+    titleKey: 'help.wiki.workspace.title',
     blocks: [
-      { type: 'p', keys: ['help.wiki.canvas.p0'] },
-      { type: 'steps', keys: ['help.wiki.canvas.s0', 'help.wiki.canvas.s1', 'help.wiki.canvas.s2', 'help.wiki.canvas.s3', 'help.wiki.canvas.s4', 'help.wiki.canvas.s5'] },
-      { type: 'p', keys: ['help.wiki.canvas.p1'] },
+      { type: 'p', keys: ['help.wiki.workspace.p0'] },
+      { type: 'p', keys: ['help.wiki.workspace.p1'] },
+      { type: 'steps', keys: ['help.wiki.workspace.s0', 'help.wiki.workspace.s1'] },
     ],
-    related: ['query', 'interface'],
-  },
-  {
-    id: 'query',
-    titleKey: 'help.wiki.query.title',
-    blocks: [
-      { type: 'p', keys: ['help.wiki.query.p0'] },
-      { type: 'p', keys: ['help.wiki.query.p1'] },
-      { type: 'p', keys: ['help.wiki.query.p2'] },
-      { type: 'p', keys: ['help.wiki.query.p3'] },
-    ],
-    related: ['canvas', 'interface'],
+    related: ['interface', 'account', 'cloud'],
   },
   {
     id: 'gallery',
@@ -93,7 +82,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
       { type: 'p', keys: ['help.wiki.quickadjust.p1'] },
       { type: 'p', keys: ['help.wiki.quickadjust.p2'] },
       { type: 'p', keys: ['help.wiki.quickadjust.p3'] },
-      { type: 'bullets', keys: ['help.wiki.quickadjust.b0', 'help.wiki.quickadjust.b1', 'help.wiki.quickadjust.b2'] },
+      { type: 'bullets', keys: ['help.wiki.quickadjust.b0', 'help.wiki.quickadjust.b1', 'help.wiki.quickadjust.b2', 'help.wiki.quickadjust.b3'] },
     ],
     related: ['batches', 'logs', 'providers'],
   },
@@ -180,7 +169,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
       { type: 'p', keys: ['help.wiki.print.p0'] },
       { type: 'steps', keys: ['help.wiki.print.s0', 'help.wiki.print.s1', 'help.wiki.print.s2'] },
     ],
-    related: ['reports', 'product-detail'],
+    related: ['reports'],
   },
   {
     id: 'themes',
@@ -191,7 +180,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
       { type: 'bullets', keys: ['help.wiki.themes.b0', 'help.wiki.themes.b1', 'help.wiki.themes.b2', 'help.wiki.themes.b3', 'help.wiki.themes.b4', 'help.wiki.themes.b5', 'help.wiki.themes.b6', 'help.wiki.themes.b7'] },
       { type: 'p', keys: ['help.wiki.themes.p2'] },
     ],
-    related: ['settings', 'interface'],
+    related: ['settings'],
   },
   {
     id: 'logs',
@@ -208,7 +197,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
     titleKey: 'help.wiki.product-detail.title',
     blocks: [
       { type: 'p', keys: ['help.wiki.product-detail.p0'] },
-      { type: 'bullets', keys: ['help.wiki.product-detail.b0', 'help.wiki.product-detail.b1', 'help.wiki.product-detail.b2', 'help.wiki.product-detail.b3', 'help.wiki.product-detail.b4', 'help.wiki.product-detail.b5'] },
+      { type: 'bullets', keys: ['help.wiki.product-detail.b0', 'help.wiki.product-detail.b1'] },
     ],
     related: ['gallery', 'products'],
   },
@@ -220,7 +209,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
       { type: 'p', keys: ['help.wiki.settings.p1'] },
       { type: 'p', keys: ['help.wiki.settings.p2'] },
     ],
-    related: ['interface', 'tab-reorder'],
+    related: ['interface', 'tab-reorder', 'sync', 'alerts'],
   },
   {
     id: 'tab-reorder',
@@ -230,6 +219,66 @@ export const WIKI_SECTIONS: WikiSection[] = [
       { type: 'p', keys: ['help.wiki.tab-reorder.p1'] },
     ],
     related: ['interface', 'settings'],
+  },
+  {
+    id: 'account',
+    titleKey: 'help.wiki.account.title',
+    blocks: [
+      { type: 'p', keys: ['help.wiki.account.p0'] },
+      { type: 'p', keys: ['help.wiki.account.p1'] },
+      { type: 'steps', keys: ['help.wiki.account.s0', 'help.wiki.account.s1'] },
+    ],
+    related: ['cloud', 'sync', 'teams'],
+  },
+  {
+    id: 'cloud',
+    titleKey: 'help.wiki.cloud.title',
+    blocks: [
+      { type: 'p', keys: ['help.wiki.cloud.p0'] },
+      { type: 'steps', keys: ['help.wiki.cloud.s0', 'help.wiki.cloud.s1', 'help.wiki.cloud.s2'] },
+      { type: 'p', keys: ['help.wiki.cloud.p1'] },
+    ],
+    related: ['account', 'teams', 'sync'],
+  },
+  {
+    id: 'teams',
+    titleKey: 'help.wiki.teams.title',
+    blocks: [
+      { type: 'p', keys: ['help.wiki.teams.p0'] },
+      { type: 'p', keys: ['help.wiki.teams.p1'] },
+      { type: 'steps', keys: ['help.wiki.teams.s0', 'help.wiki.teams.s1', 'help.wiki.teams.s2', 'help.wiki.teams.s3'] },
+    ],
+    related: ['account', 'cloud', 'sync'],
+  },
+  {
+    id: 'sync',
+    titleKey: 'help.wiki.sync.title',
+    blocks: [
+      { type: 'p', keys: ['help.wiki.sync.p0'] },
+      { type: 'p', keys: ['help.wiki.sync.p1'] },
+      { type: 'steps', keys: ['help.wiki.sync.s0', 'help.wiki.sync.s1', 'help.wiki.sync.s2'] },
+    ],
+    related: ['account', 'cloud', 'teams'],
+  },
+  {
+    id: 'alerts',
+    titleKey: 'help.wiki.alerts.title',
+    blocks: [
+      { type: 'p', keys: ['help.wiki.alerts.p0'] },
+      { type: 'p', keys: ['help.wiki.alerts.p1'] },
+      { type: 'bullets', keys: ['help.wiki.alerts.b0', 'help.wiki.alerts.b1', 'help.wiki.alerts.b2'] },
+    ],
+    related: ['settings', 'dashboard'],
+  },
+  {
+    id: 'devices',
+    titleKey: 'help.wiki.devices.title',
+    blocks: [
+      { type: 'p', keys: ['help.wiki.devices.p0'] },
+      { type: 'p', keys: ['help.wiki.devices.p1'] },
+      { type: 'bullets', keys: ['help.wiki.devices.b0', 'help.wiki.devices.b1', 'help.wiki.devices.b2'] },
+    ],
+    related: ['workspace', 'cloud', 'sync'],
   },
   {
     id: 'cost',

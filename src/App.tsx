@@ -723,7 +723,7 @@ useEffect(() => {
               )}
             </div>
           )}
-          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' || viewMode === 'teams' ? 'hidden' : 'flex-1 flex flex-col overflow-hidden'} ${isTablet && viewMode !== 'dashboard' && viewMode !== 'reports' ? 'tablet-content' : ''}`}>
+          <div key={viewMode} className={`${viewMode === 'workspace' || viewMode === 'settings' || viewMode === 'teams' ? 'hidden' : 'flex-1 flex flex-col overflow-hidden'} ${isTablet && viewMode !== 'dashboard' && viewMode !== 'reports' && viewMode !== 'products' && viewMode !== 'categories' ? 'tablet-content' : ''}`}>
           {viewMode === 'dashboard' && (
             <Dashboard refreshKey={syncTick} onNavigate={(stockFilter) => {
               setGalleryStockFilter(stockFilter);
@@ -746,12 +746,11 @@ useEffect(() => {
               refreshKey={syncTick}
               product={selectedProduct}
               onBack={() => setViewMode('gallery')}
-              currencySymbol={prefs.currencySymbol}
             />
           )}
           {viewMode === 'categories' && <CategoryManager refreshKey={syncTick} />}
           {viewMode === 'used' && <UseHistory refreshKey={syncTick} />}
-          {viewMode === 'products' && <ProductManager refreshKey={syncTick} currencySymbol={prefs.currencySymbol} />}
+          {viewMode === 'products' && <ProductManager refreshKey={syncTick} />}
           {viewMode === 'batches' && <BatchManager refreshKey={syncTick} currencySymbol={prefs.currencySymbol} />}
           {viewMode === 'logs' && <InventoryLog refreshKey={syncTick} />}
           {viewMode === 'txhistory' && <TransactionHistory refreshKey={syncTick} />}

@@ -14,7 +14,9 @@ dist-ssr
 
 # Tauri
 src-tauri/target
-src-tauri/gen
+src-tauri/gen/*
+!src-tauri/gen/apple
+!src-tauri/gen/android
 
 # Editor directories and files
 .vscode/*
@@ -54,3 +56,7 @@ xwin-runner
 deploy/cloud-relay/target/
 dist-install/
 dist-tablet
+
+# Android release signing keys - never commit
+*.keystore
+src-tauri/gen/android/app/*.jks

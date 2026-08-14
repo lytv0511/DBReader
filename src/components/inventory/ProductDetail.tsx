@@ -4,10 +4,9 @@ import { updateProduct } from '../../lib/db';
 import type { Product } from './ProductGallery';
 import ProductHistory from './product-tabs/ProductHistory';
 import ProductNotes from './product-tabs/ProductNotes';
-import ProductReport from './product-tabs/ProductReport';
 import { useI18n } from '../../lib/language';
 
-type TabId = 'history' | 'notes' | 'report';
+type TabId = 'history' | 'notes';
 
 interface Tab {
   id: TabId;
@@ -17,17 +16,15 @@ interface Tab {
 const TABS: Tab[] = [
   { id: 'history', label: 'History' },
   { id: 'notes', label: 'Notes' },
-  { id: 'report', label: 'Report' },
 ];
 
 interface ProductDetailProps {
   product: Product;
   onBack: () => void;
-  currencySymbol: string;
   refreshKey?: number;
 }
 
-export default function ProductDetail({ product, onBack, currencySymbol, refreshKey }: ProductDetailProps) {
+export default function ProductDetail({ product, onBack, refreshKey }: ProductDetailProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>('history');
   const [editingProduct, setEditingProduct] = useState(false);
@@ -51,8 +48,6 @@ export default function ProductDetail({ product, onBack, currencySymbol, refresh
         return <ProductHistory refreshKey={refreshKey} productId={product.id} />;
       case 'notes':
         return <ProductNotes refreshKey={refreshKey} productId={product.id} />;
-      case 'report':
-        return <ProductReport refreshKey={refreshKey} productId={product.id} currencySymbol={currencySymbol} />;
     }
   };
 

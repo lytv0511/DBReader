@@ -24,8 +24,13 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const [size, setSize] = useState({ w: 360, h: 480 });
+  const [size, setSize] = useState({ w: 460, h: 600 });
   const [dragging, setDragging] = useState(false);
+  const docsScrollRef = useRef<HTMLDivElement>(null);
+  const docsLastTop = useRef(0);
+  const chatLastTop = useRef(0);
+  const [showDocsTags, setShowDocsTags] = useState(true);
+  const [showChatTags, setShowChatTags] = useState(true);
   const dragRef = useRef<{
     mode: 'move' | 'resize';
     startX: number;
@@ -152,6 +157,24 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
     document.getElementById(`wiki-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  const handleDocsScroll = () => {
+    const el = docsScrollRef.current;
+    if (!el) return;
+    const delta = el.scrollTop - docsLastTop.current;
+    if (delta > 6) setShowDocsTags(false);
+    else if (delta < -6) setShowDocsTags(true);
+    docsLastTop.current = el.scrollTop;
+  };
+
+  const handleChatScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const delta = el.scrollTop - chatLastTop.current;
+    if (delta > 6) setShowChatTags(false);
+    else if (delta < -6) setShowChatTags(true);
+    chatLastTop.current = el.scrollTop;
+  };
+
   return (
     <div
       ref={panelRef}
@@ -169,23 +192,23 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
         className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-bg-tertiary shrink-0 cursor-grab active:cursor-grabbing touch-none"
       >
         {view === 'chat' ? (
-          <MessageCircle size={14} className="text-accent" />
+          <MessageCircle size={16} className="text-accent" />
         ) : (
-          <BookOpen size={14} className="text-accent" />
+          <BookOpen size={16} className="text-accent" />
         )}
-        <span className="text-xs font-semibold text-text-primary flex-1 truncate">{t('help.title')}</span>
+        <span className="text-sm font-semibold text-text-primary flex-1 truncate">{t('help.title')}</span>
         <div className="flex items-center bg-bg-secondary border border-border rounded-md overflow-hidden">
           <button
-            onClick={() => setView('chat')}
-            className={`px-2 py-1 text-[10px] transition-colors ${
+            onClick={() => { setView('chat'); setShowChatTags(true); }}
+            className={`px-2.5 py-1 text-xs transition-colors ${
               view === 'chat' ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'
             }`}
           >
             {t('help.chatTab')}
           </button>
           <button
-            onClick={() => setView('docs')}
-            className={`px-2 py-1 text-[10px] transition-colors ${
+            onClick={() => { setView('docs'); setShowDocsTags(true); }}
+            className={`px-2.5 py-1 text-xs transition-colors ${
               view === 'docs' ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'
             }`}
           >
@@ -193,7 +216,7 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
           </button>
         </div>
         <button onClick={onClose} className="text-text-secondary hover:text-text-primary transition-colors">
-          <X size={14} />
+          <X size={16} />
         </button>
       </div>
 
@@ -202,21 +225,21 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
           {/* Docs search + index */}
           <div className="shrink-0 px-3 pt-2.5 pb-1.5 flex flex-col gap-2 border-b border-border">
             <div className="flex items-center gap-1.5 px-2 py-1.5 bg-bg-primary border border-border rounded-md">
-              <Search size={11} className="text-text-secondary shrink-0" />
+              <Search size={13} className="text-text-secondary shrink-0" />
               <input
                 type="text"
                 value={docQuery}
                 onChange={(e) => setDocQuery(e.target.value)}
                 placeholder={t('help.docsSearch')}
-                className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-secondary focus:outline-none"
+                className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
               />
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className={`flex flex-wrap gap-1.5 ${showDocsTags ? '' : 'hidden'}`}>
               {docSections.map((s) => (
                 <button
                   key={s.id}
                   onClick={() => goToSection(s.id)}
-                  className="px-2 py-0.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-full text-[10px] text-text-secondary hover:text-text-primary transition-colors"
+                  className="px-2 py-0.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-full text-xs text-text-secondary hover:text-text-primary transition-colors"
                 >
                   {t(s.titleKey)}
                 </button>
@@ -225,17 +248,17 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
           </div>
 
           {/* Docs content */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          <div ref={docsScrollRef} onScroll={handleDocsScroll} className="flex-1 overflow-y-auto p-3 space-y-4">
             {docSections.length === 0 && (
-              <p className="text-xs text-text-secondary text-center py-6">{t('help.docsNoResults')}</p>
+              <p className="text-sm text-text-secondary text-center py-6">{t('help.docsNoResults')}</p>
             )}
             {docSections.map((s) => (
               <section key={s.id} id={`wiki-${s.id}`} className="space-y-1.5 scroll-mt-2">
-                <h3 className="text-xs font-bold text-accent border-b border-border pb-1">{t(s.titleKey)}</h3>
+                <h3 className="text-sm font-bold text-accent border-b border-border pb-1">{t(s.titleKey)}</h3>
                 {s.blocks.map((b, i) => {
                   if (b.type === 'p') {
                     return (
-                      <p key={i} className="text-[11px] leading-relaxed text-text-primary">
+                      <p key={i} className="text-[13px] leading-relaxed text-text-primary">
                         {t(b.keys[0])}
                       </p>
                     );
@@ -243,7 +266,7 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
                   return (
                     <ul key={i} className="space-y-1 pl-1">
                       {b.keys.map((k) => (
-                        <li key={k} className="text-[11px] leading-relaxed text-text-primary flex gap-1.5">
+                        <li key={k} className="text-[13px] leading-relaxed text-text-primary flex gap-1.5">
                           <span className="text-text-secondary shrink-0">
                             {b.type === 'steps' ? '•' : '–'}
                           </span>
@@ -255,7 +278,7 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
                 })}
                 {s.related.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span className="text-[10px] text-text-secondary">{t('help.docsSeeAlso')}</span>
+                    <span className="text-xs text-text-secondary">{t('help.docsSeeAlso')}</span>
                     {s.related.map((id) => {
                       const rel = getWikiSection(id);
                       if (!rel) return null;
@@ -263,7 +286,7 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
                         <button
                           key={id}
                           onClick={() => goToSection(id)}
-                          className="px-2 py-0.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-full text-[10px] text-accent transition-colors"
+                          className="px-2 py-0.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 rounded-full text-xs text-accent transition-colors"
                         >
                           {t(rel.titleKey)}
                         </button>
@@ -278,13 +301,13 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
       ) : (
         <>
           {/* Messages */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+          <div ref={scrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
             {messages.map((msg, i) => {
               const topic = topicFor(msg);
               return (
                 <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div
-                    className={`max-w-[85%] px-3 py-2 rounded-lg text-xs whitespace-pre-line ${
+                    className={`max-w-[85%] px-3 py-2 rounded-lg text-sm leading-relaxed whitespace-pre-line ${
                       msg.role === 'user'
                         ? 'bg-accent text-white rounded-br-sm'
                         : 'bg-bg-primary border border-border text-text-primary rounded-bl-sm'
@@ -293,12 +316,12 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
                     {msg.text}
                   </div>
                   {msg.role === 'bot' && (
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    <div className={`flex flex-wrap gap-1.5 mt-1.5 ${showChatTags ? '' : 'hidden'}`}>
                       {(topic ? topic.related : allTopics().map((tp) => tp.id)).map((rel) => (
                         <button
                           key={rel}
                           onClick={() => askTopic(rel)}
-                          className="px-2 py-0.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-full text-[10px] text-text-secondary hover:text-text-primary transition-colors"
+                          className="px-2 py-0.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-full text-xs text-text-secondary hover:text-text-primary transition-colors"
                         >
                           {t(`help.chip.${rel}`)}
                         </button>
@@ -320,7 +343,7 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
                 if (e.key === 'Enter') handleSend();
               }}
               placeholder={t('help.placeholder')}
-              className="flex-1 px-3 py-1.5 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent"
+              className="flex-1 px-3 py-1.5 bg-bg-primary border border-border rounded-md text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent"
             />
             <button
               onClick={handleSend}
@@ -339,7 +362,7 @@ export default function HelpChat({ open, onClose }: HelpChatProps) {
         className="absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize touch-none flex items-end justify-end"
         title={t('help.dragResize')}
       >
-        <div className="w-3 h-3 border-b-2 border-r-2 border-text-secondary/50 rounded-br" />
+        <div className="w-4 h-4 border-b-2 border-r-2 border-text-secondary/60 rounded-br" />
       </div>
     </div>
   );

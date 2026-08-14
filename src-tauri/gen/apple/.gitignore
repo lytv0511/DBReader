@@ -1,0 +1,5 @@
+# Regenerated on every build - never commit
+build/
+Externals/
+assets/
+xcuserdata/
