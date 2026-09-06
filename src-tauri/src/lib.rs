@@ -2696,7 +2696,7 @@ let mut builder = tauri::Builder::default()
     // Windows now uses embedded assets like other platforms
 
     builder
-        .assets(EmbeddedAssets::new())
+        .assets(tauri::utils::assets::EmbeddedAssets::new(include!(concat!(env!("OUT_DIR"), "/tauri_assets.rs"))))
         .invoke_handler(tauri::generate_handler![
             open_database,
             print_report,
