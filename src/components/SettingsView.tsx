@@ -6,7 +6,6 @@ import {
   RotateCcw,
   Settings,
   Sun,
-  ListRestart,
   Info,
   Palette,
   Flame,
@@ -25,6 +24,7 @@ import {
   RefreshCw,
   KeyRound,
   LogOut,
+  FlaskConical,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -44,7 +44,6 @@ interface SettingsViewProps {
   onSignOut: () => void;
 }
 
-const LIMIT_OPTIONS = [50, 100, 250, 500, 1000];
 const MAX_ENABLED_TABS = 6;
 
 export default function SettingsView({ prefs, tabs, onChange, onReset, t, accountEmail, onSignOut }: SettingsViewProps) {
@@ -73,6 +72,7 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t, accoun
   const [checking, setChecking] = useState(false);
   const [notifTesting, setNotifTesting] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [betaMode, setBetaMode] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshLastError = () => {
@@ -278,27 +278,29 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t, accoun
           </div>
         </section>
 
-        {/* Query limit */}
+        {/* Beta Mode */}
         <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
-          <div className="flex items-center gap-2">
-            <ListRestart size={14} className="text-accent" />
-            <span className={rowLabel}>{t('settings.queryLimit')}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {LIMIT_OPTIONS.map((n) => (
-              <button
-                key={n}
-                onClick={() => onChange({ defaultQueryLimit: n })}
-                className={`w-12 py-1.5 rounded-md text-sm border transition-colors ${
-                  prefs.defaultQueryLimit === n
-                    ? 'bg-accent text-white border-accent'
-                    : 'bg-bg-tertiary text-text-secondary hover:text-text-primary border-border'
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FlaskConical size={14} className="text-accent" />
+              <span className={rowLabel}>{t('settings.beta.title')}</span>
+            </div>
+            <button
+              role="switch"
+              aria-checked={betaMode}
+              onClick={() => setBetaMode(!betaMode)}
+              className={`relative w-10 h-5 rounded-full transition-colors ${
+                betaMode ? 'bg-accent' : 'bg-bg-tertiary border border-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                  betaMode ? 'left-[22px]' : 'left-0.5'
                 }`}
-              >
-                {n}
-              </button>
-            ))}
+              />
+            </button>
           </div>
+          <p className="text-xs text-text-secondary ml-16">{t('settings.beta.warning')}</p>
         </section>
 
         {/* Tabs (desktop only - mobile has no tab bar) */}
@@ -407,14 +409,12 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t, accoun
           </div>
         </section>
 
-        {/* Email alerts */}
+        {/* Desktop Notifications (always available) */}
         <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
-          {isMobile && (
-          <>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Bell size={14} className="text-accent" />
-              <span className="text-sm text-text-primary">{t('settings.email.confirmDesktopNotifications')}</span>
+              <span className="text-sm text-text-primary">{t('settings.notifications.desktop')}</span>
             </div>
             <button
               role="switch"
@@ -438,14 +438,15 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t, accoun
               className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-md text-xs text-text-primary transition-colors"
             >
               {notifTesting ? <Loader2 size={11} className="animate-spin" /> : <BellRing size={11} />}
-              {t('settings.email.testNotif')}
+              {t('settings.notifications.test')}
             </button>
             {lastError && <span className="text-xs text-text-secondary truncate">{lastError}</span>}
           </div>
-          </>
-          )}
-          {!isMobile && (
-          <>
+        </section>
+
+        {/* Email Alerts (Beta only) */}
+        {betaMode && (
+        <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Mail size={14} className="text-accent" />
@@ -537,32 +538,17 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t, accoun
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-md text-xs text-text-primary transition-colors"
               >
                 {notifTesting ? <Loader2 size={11} className="animate-spin" /> : <BellRing size={11} />}
-                {t('settings.email.testNotif')}
+                {t('settings.notifications.test')}
               </button>
               {lastError && <span className="text-xs text-text-secondary truncate">{lastError}</span>}
             </div>
           </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Bell size={14} className="text-accent" />
-              <span className="text-sm text-text-primary">{t('settings.email.confirmDesktopNotifications')}</span>
-            </div>
-            <button
-              role="switch"
-              aria-checked={prefs.desktopNotifications}
-              onClick={() => onChange({ desktopNotifications: !prefs.desktopNotifications })}
-              className={`relative w-10 h-5 rounded-full transition-colors ${
-                prefs.desktopNotifications ? 'bg-accent' : 'bg-bg-tertiary border border-border'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-                  prefs.desktopNotifications ? 'left-[22px]' : 'left-0.5'
-                }`}
-              />
-            </button>
-          </div>
-          {!isMobile && (
+        </section>
+        )}
+
+        {/* Launch at Login */}
+        {!isMobile && (
+        <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Power size={14} className="text-accent" />
@@ -590,10 +576,8 @@ export default function SettingsView({ prefs, tabs, onChange, onReset, t, accoun
               />
             </button>
           </div>
-          )}
-          </>
-          )}
         </section>
+        )}
 
         {/* Sync */}
         <section className={`${sectionCls} p-4 bg-bg-secondary border border-border rounded-lg`}>

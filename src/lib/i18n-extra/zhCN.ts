@@ -527,6 +527,10 @@ export default {
   'settings.email.launchAtLogin': '登录时在后台启动',
   'settings.email.testNotif': '发送测试通知',
   'settings.email.testNotifQueued': '测试通知已发送',
+  'settings.notifications.desktop': '桌面通知',
+  'settings.notifications.test': '测试通知',
+  'settings.beta.title': 'Beta 模式',
+  'settings.beta.warning': '这些功能尚不稳定，可能无法正常工作。',
 
   /* ===== help assistant ===== */
 

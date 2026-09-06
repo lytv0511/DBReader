@@ -430,6 +430,9 @@ useEffect(() => {
         .catch(() => {
           setPrefs((p) => ({ ...p, lastDbPath: null }));
         });
+    } else {
+      // First time: open directly to workspace
+      setViewMode(fallbackView());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionStarted, prefs]);
