@@ -72,8 +72,9 @@ export default function ProductReport({ productId, currencySymbol, refreshKey }:
             {data.product.icon}
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{data.product.name}</h1>
-            <p className="text-sm text-gray-500">{data.product.category}{data.product.sku ? t('preport.sku', { sku: data.product.sku }) : ''}</p>
+            <h1 className="text-2xl font-bold text-gray-900 font-mono">{data.product.sku || data.product.name}</h1>
+            {data.product.sku && <p className="text-sm text-gray-500">{data.product.name}</p>}
+            <p className="text-sm text-gray-500">{data.product.category}</p>
           </div>
           <div className="ml-auto text-right text-xs text-gray-400">
             <p>{t('preport.generated', { date: now })}</p>

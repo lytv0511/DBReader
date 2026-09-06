@@ -270,9 +270,8 @@ export default function ProductGallery({ onSelectProduct, initialStockFilter = '
                   >
                     {product.category_icon}
                   </div>
-                  <p className="text-xs font-semibold text-text-primary truncate w-full mb-1 group-hover:text-accent transition-colors">
-                    {product.name}
-                  </p>
+                  <p className="text-xs font-bold text-text-primary font-mono truncate w-full mb-0.5">{product.sku || product.name}</p>
+                  {product.sku && <p className="text-[10px] text-text-secondary truncate w-full mb-1">{product.name}</p>}
                   <p className="text-[10px] text-text-secondary mb-2">{product.category_name}</p>
                   <p className="text-[10px] text-text-secondary truncate w-full mb-2 text-accent/80">
                     {[product.provider_name, product.batch_number].filter(Boolean).join(' · ') || '-'}

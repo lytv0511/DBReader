@@ -187,7 +187,10 @@ export default function InventoryLog({ refreshKey }: { refreshKey?: number }) {
                       {t(`logs.typeName.${log.transaction_type}`)}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-text-primary font-medium">{log.product_name}</td>
+                  <td className="px-4 py-2.5 text-text-primary font-medium">
+                    <p className="font-bold text-text-primary font-mono truncate">{log.product_sku || log.product_name}</p>
+                    {log.product_sku && <p className="text-[10px] text-text-secondary truncate">{log.product_name}</p>}
+                  </td>
                   <td className="px-4 py-2.5 text-text-secondary font-mono">{log.product_sku || '-'}</td>
                   <td className="px-4 py-2.5 text-text-secondary font-mono">{log.batch_number || '-'}</td>
                   <td className="px-4 py-2.5 text-text-secondary">

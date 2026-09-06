@@ -8,6 +8,7 @@ interface Batch {
   id: number;
   product_id: number;
   product_name: string;
+  product_sku: string | null;
   batch_number: string | null;
   supplier_name: string | null;
   unit_cost_price: number;
@@ -60,7 +61,7 @@ export default function BatchManager({ currencySymbol = '$', refreshKey }: { cur
     try {
       const [batchesResult, productsResult, providersResult] = await Promise.all([
         executeQuery(`
-          SELECT b.id, b.product_id, p.name AS product_name, b.batch_number, b.supplier_name,
+          SELECT b.id, b.product_id, p.name AS product_name, p.sku AS product_sku, b.batch_number, b.supplier_name,
                  b.unit_cost_price, b.purchase_date, b.notes
           FROM batches b
           JOIN products p ON b.product_id = p.id
@@ -75,11 +76,12 @@ export default function BatchManager({ currencySymbol = '$', refreshKey }: { cur
         id: r[0] as number,
         product_id: r[1] as number,
         product_name: r[2] as string,
-        batch_number: r[3] as string | null,
-        supplier_name: r[4] as string | null,
-        unit_cost_price: r[5] as number,
-        purchase_date: r[6] as string,
-        notes: r[7] as string | null,
+        product_sku: r[3] as string | null,
+        batch_number: r[4] as string | null,
+        supplier_name: r[5] as string | null,
+        unit_cost_price: r[6] as number,
+        purchase_date: r[7] as string,
+        notes: r[8] as string | null,
       })));
 
       setProducts(productsResult.rows.map((r) => ({
@@ -261,7 +263,10 @@ export default function BatchManager({ currencySymbol = '$', refreshKey }: { cur
             {batches.map((b) => (
               <tr key={b.id} className="hover:bg-bg-hover transition-colors">
                 <td className="px-4 py-2.5 text-text-primary font-mono">{b.batch_number || '-'}</td>
-                <td className="px-4 py-2.5 text-text-primary">{b.product_name}</td>
+                <td className="px-4 py-2.5">
+                    <p className="text-text-primary font-bold font-mono truncate">{b.product_sku || b.product_name}</p>
+                    {b.product_sku && <p className="text-[10px] text-text-secondary truncate">{b.product_name}</p>}
+                  </td>
                 <td className="px-4 py-2.5 text-text-secondary">{b.supplier_name || '-'}</td>
                 <td className="px-4 py-2.5 text-text-primary text-right font-mono">{currencySymbol}{Number(b.unit_cost_price).toFixed(2)}</td>
                 <td className="px-4 py-2.5 text-text-secondary">{b.purchase_date?.slice(0, 10)}</td>
@@ -300,7 +305,7 @@ export default function BatchManager({ currencySymbol = '$', refreshKey }: { cur
             <div className="space-y-3">
               <select value={formProductId} onChange={(e) => setFormProductId(e.target.value === '' ? '' : Number(e.target.value))} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary focus:outline-none focus:border-accent">
                 <option value="">{t('batch.ph.selectProduct')}</option>
-                {products.map((p) => <option key={p.id} value={p.id}>{p.name}{p.sku ? ` (${p.sku})` : ''}</option>)}
+                {products.map((p) => <option key={p.id} value={p.id}>{p.sku ? `${p.sku} — ${p.name}` : p.name}</option>)}
               </select>
               <input value={formBatchNumber} onChange={(e) => setFormBatchNumber(e.target.value)} placeholder={t('batch.ph.batchNumber')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />
               <input value={formSupplier} onChange={(e) => setFormSupplier(e.target.value)} placeholder={t('batch.ph.supplier')} className="w-full px-3 py-2 bg-bg-primary border border-border rounded-md text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent" />

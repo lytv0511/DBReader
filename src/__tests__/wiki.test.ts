@@ -14,7 +14,7 @@ describe('wiki documentation', () => {
   });
 
   it('every title and body key resolves in every supported language', () => {
-    const languages = ['en', 'zh-CN', 'zh-TW', 'ja', 'ko', 'es', 'fr', 'de'];
+    const languages = ['en', 'zh-CN', 'zh-TW'];
     for (const lang of languages) {
       for (const s of WIKI_SECTIONS) {
         const title = t(resolveLang(lang as never), s.titleKey);

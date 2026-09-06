@@ -18,7 +18,6 @@ import {
   Printer,
   History,
   Settings as SettingsIcon,
-  HelpCircle,
   ChevronLeft,
   UploadCloud,
   FilePlus2,
@@ -26,6 +25,7 @@ import {
   Users,
   CloudDownload,
   LogOut,
+  HelpCircle,
 } from 'lucide-react';
 
 import SettingsView from './components/SettingsView';
@@ -57,7 +57,7 @@ import type { Product } from './components/inventory/ProductGallery';
 const DEFAULT_PREFS: AppPreferences = {
   lastDbPath: null,
   theme: 'dark',
-  language: 'system',
+  language: 'zh-CN',
   openOnStartup: true,
   defaultQueryLimit: 100,
   inventoryTabOrder: null,
@@ -611,6 +611,8 @@ useEffect(() => {
         >
           <HelpCircle size={12} className="help-icon-anim" />
         </button>
+
+        
 
         {isConnected && (
           <div className="flex-1 flex items-center gap-3 min-w-0">

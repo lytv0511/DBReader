@@ -644,7 +644,7 @@ export default {
   'help.wiki.overview.title': 'Overview',
   'help.wiki.overview.p0': 'DBReader is an inventory manager for product stock in SQLite database files. It provides a complete set of inventory tools: products, batches, categories, stock movements, dashboards and reports.',
   'help.wiki.overview.p1': 'Everything you create is stored in a single database file that you choose. The app works fully offline, and optional cloud features (account, sync, Teams) let you share and back it up across your devices.',
-  'help.wiki.overview.p2': 'The interface is available in eight languages and supports light, dark and gradient themes. Open this documentation at any time with the help button in the header.',
+  'help.wiki.overview.p2': 'The interface is available in three languages and supports light, dark and gradient themes. Open this documentation at any time with the help button in the header.',
   'help.wiki.getting-started.title': 'Getting started',
   'help.wiki.getting-started.p0': 'DBReader works on SQLite databases. You can create a new, empty database, open an existing one, or open a database stored in your account.',
   'help.wiki.getting-started.s0': 'Create a new database: click New, choose a location and file name (for example wine_inventory.db). All required tables are created automatically.',

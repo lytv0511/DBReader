@@ -362,9 +362,11 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol, refreshKey }:
     <tr key={row.id} data-unit className="border-b border-gray-100">
       <DateTimeCell value={row.created_at} />
       <td className="py-1.5 col-indent text-gray-600">{row.category_name}</td>
-      <td className="py-1.5 col-indent text-gray-600 font-mono">{row.sku || '-'}</td>
+      <td className="py-1.5 col-indent-sm text-gray-900">
+        <p className="text-gray-900 font-bold font-mono truncate">{row.sku || row.product_name}</p>
+        {row.sku && <p className="text-[10px] text-gray-500 truncate">{row.product_name}</p>}
+      </td>
       <td className="py-1.5 col-indent text-gray-600 font-mono">{row.batch_number || '-'}</td>
-      <td className="py-1.5 col-indent-sm text-gray-900">{row.product_name}</td>
       <td className="py-1.5 text-right font-mono text-gray-900">{Math.round(row.current_stock)}</td>
       <td className="py-1.5 notes-cell text-gray-600">
         {row.provider_name ? `${row.provider_name}${row.provider_sub ? ` - ${row.provider_sub}` : ''}` : '-'}
@@ -374,7 +376,10 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol, refreshKey }:
 
   const renderProdRow = (row: ProductRow) => (
     <tr key={`${row.id}-${row.batch_number}-${row.provider_name}`} data-unit className="border-b border-gray-100">
-      <td className="py-1.5 text-gray-900">{row.name}</td>
+      <td className="py-1.5 text-gray-900">
+        <p className="font-bold font-mono truncate">{row.sku || row.name}</p>
+        {row.sku && <p className="text-[10px] text-gray-500 truncate">{row.name}</p>}
+      </td>
       <td className="py-1.5 text-gray-600">{row.category_name}</td>
       <td className="py-1.5 text-gray-600 font-mono">{row.sku || '-'}</td>
       {!bundleSimilar && (
@@ -396,7 +401,9 @@ function ReportsInner({ reportLang, setReportLang, currencySymbol, refreshKey }:
 
   const renderBatchRow = (row: BatchRow) => (
     <tr key={row.batch_number || row.product_name} data-unit className="border-b border-gray-100">
-      <td className="py-1.5 text-gray-900">{row.product_name}</td>
+      <td className="py-1.5 text-gray-900">
+        <p className="font-bold font-mono truncate">{row.product_name}</p>
+      </td>
       <td className="py-1.5 text-gray-600 font-mono">{row.batch_number || '-'}</td>
       <td className="py-1.5 text-gray-600">{row.supplier || '-'}</td>
       <td className="py-1.5 text-gray-600">{fmtDate(row.purchase_date).slice(0, 10)}</td>

@@ -13,7 +13,7 @@ interface Category {
   product_count: number;
 }
 
-const EMOJI_OPTIONS = ['🍷', '🥂', '🌸', '🍾', '🫙', '🍸', '🚬', '📦', '☕', '🫒', '🧀', '🥩', '🐟', '🍞', '🍫', '🎁', '🧹', '🔧'];
+const EMOJI_OPTIONS = ['🍷', '🥂', '🌸', '🍾', '🫙', '🍸', '🥃', '🚬', '📦', '☕', '🫒', '🧀', '🥩', '🐟', '🍞', '🍫', '🎁', '🧹', '🔧'];
 
 const COLOR_OPTIONS = [
   '#dc2626', '#ea580c', '#f59e0b', '#eab308', '#84cc16', '#22c55e',

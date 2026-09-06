@@ -1433,6 +1433,17 @@ impl CloudApi {
         )?;
         Ok(())
     }
+
+    /// Deletes all files in the account's personal space and all team spaces.
+    /// This permanently deletes all files and their data from the cloud.
+    fn delete_all_files(&self, token: &str) -> Result<(), String> {
+        let _ = self.post_json(
+            "/api/v1/files/delete_all",
+            serde_json::json!({}),
+            token,
+        )?;
+        Ok(())
+    }
 }
 
 /// Teams auto-created by the app for a database are named exactly after its
@@ -2571,7 +2582,45 @@ pub fn auto_connect_account(app: &AppHandle) {
     });
 }
 
-#[cfg(test)]
+
+
+/// Deletes all files in the account's personal space and all team spaces.
+/// This permanently deletes all files and their data from the cloud.
+#[tauri::command]
+pub fn delete_all_account_files(app: AppHandle) -> Result<(), String> {
+    let account = account_load(&app).ok_or("Not signed in")?;
+    let api = CloudApi::new(&cloud_endpoint())?;
+    api.delete_all_files(&account.token)
+}
+
+
+
+/// Sets whether cloud sync should automatically provision files on first use.
+/// When disabled, the user must manually publish files to the cloud.
+/// This setting persists across app restarts.
+#[tauri::command]
+pub fn set_cloud_auto_provision(app: AppHandle, enabled: bool) -> Result<(), String> {
+    with_open_conn(&app, |conn| {
+        meta_set(conn, "cloud_auto_provision", if enabled { "1" } else { "0" })?;
+        Ok(())
+    })
+}
+
+
+
+/// Gets whether cloud auto-provisioning is enabled.
+/// When enabled (default), files are automatically uploaded to the cloud on first sync.
+/// When disabled, the user must manually publish files.
+#[tauri::command]
+pub fn get_cloud_auto_provision(app: AppHandle) -> Result<bool, String> {
+    with_open_conn(&app, |conn| {
+        let val = meta_get(conn, "cloud_auto_provision")?.unwrap_or_else(|| "1".to_string());
+        Ok(val == "1")
+    })
+}
+
+
+
 mod tests {
     use super::*;
     use serde_json::json;
@@ -3837,4 +3886,5 @@ mod tests {
             "database with data should publish itself into the account's personal space"
         );
     }
+
 }

@@ -322,8 +322,10 @@ export default function TransactionHistory({ refreshKey }: { refreshKey?: number
                       : '-'}
                   </td>
                   <td className="px-4 py-2.5 text-text-secondary font-mono">{entry.batch_number || '-'}</td>
-                  <td className="px-4 py-2.5 text-text-secondary font-mono">{entry.product_sku || '-'}</td>
-                  <td className="px-4 py-2.5 text-text-primary font-medium">{entry.product_name}</td>
+                  <td className="px-4 py-2.5">
+                    <p className="text-text-primary font-bold font-mono truncate">{entry.product_sku || entry.product_name}</p>
+                    {entry.product_sku && <p className="text-[10px] text-text-secondary truncate">{entry.product_name}</p>}
+                  </td>
                   <td className="px-4 py-2.5 text-text-secondary">{entry.category_name}</td>
                   <td className="px-4 py-2.5">
                     <span className={`inline-block px-2 py-0.5 rounded border text-[10px] font-semibold ${txBg[entry.transaction_type]} ${txColor[entry.transaction_type]}`}>

@@ -99,7 +99,7 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
   const [formSku, setFormSku] = useState('');
   const [formCategoryId, setFormCategoryId] = useState<number | ''>('');
   const [formUnitName, setFormUnitName] = useState('bottle');
-  const [formReorderThreshold, setFormReorderThreshold] = useState('0');
+  const [formReorderThreshold, setFormReorderThreshold] = useState('20');
   const [formCategoryName, setFormCategoryName] = useState('');
   const [formAttrKey, setFormAttrKey] = useState('');
   const [formAttrValue, setFormAttrValue] = useState('');
@@ -348,11 +348,9 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
           >
             <span className="text-xl shrink-0">{p.category_icon}</span>
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-text-primary font-medium truncate">{p.name}</p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-[10px] text-text-secondary truncate">{p.category_name}</span>
-                {p.sku && <span className="text-[10px] text-text-secondary font-mono">{p.sku}</span>}
-              </div>
+              <p className="text-sm text-text-primary font-bold font-mono truncate">{p.sku || p.name}</p>
+              {p.sku && <p className="text-[10px] text-text-secondary truncate">{p.name}</p>}
+              <p className="text-[10px] text-text-secondary">{p.category_name}</p>
             </div>
             {mobile && <ChevronRight size={14} className="text-text-secondary/50 shrink-0" />}
           </div>
@@ -387,8 +385,9 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-text-primary">{selectedProduct.name}</h2>
-                <p className="text-xs text-text-secondary">{selectedProduct.category_name}{selectedProduct.sku ? ` · ${selectedProduct.sku}` : ''}</p>
+                <h2 className="text-lg font-bold text-text-primary font-mono">{selectedProduct.sku || selectedProduct.name}</h2>
+                {selectedProduct.sku && <p className="text-xs text-text-secondary">{selectedProduct.name}</p>}
+                <p className="text-xs text-text-secondary">{selectedProduct.category_name}</p>
               </div>
               <div className="flex gap-2">
                 <button

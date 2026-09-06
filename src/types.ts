@@ -29,7 +29,7 @@ export type ViewMode = 'dashboard' | 'gallery' | 'detail' | 'products' | 'batche
 export const DEFAULT_TABS = ['gallery', 'categories', 'adjust', 'dashboard', 'products', 'txhistory'];
 
 export type ThemeMode = 'dark' | 'light' | 'system' | 'aurora' | 'sunset' | 'ocean' | 'forest' | 'candy' | 'gold' | 'midnight' | 'lava';
-export type LanguageCode = 'system' | 'en' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'es' | 'fr' | 'de';
+export type LanguageCode = 'system' | 'en' | 'zh-CN' | 'zh-TW';
 
 export interface EmailSlot {
   enabled: boolean;

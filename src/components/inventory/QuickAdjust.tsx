@@ -211,7 +211,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
               <option value="">{t('adjust.productPlaceholder')}</option>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}{p.sku ? ` (${p.sku})` : ''}
+                  {p.sku ? `${p.sku} — ${p.name}` : p.name}
                 </option>
               ))}
             </select>
@@ -464,6 +464,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
                           : 'border-border bg-bg-secondary hover:border-accent/30'
                   }`}
                 >
+                  {p.sku && <p className="text-[10px] font-bold text-text-primary font-mono truncate">{p.sku}</p>}
                   <p className="text-xs text-text-primary font-medium truncate">{p.name}</p>
                   <div className="flex items-baseline gap-2 mt-1">
                     <span className={`text-lg font-bold ${isOut ? 'text-error' : isLow ? 'text-warning' : 'text-success'}`}>

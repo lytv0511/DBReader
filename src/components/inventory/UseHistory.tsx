@@ -139,8 +139,9 @@ export default function UseHistory({ refreshKey }: { refreshKey?: number }) {
                     {entry.created_at?.replace('T', ' ').slice(0, 16)}
                   </td>
                   <td className="px-4 py-2.5">
-                    <p className="text-text-primary font-medium">{entry.product_name}</p>
-                    <p className="text-[10px] text-text-secondary">{entry.category_name}{entry.sku ? ` · ${entry.sku}` : ''}</p>
+                    <p className="text-text-primary font-bold font-mono truncate">{entry.sku || entry.product_name}</p>
+                    {entry.sku && <p className="text-[10px] text-text-secondary truncate">{entry.product_name}</p>}
+                    <p className="text-[10px] text-text-secondary">{entry.category_name}</p>
                   </td>
                   <td className="px-4 py-2.5 text-text-secondary font-mono">{entry.batch_number || '-'}</td>
                   <td className="px-4 py-2.5 text-error text-right font-bold">{entry.quantity}</td>

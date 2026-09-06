@@ -4,8 +4,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 
-mod sync;
-mod sync_live;
+pub mod sync;
+pub mod sync_live;
 
 pub(crate) struct DbState {
     pub(crate) inner: Mutex<InnerState>,
@@ -2773,6 +2773,9 @@ let mut builder = tauri::Builder::default()
             team_publish,
             team_upload_file,
             team_delete_file,
+            sync::delete_all_account_files,
+            sync::set_cloud_auto_provision,
+            sync::get_cloud_auto_provision,
         ])
         .on_window_event(|window, event| {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

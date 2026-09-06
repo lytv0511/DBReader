@@ -76,8 +76,9 @@ export default function ProductDetail({ product, onBack, refreshKey }: ProductDe
               </div>
             ) : (
               <div>
-                <h2 className="text-lg font-bold text-text-primary">{product.name}</h2>
-                <p className="text-xs text-text-secondary">{product.category_name}{product.sku ? ` · ${product.sku}` : ''}</p>
+                <h2 className="text-lg font-bold text-text-primary font-mono">{product.sku || product.name}</h2>
+                {product.sku && <p className="text-xs text-text-secondary">{product.name}</p>}
+                <p className="text-xs text-text-secondary">{product.category_name}</p>
               </div>
             )}
           </div>

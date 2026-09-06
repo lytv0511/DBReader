@@ -21,6 +21,7 @@ interface StockRow {
 interface RecentActivity {
   id: number;
   product_name: string;
+  sku: string | null;
   provider_name: string | null;
   quantity_change: number;
   transaction_type: string;
@@ -109,6 +110,7 @@ export default function Dashboard({ onNavigate, refreshKey }: DashboardProps) {
           SELECT
             il.id,
             p.name AS product_name,
+            p.sku,
             pr.name AS provider_name,
             il.quantity_change,
             il.transaction_type,
@@ -147,11 +149,12 @@ export default function Dashboard({ onNavigate, refreshKey }: DashboardProps) {
       const activityRows: RecentActivity[] = activityResult.rows.map((r) => ({
         id: r[0] as number,
         product_name: r[1] as string,
-        provider_name: r[2] as string | null,
-        quantity_change: r[3] as number,
-        transaction_type: r[4] as string,
-        notes: r[5] as string | null,
-        created_at: r[6] as string,
+        sku: r[2] as string | null,
+        provider_name: r[3] as string | null,
+        quantity_change: r[4] as number,
+        transaction_type: r[5] as string,
+        notes: r[6] as string | null,
+        created_at: r[7] as string,
       }));
 
       setRecentActivity(activityRows);
@@ -263,8 +266,9 @@ export default function Dashboard({ onNavigate, refreshKey }: DashboardProps) {
               lowStockItems.map((item) => (
                 <div key={item.product_id} className="px-4 py-3 flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-text-primary font-medium">{item.product_name}</p>
-                    <p className="text-xs text-text-secondary">{item.category_name}{item.sku ? ` · ${item.sku}` : ''}</p>
+                    <p className="text-sm text-text-primary font-bold font-mono truncate">{item.sku || item.product_name}</p>
+                    {item.sku && <p className="text-[10px] text-text-secondary truncate">{item.product_name}</p>}
+                    <p className="text-xs text-text-secondary">{item.category_name}</p>
                   </div>
                   <div className="text-right">
                     <p className={`text-sm font-bold ${item.current_stock <= 0 ? 'text-error' : 'text-warning'}`}>
@@ -295,7 +299,8 @@ export default function Dashboard({ onNavigate, refreshKey }: DashboardProps) {
                       {item.transaction_type}
                     </span>
                     <div>
-                      <p className="text-sm text-text-primary">{item.product_name}</p>
+                      <p className="text-sm text-text-primary font-bold font-mono truncate">{item.sku || item.product_name}</p>
+                      {item.sku && <p className="text-[10px] text-text-secondary truncate">{item.product_name}</p>}
                       {item.provider_name && <p className="text-[10px] text-text-secondary/70 uppercase tracking-wide">{item.provider_name}</p>}
                       {item.notes && <p className="text-xs text-text-secondary truncate max-w-[200px]">{item.notes}</p>}
                     </div>
