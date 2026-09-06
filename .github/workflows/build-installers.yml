@@ -78,6 +78,14 @@ jobs:
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
 
+      - name: Setup Android NDK toolchain PATH
+        run: |
+          NDK_VERSION=$(ls -d "$ANDROID_HOME"/ndk/* | tail -1 | xargs basename)
+          TOOLCHAIN_PATH="$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "$TOOLCHAIN_PATH" >> $GITHUB_PATH
+          # Verify ranlib exists
+          ls -la "$TOOLCHAIN_PATH"/aarch64-linux-android-ranlib
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
