@@ -8,7 +8,7 @@ name = "dbreader_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = ["assets"] }
+tauri-build = { version = "2", features = ["codegen"] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "custom-protocol"] }
