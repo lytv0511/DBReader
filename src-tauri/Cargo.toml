@@ -33,6 +33,7 @@ bytes = "1"
 thiserror = "1.0"
 tracing = "0.1"
 num_cpus = "1.16"
+openssl-sys = { version = "0.9", features = ["vendored"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com-sys = "0.38"
