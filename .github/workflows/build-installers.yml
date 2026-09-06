@@ -83,8 +83,14 @@ jobs:
           NDK_VERSION=$(ls -d "$ANDROID_HOME"/ndk/* | tail -1 | xargs basename)
           TOOLCHAIN_PATH="$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "$TOOLCHAIN_PATH" >> $GITHUB_PATH
-          # Verify ranlib exists
-          ls -la "$TOOLCHAIN_PATH"/aarch64-linux-android-ranlib
+          # Set ranlib to llvm-ranlib for NDK r29+
+          echo "RANLIB=$TOOLCHAIN_PATH/llvm-ranlib" >> $GITHUB_ENV
+          echo "AR=$TOOLCHAIN_PATH/llvm-ar" >> $GITHUB_ENV
+          echo "CC=$TOOLCHAIN_PATH/aarch64-linux-android24-clang" >> $GITHUB_ENV
+          echo "CXX=$TOOLCHAIN_PATH/aarch64-linux-android24-clang++" >> $GITHUB_ENV
+          # Verify tools exist
+          ls -la "$TOOLCHAIN_PATH"/llvm-ranlib
+          ls -la "$TOOLCHAIN_PATH"/llvm-ar
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
