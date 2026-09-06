@@ -86,45 +86,9 @@ jobs:
           # Set ranlib to llvm-ranlib for NDK r29+
           echo "RANLIB=$TOOLCHAIN_PATH/llvm-ranlib" >> $GITHUB_ENV
           echo "AR=$TOOLCHAIN_PATH/llvm-ar" >> $GITHUB_ENV
-          echo "CC=$TOOLCHAIN_PATH/aarch64-linux-android24-clang" >> $GITHUB_ENV
-          echo "CXX=$TOOLCHAIN_PATH/aarch64-linux-android24-clang++" >> $GITHUB_ENV
           # Verify tools exist
           ls -la "$TOOLCHAIN_PATH"/llvm-ranlib
           ls -la "$TOOLCHAIN_PATH"/llvm-ar
-
-      - name: Create compiler wrapper to filter x86 flags
-        run: |
-          cat > /usr/local/bin/aarch64-linux-android24-clang-wrapper << 'EOF'
-          #!/bin/bash
-          # Filter out x86-specific flags that don't work on ARM64
-          filtered_args=()
-          for arg in "$@"; do
-            case "$arg" in
-              -march=native) filtered_args+=("-march=armv8-a") ;;
-              -mfma|-mf16c|-mavx2|-mavx) ;;  # Skip x86 SIMD flags
-              *) filtered_args+=("$arg") ;;
-            esac
-          done
-          exec /usr/local/lib/android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang "${filtered_args[@]}"
-          EOF
-          chmod +x /usr/local/bin/aarch64-linux-android24-clang-wrapper
-          
-          cat > /usr/local/bin/aarch64-linux-android24-clang++-wrapper << 'EOF'
-          #!/bin/bash
-          filtered_args=()
-          for arg in "$@"; do
-            case "$arg" in
-              -march=native) filtered_args+=("-march=armv8-a") ;;
-              -mfma|-mf16c|-mavx2|-mavx) ;;
-              *) filtered_args+=("$arg") ;;
-            esac
-          done
-          exec /usr/local/lib/android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++ "${filtered_args[@]}"
-          EOF
-          chmod +x /usr/local/bin/aarch64-linux-android24-clang++-wrapper
-          
-          echo "CC=/usr/local/bin/aarch64-linux-android24-clang-wrapper" >> $GITHUB_ENV
-          echo "CXX=/usr/local/bin/aarch64-linux-android24-clang++-wrapper" >> $GITHUB_ENV
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
