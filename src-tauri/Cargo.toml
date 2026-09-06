@@ -50,10 +50,12 @@ llama_cpp = { version = "0.3" }
 [target.'cfg(target_os = "android")'.dependencies]
 filebridge = { path = "plugins/file-bridge" }
 llama_cpp = { version = "0.3", default-features = false }
+llama_cpp_sys = { version = "0.3", default-features = false }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 filebridge = { path = "plugins/file-bridge" }
 llama_cpp = { version = "0.3", default-features = false }
+llama_cpp_sys = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 dbreader-relay = { path = "../relay" }
