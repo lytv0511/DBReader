@@ -18,8 +18,7 @@ pub(crate) struct InnerState {
 
 pub struct SyncGate(pub Mutex<()>);
 
-#[cfg(windows)]
-static ASSET_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(14371);
+// Windows now uses custom-protocol like other platforms
 
 struct PrintState(Mutex<PrintStateInner>);
 
@@ -2693,14 +2692,7 @@ let mut builder = tauri::Builder::default()
             }
         }));
     }
-    #[cfg(windows)]
-    {
-        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
-            .map(|l| l.local_addr().map(|a| a.port()).unwrap_or(14371))
-            .unwrap_or(14371);
-        ASSET_PORT.store(port, std::sync::atomic::Ordering::Relaxed);
-        builder = builder.plugin(tauri_plugin_localhost::Builder::new(port).build());
-    }
+    // Windows uses custom-protocol like other platforms
 
     builder
         .invoke_handler(tauri::generate_handler![
@@ -2793,16 +2785,6 @@ let mut builder = tauri::Builder::default()
             }
         })
         .setup(move |app| {
-            #[cfg(windows)]
-            let main_url = WebviewUrl::External(
-                format!(
-                    "http://127.0.0.1:{}/",
-                    ASSET_PORT.load(std::sync::atomic::Ordering::Relaxed)
-                )
-                .parse()
-                .expect("invalid localhost url"),
-            );
-            #[cfg(not(windows))]
             let main_url = WebviewUrl::App("index.html".into());
 
             let mut main_window = WebviewWindowBuilder::new(app, "main", main_url)
