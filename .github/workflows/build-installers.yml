@@ -88,6 +88,9 @@ jobs:
           echo "AR=$TOOLCHAIN_PATH/llvm-ar" >> $GITHUB_ENV
           echo "CC=$TOOLCHAIN_PATH/aarch64-linux-android24-clang" >> $GITHUB_ENV
           echo "CXX=$TOOLCHAIN_PATH/aarch64-linux-android24-clang++" >> $GITHUB_ENV
+          # Override CFLAGS to disable x86-specific optimizations for ARM64
+          echo "CFLAGS_aarch64_linux_android=-O3 -DANDROID -ffunction-sections -fdata-sections -fPIC" >> $GITHUB_ENV
+          echo "CFLAGS_aarch64-linux-android=-O3 -DANDROID -ffunction-sections -fdata-sections -fPIC" >> $GITHUB_ENV
           # Verify tools exist
           ls -la "$TOOLCHAIN_PATH"/llvm-ranlib
           ls -la "$TOOLCHAIN_PATH"/llvm-ar
