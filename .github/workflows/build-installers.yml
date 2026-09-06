@@ -78,6 +78,19 @@ jobs:
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
 
+      - name: Install OpenSSL for Android
+        run: |
+          sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+          # Install Android NDK OpenSSL sysroot
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+
+      - name: Setup OpenSSL environment for Android
+        run: |
+          # Use cargo-vcpkg or install openssl for Android targets
+          echo "OPENSSL_DIR=/usr/lib/x86_64-linux-gnu" >> $GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> $GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=/usr/include" >> $GITHUB_ENV
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
