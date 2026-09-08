@@ -40,7 +40,6 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
   const [adjustDir, setAdjustDir] = useState<'add' | 'remove'>('add');
   const [qty, setQty] = useState('1');
   const [storageCompany, setStorageCompany] = useState('');
-  const [providerId, setProviderId] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
   const [batchNumber, setBatchNumber] = useState('');
   const [unitCostPrice, setUnitCostPrice] = useState('');
@@ -54,15 +53,8 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
     return names.sort((a, b) => a.localeCompare(b));
   }, [providers]);
 
-  const storageLocations = storageCompany
-    ? providers.filter((p) => p.name === storageCompany)
-    : [];
-
   const handleStorageCompanyChange = (name: string) => {
     setStorageCompany(name);
-    setProviderId('');
-    const rows = name ? providers.filter((p) => p.name === name) : [];
-    if (rows.length === 1) setProviderId(rows[0].id);
   };
 
   const fetchData = useCallback(async (quiet = false) => {
@@ -162,7 +154,24 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
           ? -Math.abs(qtyNum)
           : Math.abs(qtyNum);
 
-      const provVal = providerId === '' ? 'NULL' : String(providerId);
+      // Create provider if storage company is entered but doesn't exist
+      let finalProvVal = 'NULL';
+      if (storageCompany.trim()) {
+        const existing = providers.find((p) => p.name.toLowerCase() === storageCompany.trim().toLowerCase());
+        if (existing) {
+          finalProvVal = String(existing.id);
+        } else {
+          // Create new provider
+          const nameVal = storageCompany.trim().replace(/'/g, "''");
+          await executeQuery(`
+            INSERT INTO providers (name, sub_name) VALUES ('${nameVal}', NULL)
+          `);
+          const newProvResult = await executeQuery(`SELECT last_insert_rowid()`);
+          finalProvVal = String(newProvResult.rows[0][0]);
+        }
+      }
+
+      const provVal = finalProvVal;
       const notesVal = notes.trim() ? `'${notes.trim().replace(/'/g, "''")}'` : 'NULL';
 
       await executeQuery(`
@@ -389,41 +398,25 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
             />
           </div>
 
-          {/* Storage company + location */}
-          <div className="space-y-5">
-            <div>
-              <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
-                {t('adjust.providerLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
-              </label>
-              <select
+          {/* Storage company */}
+          <div>
+            <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+              {t('adjust.providerLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
+            </label>
+            <div className="relative">
+              <input
+                list="storage-companies"
                 value={storageCompany}
                 onChange={(e) => handleStorageCompanyChange(e.target.value)}
+                placeholder={t('adjust.providerPlaceholder')}
                 className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary focus:outline-none focus:border-accent"
-              >
-                <option value="">{t('adjust.noProvider')}</option>
+              />
+              <datalist id="storage-companies">
                 {storageCompanies.map((c) => (
-                  <option key={c} value={c}>{c}</option>
+                  <option key={c} value={c} />
                 ))}
-              </select>
+              </datalist>
             </div>
-
-            {storageCompany && (
-              <div>
-                <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
-                  {t('adjust.storageLocation')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
-                </label>
-                <select
-                  value={providerId}
-                  onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary focus:outline-none focus:border-accent"
-                >
-                  <option value="">{t('adjust.noLocation')}</option>
-                  {storageLocations.map((l) => (
-                    <option key={l.id} value={l.id}>{l.sub_name || t('adjust.noLocation')}</option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
 
           {/* Notes (optional) */}

@@ -125,6 +125,7 @@ export default {
   'adjust.dateLabel': '日期',
   'adjust.quantityLabel': '数量',
   'adjust.providerLabel': '仓库',
+  'adjust.providerPlaceholder': '输入或选择仓库...',
   'adjust.storageLocation': '仓库位置',
   'adjust.noLocation': '无位置',
   'adjust.noProvider': '无仓库',

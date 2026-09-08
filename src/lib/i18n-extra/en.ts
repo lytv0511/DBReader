@@ -132,6 +132,7 @@ export default {
   'adjust.dateLabel': 'Date',
   'adjust.quantityLabel': 'Quantity',
   'adjust.providerLabel': 'Storage',
+  'adjust.providerPlaceholder': 'Type or select storage...',
   'adjust.storageLocation': 'Storage location',
   'adjust.noLocation': 'No location',
   'adjust.noProvider': 'No storage',
