@@ -2,6 +2,7 @@ export default {
   'common.cancel': '取消',
   'common.save': '保存',
   'common.delete': '删除',
+  'common.confirm': '确认',
   'common.edit': '编辑',
   'common.add': '添加',
   'common.all': '全部',

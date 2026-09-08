@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag, ChevronRight } from 'lucide-react';
+import { RefreshCw, Plus, Pencil, Trash2, X, Save, Tag, ChevronRight, AlertTriangle } from 'lucide-react';
 import { executeQuery, upsertProductAttribute, deleteCategory } from '../../lib/db';
 import { useI18n } from '../../lib/language';
 import { UNIT_RECS } from '../../lib/units';
@@ -106,6 +106,9 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
   const [formAttrType, setFormAttrType] = useState('string');
   const [formUnitName2, setFormUnitName2] = useState('');
   const [formConversionFactor, setFormConversionFactor] = useState('1');
+  // Confirmation modal
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
 
   const fetchData = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -211,22 +214,24 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
   };
 
   const deleteProduct = async (id: number) => {
-    if (!confirm(t('prods.confirmDeleteProduct'))) return;
-    try {
-      await executeQuery(`DELETE FROM inventory_logs WHERE batch_id IN (SELECT id FROM batches WHERE product_id = ${id})`);
-      await executeQuery(`DELETE FROM batches WHERE product_id = ${id}`);
-      await executeQuery(`DELETE FROM product_attributes WHERE product_id = ${id}`);
-      await executeQuery(`DELETE FROM unit_conversions WHERE product_id = ${id}`);
-      await executeQuery(`DELETE FROM product_notes WHERE product_id = ${id}`);
-      await executeQuery(`DELETE FROM client_reservations WHERE product_id = ${id}`);
-      await executeQuery(`DELETE FROM calendar_events WHERE product_id = ${id}`);
-      await executeQuery(`DELETE FROM product_notifications WHERE product_id = ${id}`);
-      await executeQuery(`DELETE FROM products WHERE id = ${id}`);
-      setSelectedProduct(null);
-      await fetchData();
-    } catch (err) {
-      setError(String(err));
-    }
+    setConfirmMessage(t('prods.confirmDeleteProduct'));
+    setConfirmAction(async () => {
+      try {
+        await executeQuery(`DELETE FROM inventory_logs WHERE batch_id IN (SELECT id FROM batches WHERE product_id = ${id})`);
+        await executeQuery(`DELETE FROM batches WHERE product_id = ${id}`);
+        await executeQuery(`DELETE FROM product_attributes WHERE product_id = ${id}`);
+        await executeQuery(`DELETE FROM unit_conversions WHERE product_id = ${id}`);
+        await executeQuery(`DELETE FROM product_notes WHERE product_id = ${id}`);
+        await executeQuery(`DELETE FROM client_reservations WHERE product_id = ${id}`);
+        await executeQuery(`DELETE FROM calendar_events WHERE product_id = ${id}`);
+        await executeQuery(`DELETE FROM product_notifications WHERE product_id = ${id}`);
+        await executeQuery(`DELETE FROM products WHERE id = ${id}`);
+        setSelectedProduct(null);
+        await fetchData();
+      } catch (err) {
+        setError(String(err));
+      }
+    });
   };
 
   const saveCategory = async () => {
@@ -241,13 +246,15 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
   };
 
     const handleDeleteCategory = async (id: number) => {
-    if (!confirm(t('prods.confirmDeleteCategory'))) return;
-    try {
-      await deleteCategory(id);
-      await fetchData();
-    } catch (err) {
-      setError(String(err));
-    }
+    setConfirmMessage(t('prods.confirmDeleteCategory'));
+    setConfirmAction(async () => {
+      try {
+        await deleteCategory(id);
+        await fetchData();
+      } catch (err) {
+        setError(String(err));
+      }
+    });
   };
 
   const saveAttribute = async () => {
@@ -552,6 +559,34 @@ export default function ProductManager({ refreshKey }: { refreshKey?: number }) 
                 className="flex items-center gap-1 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-md text-xs text-white transition-colors"
               >
                 <Save size={10} /> {t('common.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setConfirmAction(null); setConfirmMessage(''); }}>
+          <div className="bg-bg-secondary border border-border rounded-lg p-5 w-[380px] max-w-[90vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle size={16} className="text-warning" />
+              <h3 className="text-sm font-bold text-text-primary">{t('common.confirm')}</h3>
+            </div>
+            <p className="text-sm text-text-primary mb-4">{confirmMessage}</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setConfirmAction(null); setConfirmMessage(''); }} className="px-3 py-1.5 bg-bg-tertiary hover:bg-bg-hover border border-border rounded-md text-xs text-text-secondary transition-colors">
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={async () => {
+                  await confirmAction();
+                  setConfirmAction(null);
+                  setConfirmMessage('');
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 bg-error hover:bg-error-hover rounded-md text-xs text-white transition-colors"
+              >
+                <Trash2 size={10} /> {t('common.delete')}
               </button>
             </div>
           </div>

@@ -3,6 +3,7 @@ export default {
   'common.cancel': 'Cancel',
   'common.save': 'Save',
   'common.delete': 'Delete',
+  'common.confirm': 'Confirm',
   'common.edit': 'Edit',
   'common.add': 'Add',
   'common.all': 'All',

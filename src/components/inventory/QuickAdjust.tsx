@@ -43,6 +43,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
   const [providerId, setProviderId] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
   const [batchNumber, setBatchNumber] = useState('');
+  const [unitCostPrice, setUnitCostPrice] = useState('');
   const [txDate, setTxDate] = useState(todayLocalISO());
   const [submitting, setSubmitting] = useState(false);
 
@@ -120,13 +121,14 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
     try {
       // PURCHASE with an explicit batch number creates a new batch
       const newBatchNum = txType === 'PURCHASE' ? batchNumber.trim() : '';
+      const unitCost = txType === 'PURCHASE' && unitCostPrice.trim() ? parseFloat(unitCostPrice) : 0;
       let batchId: number;
 
       if (newBatchNum) {
         const batchNumVal = newBatchNum.replace(/'/g, "''");
         await executeQuery(`
           INSERT INTO batches (product_id, batch_number, supplier_name, unit_cost_price, purchase_date, notes)
-          VALUES (${selectedProductId}, '${batchNumVal}', NULL, 0, '${txDate}', NULL)
+          VALUES (${selectedProductId}, '${batchNumVal}', NULL, ${unitCost}, '${txDate}', NULL)
         `);
         const newBatch = await executeQuery(`SELECT last_insert_rowid()`);
         batchId = newBatch.rows[0][0] as number;
@@ -146,7 +148,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
           const autoNote = t('adjust.autoNote').replace(/'/g, "''");
           await executeQuery(`
             INSERT INTO batches (product_id, batch_number, supplier_name, unit_cost_price, purchase_date, notes)
-            VALUES (${selectedProductId}, NULL, NULL, 0, '${txDate}', '${autoNote}')
+            VALUES (${selectedProductId}, NULL, NULL, ${unitCost}, '${txDate}', '${autoNote}')
           `);
           const newBatch = await executeQuery(`SELECT last_insert_rowid()`);
           batchId = newBatch.rows[0][0] as number;
@@ -172,6 +174,7 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
       setQty('1');
       setNotes('');
       setBatchNumber('');
+      setUnitCostPrice('');
       setTxDate(todayLocalISO());
       await fetchData();
     } catch (err) {
@@ -342,16 +345,34 @@ export default function QuickAdjust({ refreshKey }: { refreshKey?: number }) {
 
           {/* Batch number (only for PURCHASE) */}
           {txType === 'PURCHASE' && (
-            <div>
-              <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
-                {t('adjust.batchLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
-              </label>
-              <input
-                value={batchNumber}
-                onChange={(e) => setBatchNumber(e.target.value)}
-                placeholder={t('batch.ph.batchNumber')}
-                className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+                  {t('adjust.batchLabel')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
+                </label>
+                <input
+                  value={batchNumber}
+                  onChange={(e) => setBatchNumber(e.target.value)}
+                  placeholder={t('batch.ph.batchNumber')}
+                  className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide block mb-1.5">
+                  {t('batch.ph.unitCost')} <span className="font-normal text-text-secondary/60">{t('common.optional')}</span>
+                </label>
+                <input
+                  value={unitCostPrice}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '' || /^\d*\.?\d*$/.test(v)) setUnitCostPrice(v);
+                  }}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={t('batch.ph.unitCost')}
+                  className="w-full max-w-full px-3 py-2 sm:py-2.5 bg-bg-primary border border-border rounded-lg text-[13px] sm:text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
+                />
+              </div>
             </div>
           )}
 
